@@ -375,6 +375,37 @@ test_lock_steal_create_failure_is_bounded() {
   pass "steal-mutex create failure fails closed without unbounded recursion"
 }
 
+test_lock_missing_parent_create_failure_is_bounded() {
+  local dir state lockdir pid status out err
+  dir=$(make_case lock-missing-parent)
+  state="$dir/state"
+  lockdir="$state/.watch-cycle-exits.lock"
+  out="$dir/acquire.out"
+  err="$dir/acquire.err"
+
+  FUNCNEST=40 FM_STATE_OVERRIDE="$state" bash -c '
+    ulimit -c 0
+    . "$1"
+    rm -rf "$2"
+    if fm_lock_try_acquire "$3"; then rc=0; else rc=1; fi
+    printf "rc=%s held=%s\n" "$rc" "${FM_LOCK_HELD_PID:-}"
+  ' _ "$LIB" "$state" "$lockdir" > "$out" 2> "$err" &
+  pid=$!
+  wait_for_exit "$pid" 50
+  status=$?
+
+  [ "$status" -ne 124 ] || fail "missing-parent steal create failure did not terminate"
+  [ "$status" -eq 0 ] \
+    || fail "acquire aborted instead of returning (status $status): $(tr '\n' ' ' < "$err") $(tr '\n' ' ' < "$out")"
+  ! grep -q 'nesting level exceeded' "$err" \
+    || fail "steal acquire recursed until bash nesting exhausted: $(tr '\n' ' ' < "$err")"
+  case "$(cat "$out")" in
+    *"rc=1"*) ;;
+    *) fail "expected fail-closed acquire when lock parent is missing: $(cat "$out")" ;;
+  esac
+  pass "missing lock parent fails closed without unbounded recursion"
+}
+
 test_lock_does_not_steal_live_lock() {
   local dir state lockdir live out lockpid
   dir=$(make_case lock-live-noop)
@@ -1183,6 +1214,7 @@ test_lock_stale_steal_single_winner_under_concurrency
 test_lock_live_steal_mutex_is_not_reclaimed
 test_lock_stale_steal_mutex_is_reclaimed
 test_lock_steal_create_failure_is_bounded
+test_lock_missing_parent_create_failure_is_bounded
 test_lock_does_not_steal_live_lock
 test_lock_empty_pid_uses_minimum_grace
 test_lock_late_claim_loses_after_recreate

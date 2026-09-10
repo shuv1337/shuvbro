@@ -922,9 +922,10 @@ fm_lock_try_acquire() {
   steal="$lockdir.steal"
   # The steal mutex is itself a lock. Recursing through fm_lock_try_acquire
   # appends ".steal" at every depth, so a create failure that applies to every
-  # sibling (unwritable parent, ENAMETOOLONG, mktemp failure) grows the path
-  # until bash exhausts its stack. Once we are already acquiring a steal mutex,
-  # serialize any reclaim with a non-recursive create of the next sibling.
+  # sibling (missing or unwritable parent, ENAMETOOLONG, mktemp failure) grows
+  # the path until bash exhausts its stack. Once we are already acquiring a
+  # steal mutex, serialize any reclaim with a non-recursive create of the next
+  # sibling.
   case "$lockdir" in
     *.steal)
       if ! fm_lock_try_create "$steal"; then
