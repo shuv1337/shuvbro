@@ -777,10 +777,10 @@ EOF
       brief="$home/data/$id/launch-brief.md"
       assert_present "$brief" "$project_kind $kind did not refresh the legacy launch brief"
       assert_grep 'follow this brief instead of that supervisor contract' "$brief" "$project_kind $kind omitted worker authority"
-      assert_grep 'When this task works on Firstmate itself' "$brief" "$project_kind $kind made the exception unconditional"
+      assert_grep 'When this task works on shuvbro itself' "$brief" "$project_kind $kind made the exception unconditional"
       assert_grep 'Other projects retain their own instructions unchanged' "$brief" "$project_kind $kind displaced project guidance"
       ! grep -q '^This section supersedes every earlier brief instruction about your role' "$brief" ||
-        fail "$project_kind $kind revoked the brief's own role for a task that is not Firstmate"
+        fail "$project_kind $kind revoked the brief's own role for a task that is not shuvbro"
       assert_no_grep '# Current worker role contract' "$home/data/$id/brief.md" "spawn rewrote the source brief"
       cmp -s "$proj/agents-before" "$proj/AGENTS.md" || fail "spawn changed project AGENTS.md"
       [ "$(cat "$proj/CLAUDE.md")" = '@AGENTS.md' ] || fail "spawn changed the project import"

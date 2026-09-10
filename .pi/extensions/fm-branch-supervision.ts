@@ -1445,8 +1445,16 @@ ${context.command}
         const entryOffset = sessionManager.getEntries().length;
         wakeTaskScope = heartbeat ? null : { rows: [...scope.eligibleSeqs], tasks: new Set(scope.eligibleTasks) };
         try {
+          const personaScript = join(fmRoot, "bin", "fm-persona-lib.sh");
+          const persona = await runCommandAsync("bash", [personaScript, "--instruction-tail"], {
+            cwd: fmRoot,
+            env: scriptEnv,
+            maxBuffer: 64 * 1024,
+          });
+          const personaTail = (persona.stdout || "").trimEnd();
           await session.prompt(
-            `FIRSTMATE SUPERVISION WAKE: ${message}\n\nHandle this per your operating procedure and finish with fm_branch_report.`,
+            `FIRSTMATE SUPERVISION WAKE: ${message}\n\nHandle this per your operating procedure and finish with fm_branch_report.` +
+              (personaTail ? `\n\n${personaTail}` : ""),
           );
         } finally {
           wakeTaskScope = null;

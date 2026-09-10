@@ -449,3 +449,5 @@ jobs:
             printf '%s\n' "$tracked"
             exit 1
           fi
+      - name: Fork boundary
+        run: bin/fm-fork-boundary-check.sh

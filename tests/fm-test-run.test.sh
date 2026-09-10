@@ -157,6 +157,8 @@ init_changed_fixture_repo() {
   : >"$repo/.pi/extensions/lib/fm-operational-input.ts"
   : >"$repo/docs/fm-test-isolation-proof.md"
   : >"$repo/CONTRIBUTING.md"
+  : >"$repo/GROK_BOT.md"
+  : >"$repo/VISION.md"
   : >"$repo/src/unmapped.ts"
   git -C "$repo" init -q
   git -C "$repo" add .
@@ -258,6 +260,8 @@ test_changed_runner_surfaces_select_their_family() {
   # The same holds for the surfaces that document that contract.
   printf '\n' >>"$repo/docs/fm-test-isolation-proof.md"
   printf '\n' >>"$repo/CONTRIBUTING.md"
+  printf '\n' >>"$repo/GROK_BOT.md"
+  printf '\n' >>"$repo/VISION.md"
   listed=$(cd "$repo" && bin/fm-test-run.sh --list --changed --base HEAD | LC_ALL=C sort)
   case "$listed" in
     *tests/fm-documentation-audiences.test.sh*) ;;
@@ -266,6 +270,10 @@ test_changed_runner_surfaces_select_their_family() {
   case "$listed" in
     *tests/fm-brief.test.sh*) ;;
     *) fail "documentation surface change did not select its curated family: $listed" ;;
+  esac
+  case "$listed" in
+    *tests/fm-brief.test.sh*) ;;
+    *) fail "GROK_BOT.md/VISION.md change did not select pure-contract-unit: $listed" ;;
   esac
 
   rm -rf "$tmp"

@@ -20,11 +20,13 @@ test_branch_prompt_is_byte_stable_and_above_cache_floor() {
   local home_a home_b out_a out_b out_c size
   home_a="$TMP_ROOT/prompt-home-a"
   home_b="$TMP_ROOT/prompt-home-b"
-  mkdir -p "$home_a/state" "$home_b/state"
-  # Give the two homes deliberately different fleet state and clock context:
+  mkdir -p "$home_a/state" "$home_a/config" "$home_b/state" "$home_b/config"
+  # Give the two homes deliberately different fleet state, persona, and clock:
   # a byte-stable prompt must not absorb any of it.
   printf 'signal: task-1 done\n' > "$home_a/state/task-1.status"
   printf 'window=x\nharness=pi\n' > "$home_a/state/task-1.meta"
+  printf 'preset=dzl\nlead=Skip\n' > "$home_a/config/persona"
+  printf 'preset=neutral\n' > "$home_b/config/persona"
 
   out_a=$(cd "$TMP_ROOT" && FM_HOME="$home_a" TZ=UTC "$ROOT/bin/fm-branch-prompt.sh") \
     || fail "branch prompt generator failed for home A"
@@ -35,6 +37,12 @@ test_branch_prompt_is_byte_stable_and_above_cache_floor() {
 
   [ "$out_a" = "$out_b" ] || fail "branch prompt differs across homes/cwd/timezone: prefix stability broken"
   [ "$out_a" = "$out_c" ] || fail "branch prompt differs across runs at different times: prefix stability broken"
+  printf '%s\n' "$out_a" | grep -qx 'PERSONA' \
+    && fail "branch prompt absorbed per-home persona into the cache-stable prefix"
+  printf '%s\n' "$out_a" | grep -q 'lead: Skip' \
+    && fail "branch prompt absorbed per-home persona lead into the cache-stable prefix"
+  printf '%s\n' "$out_a" | grep -q 'preset: dzl' \
+    && fail "branch prompt absorbed per-home persona preset into the cache-stable prefix"
 
   # Below the provider's 1024-token caching minimum a branch prompt gets no
   # cache reuse at all (measured in the feasibility evidence), so hold a

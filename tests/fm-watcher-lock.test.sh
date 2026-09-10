@@ -308,6 +308,73 @@ test_lock_live_steal_mutex_is_not_reclaimed() {
   pass "live steal mutex is not reclaimed"
 }
 
+test_lock_stale_steal_mutex_is_reclaimed() {
+  local dir state lockdir dead rc newpid
+  dir=$(make_case lock-stale-steal-mutex)
+  state="$dir/state"
+  lockdir="$state/.contend.lock"
+  dead=$(dead_pid)
+  mkdir "$lockdir"
+  printf '%s\n' "$dead" > "$lockdir/pid"
+  mkdir "$lockdir.steal"
+  printf '%s\n' "$dead" > "$lockdir.steal/pid"
+  rc=0
+  newpid=$(FM_STATE_OVERRIDE="$state" bash -c '
+    . "$1"
+    if fm_lock_try_acquire "$2"; then cat "$2/pid"; else exit 7; fi
+  ' _ "$LIB" "$lockdir") || rc=$?
+  [ "$rc" -eq 0 ] || fail "acquirer failed to reclaim a stale steal mutex (rc=$rc)"
+  [ "$newpid" != "$dead" ] || fail "stale lock was not replaced after reclaiming a stale steal mutex"
+  [ -n "$newpid" ] || fail "reclaimed lock has no pid recorded"
+  [ ! -e "$lockdir.steal" ] && [ ! -L "$lockdir.steal" ] \
+    || fail "reclaim left the steal mutex behind"
+  pass "stale steal mutex is reclaimed"
+}
+
+test_lock_steal_create_failure_is_bounded() {
+  local dir state lockdir dead pid status out err
+  dir=$(make_case lock-steal-create-bound)
+  state="$dir/state"
+  lockdir="$state/.watch-cycle-exits.lock"
+  out="$dir/acquire.out"
+  err="$dir/acquire.err"
+  dead=$(dead_pid)
+  mkdir "$lockdir"
+  printf '%s\n' "$dead" > "$lockdir/pid"
+
+  chmod a-w "$state" || true
+  if touch "$state/.write-check" 2>/dev/null; then
+    rm -f "$state/.write-check"
+    chmod u+w "$state" 2>/dev/null || true
+    pass "steal-mutex create-failure bound skipped; state dir stayed writable"
+    return
+  fi
+
+  FUNCNEST=40 FM_STATE_OVERRIDE="$state" bash -c '
+    ulimit -c 0
+    . "$1"
+    if fm_lock_try_acquire "$2"; then rc=0; else rc=1; fi
+    printf "rc=%s held=%s\n" "$rc" "${FM_LOCK_HELD_PID:-}"
+  ' _ "$LIB" "$lockdir" > "$out" 2> "$err" &
+  pid=$!
+  wait_for_exit "$pid" 50
+  status=$?
+  chmod -R u+w "$state" 2>/dev/null || true
+
+  [ "$status" -ne 124 ] || fail "steal-mutex create failure did not terminate"
+  [ "$status" -eq 0 ] \
+    || fail "acquire aborted instead of returning (status $status): $(tr '\n' ' ' < "$err") $(tr '\n' ' ' < "$out")"
+  ! grep -q 'nesting level exceeded' "$err" \
+    || fail "steal acquire recursed until bash nesting exhausted: $(tr '\n' ' ' < "$err")"
+  case "$(cat "$out")" in
+    *"rc=1"*) ;;
+    *) fail "expected fail-closed acquire when steal mutex cannot be created: $(cat "$out")" ;;
+  esac
+  [ "$(cat "$lockdir/pid" 2>/dev/null || true)" = "$dead" ] \
+    || fail "dead-pid lock was mutated while steal mutex could not be created"
+  pass "steal-mutex create failure fails closed without unbounded recursion"
+}
+
 test_lock_does_not_steal_live_lock() {
   local dir state lockdir live out lockpid
   dir=$(make_case lock-live-noop)
@@ -1114,6 +1181,8 @@ test_lock_single_winner_under_concurrency
 test_lock_steals_dead_pid_lock
 test_lock_stale_steal_single_winner_under_concurrency
 test_lock_live_steal_mutex_is_not_reclaimed
+test_lock_stale_steal_mutex_is_reclaimed
+test_lock_steal_create_failure_is_bounded
 test_lock_does_not_steal_live_lock
 test_lock_empty_pid_uses_minimum_grace
 test_lock_late_claim_loses_after_recreate

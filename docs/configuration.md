@@ -1,6 +1,6 @@
 # Configuration
 
-The files and environment variables you set to operate firstmate.
+The files and environment variables you set to operate shuvbro.
 
 ## Orchestrator behavior (AGENTS.md)
 
@@ -24,6 +24,54 @@ Wake, watcher, away-mode, and Relay-specific state mechanics remain with their n
 `docs/sessionstart-nudge.md` owns the native session-open adapter tiers that run or nudge the digest command, and the source routing between them.
 `AGENTS.md` retains the run-once and read-once operator rules, lock-refusal safety, installation consent, and direct-report recovery boundaries because those facts apply at every session start.
 Ordinary dead-direct-report recovery is owned by `stuck-crewmate-recovery`, while persistent-secondmate recovery is owned by `secondmate-provisioning`.
+
+## Persona (config/persona)
+
+Presentation-only role names and tone for this home.
+They cannot change safety, approvals, protocols, or success truth.
+
+The file is gitignored `config/persona` under the effective home, resolved from `FM_CONFIG_OVERRIDE` when that test override is present, otherwise `$FM_HOME/config`.
+`bin/fm-persona-lib.sh` is the single parser and `PERSONA` block owner.
+The file is never sourced or evaluated.
+
+An absent file uses the built-in `bro` default: lead `Bro`, user `dude`, worker `worker`, specialist `specialist`, investigation `investigation`, queue `queue`, informal candid tone, no mandatory address, no forced slang, no success opener.
+
+A present file must be valid or the resolver returns an error.
+There is no silent fallback to `bro` or `neutral` for invalid explicit config.
+
+Each line is `key=value`.
+Unknown keys, duplicate keys, empty values, control characters, lines longer than 120 characters, values longer than 64 characters, and unknown types are rejected.
+Allowed keys: `preset`, `lead`, `user`, `worker`, `specialist`, `investigation`, `queue`.
+`preset` is required in a present file and must be `bro`, `neutral`, or `dzl`.
+Role keys are optional overrides applied after the preset.
+Key order in the file does not matter: the parser collects and validates every line, rejects duplicate keys, applies the preset, then applies overrides.
+A present file is byte-validated before any bash read: raw NUL, invalid UTF-8, Unicode Other/control/format characters (including C1 U+0085, bidi U+202E, and U+2063), and Unicode line/paragraph separators (Zl/Zp, including U+2028 and U+2029) are rejected.
+Validation uses perl, the same interpreter other `bin/` scripts already use for timeout and inherit; it is not a new bootstrap-installed tool.
+If perl is missing, a present file is an error rather than a skipped check.
+An absent file does not require perl.
+Permitted role-label characters are UTF-8 characters whose Unicode general category is not Other (`C*`), not Zl, and not Zp, plus ordinary space U+0020.
+Letters, marks, numbers, punctuation (including hyphen and apostrophe), and symbols are allowed.
+`$`, backtick, and backslash are rejected.
+LF is only a record separator.
+
+Built-in presets:
+
+- `bro` - default when the file is absent. Lead `Bro`, user `dude`, ordinary worker/specialist/investigation/queue labels.
+- `neutral` - operational ids as display names; no flavor.
+- `dzl` - opt-in Jersey Shore-inspired presentation.
+  Lead `DJ`, user `dude`, identifiable worker/specialist/investigation/queue labels, optional success opener `AYO, PR'S HERE` only for a verified ready PR.
+  Serious failures, security questions, and approval asks stay plain.
+
+Specialists and workers stay identifiable.
+Do not use ambiguous labels such as "the other guy" or "a look".
+
+Flavor is restricted to user-facing messaging.
+Commits, reviews, and machine output stay plain.
+
+This file is primary-authoritative inherited local config: it is in `FM_INHERITABLE_CONFIG` (`bin/fm-config-inherit-lib.sh`), so a primary home pushes it into secondmate homes the same way as `crew-harness`.
+An independent `FM_HOME` that is not in that relationship keeps its own file.
+
+`AGENTS.md` uses operational role ids and defers display names and tone to the `PERSONA` block emitted at session start.
 
 ## Pi Calm preference (config/calm)
 

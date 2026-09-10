@@ -186,10 +186,13 @@
 # the digest never runs without the same hard bound and process-group cleanup.
 #
 # Usage: fm-session-start.sh [--reemit] [--source <source>]
-#   Prints the full ordered digest to stdout and always exits 0: this is a
-#   reporting command, not a gate. A lock refusal is reported as a loud
-#   banner inline, never a silent failure or a non-zero exit that would make
-#   an agent skip the rest of the digest.
+#   Prints the full ordered digest to stdout and exits 0, except when
+#   gitignored config/persona is present and invalid: then safety and
+#   supervision instructions still print, a PERSONA CONFIG ERROR names the
+#   file and the repair (fix it, or remove it for the documented bro default),
+#   the completion marker is not written, and the command exits 2. That
+#   presentation error is not a configured startup and must not dispatch.
+#   A lock refusal is reported as a loud banner inline and still exits 0.
 #
 #   --reemit  This process ALREADY took the helm at its own startup and has
 #             only lost its context (a /clear or a compaction). Skip the
@@ -324,9 +327,11 @@ if [ -z "${FM_SESSION_START_STAGE_FILE:-}" ]; then
     printf '●  again, raise FM_SESSION_START_TIMEOUT and report the slow stage - a stage that\n'
     printf '●  cannot finish inside the bound is a fleet problem, not a reporting detail.\n'
     printf '%s\n' "$BAR"
+    rm -f "$SESSION_START_STAGE_FILE" 2>/dev/null || true
+    exit 0
   fi
   rm -f "$SESSION_START_STAGE_FILE" 2>/dev/null || true
-  exit 0
+  exit "$SESSION_START_RC"
 fi
 
 PRIMARY_HARNESS=$("$SCRIPT_DIR/fm-harness.sh" 2>/dev/null || printf unknown)
@@ -785,11 +790,14 @@ if [ "$PRIMARY_HARNESS" = omp ]; then
     printf 'OMP_WATCH_EXTENSION: not loaded - restart omp with this home as its working directory so %s and %s auto-load from .omp/extensions/ for turn-end guard and background wake coverage; pass -e %s -e %s only when omp must start from another directory, never together with auto-discovery (omp loads a file named both ways twice)\n' "$OMP_TURNEND_EXT" "$OMP_EXT" "$OMP_TURNEND_EXT" "$OMP_EXT"
   fi
 fi
-"$SCRIPT_DIR/fm-supervision-instructions.sh" \
+PERSONA_INVALID=0
+if ! "$SCRIPT_DIR/fm-supervision-instructions.sh" \
   --harness "$PRIMARY_HARNESS" \
   --read-only "$READ_ONLY" \
   --afk "$AFK_PRESENT" \
-  --x-mode "$X_MODE_PRESENT"
+  --x-mode "$X_MODE_PRESENT"; then
+  PERSONA_INVALID=1
+fi
 
 # --- 5. read-once contract -------------------------------------------------
 # Ahead of the two digests it governs, not after them: a truncated tail is
@@ -970,6 +978,14 @@ This script never starts supervision itself.
 
 EOF
 fi
+if [ "$PERSONA_INVALID" -eq 1 ]; then
+  printf '\nPERSONA CONFIG ERROR: %s/persona is present and invalid.\n' "$CONFIG"
+  printf 'Safety and supervision instructions above still apply. Display names are unavailable.\n'
+  printf 'Fix the file, or remove it to select the documented bro default (docs/configuration.md "Persona").\n'
+  printf 'This session start is not a configured startup. Do not dispatch work.\n'
+  exit 2
+fi
+
 cat <<'EOF'
 The digest above is complete for this session start. The READ-ONCE CONTRACT
 section near the top of it governs what may still be read from disk.

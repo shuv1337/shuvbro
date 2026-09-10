@@ -627,6 +627,7 @@ tests/fm-documentation-audiences.test.sh 732
 tests/fm-extension-binding.test.sh 7398
 tests/fm-fleet-snapshot-view.test.sh 8547
 tests/fm-fleet-sync.test.sh 37749
+tests/fm-fork-boundary.test.sh 3250
 tests/fm-gate-refuse.test.sh 4977
 tests/fm-gitignore-config.test.sh 62
 tests/fm-gotmp.test.sh 1310
@@ -653,6 +654,7 @@ tests/fm-opencode-primary-live-e2e.test.sh 21
 tests/fm-operational-input.test.sh 231
 tests/fm-peek-remote.test.sh 1018
 tests/fm-pending-reply.test.sh 86711
+tests/fm-persona-lib.test.sh 925
 tests/fm-pi-branch-extension.test.sh 22239
 tests/fm-pi-branch-live-e2e.test.sh 56
 tests/fm-pi-branch-responsiveness-live-e2e.test.sh 21
@@ -1398,6 +1400,14 @@ families_for_changed_path() {
       # lane's contract coverage re-runs.
       printf '%s\n' real-herdr-gated
       ;;
+    bin/fm-persona-lib.sh)
+      printf '%s\n' "__script__:fm-persona-lib.test.sh"
+      printf '%s\n' session-bootstrap
+      printf '%s\n' secondmate
+      ;;
+    bin/fm-fork-boundary-check.sh)
+      printf '%s\n' "__script__:fm-fork-boundary.test.sh"
+      ;;
     bin/fm-lint.sh|bin/fm-lint-workflows.sh|bin/fm-install-shellcheck.sh|\
     bin/fm-install-actionlint.sh|\
     bin/fm-brief.sh|bin/fm-ensure-agents-md.sh|bin/fm-crew-state.sh|\
@@ -1428,7 +1438,8 @@ families_for_changed_path() {
       printf '%s\n' pure-contract-unit
       ;;
     .github/*|.gitattributes|.tasks.toml|AGENTS.md|CLAUDE.md|CONTRIBUTING.md|\
-    docs/configuration.md|docs/supervision-protocols/*)
+    GROK_BOT.md|VISION.md|\
+    docs/configuration.md|docs/fork-boundary.md|docs/supervision-protocols/*)
       printf '%s\n' pure-contract-unit
       ;;
     tests/lib.sh|tests/*-helpers.sh|tests/fixtures.sh)

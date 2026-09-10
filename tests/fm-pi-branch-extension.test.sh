@@ -676,6 +676,9 @@ const wakePrompt = globalThis.__fmPrompts[0];
 if (!wakePrompt.includes("FIRSTMATE SUPERVISION WAKE: signal: task-9 done")) {
   throw new Error(`branch prompt lost the wake reason: ${wakePrompt}`);
 }
+if (!wakePrompt.includes("product: shuvbro") || !wakePrompt.includes("PERSONA")) {
+  throw new Error(`branch wake lost the persona tail: ${wakePrompt}`);
+}
 if (mainUserMessages.length !== 0) throw new Error("accepted wake leaked to main as a user message");
 
 // 2. Byte-stable prefix contract: same tool names in the same order, a

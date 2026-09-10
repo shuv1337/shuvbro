@@ -10,6 +10,9 @@ FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 CONFIG="${FM_CONFIG_OVERRIDE:-$FM_HOME/config}"
 DOC_DIR="$REPO_ROOT/docs/supervision-protocols"
 
+# shellcheck source=bin/fm-persona-lib.sh
+. "$SCRIPT_DIR/fm-persona-lib.sh"
+
 HARNESS=
 READ_ONLY=0
 AFK=0
@@ -223,3 +226,9 @@ ordinary_wake_line
 printf '\n'
 render_snippet
 printf '\n'
+PERSONA_RC=0
+if ! fm_persona_instruction_tail; then
+  PERSONA_RC=2
+fi
+printf '\n'
+exit "$PERSONA_RC"

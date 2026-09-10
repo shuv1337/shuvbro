@@ -23,18 +23,66 @@
 # Every heredoc here stays outside a command substitution: `VAR=$(cat <<EOF ...)`
 # breaks parsing of the whole file on Bash 3.2 (tests/fm-brief.test.sh).
 # fm_brief_worker_role owns the ship/scout role scope. bin/fm-spawn.sh is its one
-# emitter, supplying it to every ship/scout launch brief and never to a
+# launch emitter, supplying it to every ship/scout launch brief and never to a
 # secondmate charter. Like fm_brief_intent_overlay it is a distinctly titled
-# launch section that states its own precedence for Firstmate tasks, so a brief
-# that authors its own role wording is superseded rather than duplicated.
+# launch section that states its own precedence, so a brief that authors its own
+# role wording is superseded rather than duplicated. Role labels always come
+# from config/persona: ship uses worker, scout uses specialist.
+# fm_brief_agent_intro is the matching one-line generation intro for scaffolds.
+# fm_brief_secondmate_role is the generation-time charter stanza.
 
-fm_brief_worker_role() {
-  cat <<'EOF'
+fm_brief_persona_load() {
+  # shellcheck source=bin/fm-persona-lib.sh
+  . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/fm-persona-lib.sh"
+  fm_persona_load
+}
+
+fm_brief_kind_role() {  # <ship|scout>
+  case "$1" in
+    scout) fm_persona_role specialist ;;
+    *) fm_persona_role worker ;;
+  esac
+}
+
+fm_brief_agent_intro() {  # <ship|scout>
+  local role lead
+  fm_brief_persona_load || return 1
+  role=$(fm_brief_kind_role "$1")
+  lead=$(fm_persona_role lead)
+  printf 'You are the %s: an autonomous worker managed by %s. Work on your own; do not wait for a human.\n' "$role" "$lead"
+}
+
+fm_brief_secondmate_role() {
+  local lead user worker specialist
+  fm_brief_persona_load || return 1
+  lead=$(fm_persona_role lead)
+  user=$(fm_persona_role user)
+  worker=$(fm_persona_role worker)
+  specialist=$(fm_persona_role specialist)
+  cat <<EOF
+# Current role
+You are the ${lead} of this isolated home.
+The user is ${user}.
+Ordinary workers you spawn are the ${worker}; investigation scouts you spawn are the ${specialist}.
+Do not address ${user} from this chat: user-facing outcomes go on the parent channel.
+EOF
+}
+
+fm_brief_worker_role() {  # <ship|scout>
+  local kind=${1:-ship} role lead user
+  fm_brief_persona_load || return 1
+  role=$(fm_brief_kind_role "$kind")
+  lead=$(fm_persona_role lead)
+  user=$(fm_persona_role user)
+  cat <<EOF
 # Current worker role contract
-When this task works on Firstmate itself, this section supersedes every earlier brief instruction about your role and identity.
-When this task works on Firstmate itself, the repository root `AGENTS.md` (also imported by `CLAUDE.md`) is the primary/secondmate supervisor's contract: follow this brief instead of that supervisor contract.
-For that Firstmate task, do the assigned work yourself and report to firstmate; do not adopt the supervisor identity, delegate the task, run fleet supervision, or address the captain.
-This exception preserves this brief's safety and authority boundaries and applicable contributor guidance, including `CONTRIBUTING.md` and `firstmate-coding-guidelines` for Firstmate changes.
+You are the ${role} for this task.
+Report to ${lead}. Do not address ${user} directly.
+Do not adopt the supervisor identity, delegate this task, or run fleet supervision.
+When this task works on shuvbro itself, this section supersedes every earlier brief instruction about your role and identity.
+When this task works on shuvbro itself, the repository root \`AGENTS.md\` (also imported by \`CLAUDE.md\`) is the lead/secondmate supervisor's contract: follow this brief instead of that supervisor contract.
+For that shuvbro task, do the assigned work yourself and report to ${lead}; do not adopt the supervisor identity, delegate the task, run fleet supervision, or address ${user}.
+This exception preserves this brief's safety and authority boundaries and applicable contributor guidance, including \`CONTRIBUTING.md\` and \`firstmate-coding-guidelines\` for shuvbro changes.
 Other projects retain their own instructions unchanged.
 EOF
 }

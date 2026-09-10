@@ -1,6 +1,6 @@
 ---
 name: ahoy
-description: Recap visible session events and guide the captain through visibly unanswered decisions when the captain explicitly invokes /ahoy, with a Bearings fallback when /ahoy is the session's first real captain message.
+description: Recap visible session events and guide the user through visibly unanswered decisions when the user explicitly invokes /ahoy, with a Bearings fallback when /ahoy is the session's first real user message.
 user-invocable: true
 metadata:
   internal: true
@@ -8,7 +8,7 @@ metadata:
 
 # ahoy
 
-Give the captain a concise session-only recap without gathering fresh state.
+Give the user a concise session-only recap without gathering fresh state.
 
 0. Before anything else, check whether this session has already taken the helm: a `SESSION START` digest for this home must be visible in the session history.
    If it is not, run `bin/fm-session-start.sh` once and read its digest before producing any recap.

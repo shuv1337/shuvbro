@@ -2817,14 +2817,14 @@ test_secondmate_charter_brief_is_idle_by_default() {
   brief="$home/data/idle-sm/brief.md"
   [ -f "$brief" ] || fail "secondmate charter brief was not scaffolded"
   # Idle contract: waits for routed work, never self-initiates.
-  grep -F 'go idle and wait silently for the main firstmate' "$brief" >/dev/null \
+  grep -F 'go idle and wait silently for the main lead' "$brief" >/dev/null \
     || fail "charter brief does not tell the secondmate to go idle and wait for routed work"
-  grep -F 'Act only on tasks the main firstmate routes to you' "$brief" >/dev/null \
+  grep -F 'Act only on tasks the main lead routes to you' "$brief" >/dev/null \
     || fail "charter brief does not restrict work to routed tasks"
   grep -F 'never spawn a survey, audit, or any self-directed' "$brief" >/dev/null \
     || fail "charter brief does not forbid self-initiated survey/audit work"
   # Reconcile-on-startup must remain: bootstrap and recovery still run, scoped to own work.
-  grep -F 'run normal firstmate bootstrap and recovery' "$brief" >/dev/null \
+  grep -F 'run normal bootstrap and recovery' "$brief" >/dev/null \
     || fail "charter brief dropped the bootstrap/recovery reconciliation step"
   grep -F 'only to RECONCILE work that is already yours' "$brief" >/dev/null \
     || fail "charter brief does not scope startup work to reconciling existing work"

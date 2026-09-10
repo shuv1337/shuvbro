@@ -325,6 +325,10 @@
       "audience": "maintainer-architecture"
     },
     {
+      "path": "docs/fork-boundary.md",
+      "audience": "maintainer-architecture"
+    },
+    {
       "path": "docs/examples/crew-dispatch.json",
       "audience": "operator-example"
     },

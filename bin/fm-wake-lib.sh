@@ -920,11 +920,27 @@ fm_lock_try_acquire() {
   fi
 
   steal="$lockdir.steal"
-  if ! fm_lock_try_acquire "$steal"; then
-    FM_LOCK_HELD_PID=$(cat "$lockdir/pid" 2>/dev/null || true)
-    FM_LOCK_OWNER_DIR=
-    return 1
-  fi
+  # The steal mutex is itself a lock. Recursing through fm_lock_try_acquire
+  # appends ".steal" at every depth, so a create failure that applies to every
+  # sibling (unwritable parent, ENAMETOOLONG, mktemp failure) grows the path
+  # until bash exhausts its stack. Once we are already acquiring a steal mutex,
+  # serialize any reclaim with a non-recursive create of the next sibling.
+  case "$lockdir" in
+    *.steal)
+      if ! fm_lock_try_create "$steal"; then
+        FM_LOCK_HELD_PID=$(cat "$lockdir/pid" 2>/dev/null || true)
+        FM_LOCK_OWNER_DIR=
+        return 1
+      fi
+      ;;
+    *)
+      if ! fm_lock_try_acquire "$steal"; then
+        FM_LOCK_HELD_PID=$(cat "$lockdir/pid" 2>/dev/null || true)
+        FM_LOCK_OWNER_DIR=
+        return 1
+      fi
+      ;;
+  esac
   steal_owner=${FM_LOCK_OWNER_DIR:-}
 
   cur=$(cat "$lockdir/pid" 2>/dev/null || true)

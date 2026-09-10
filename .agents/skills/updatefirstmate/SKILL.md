@@ -2,7 +2,7 @@
 name: updatefirstmate
 description: >-
   Self-update a running firstmate and its secondmates to the latest from origin.
-  Use when the captain invokes /updatefirstmate (e.g. "/updatefirstmate", "update firstmate", "pull the latest firstmate").
+  Use when the user invokes /updatefirstmate (e.g. "/updatefirstmate", "update shuvbro", "pull the latest shuvbro").
   Fast-forwards this firstmate repo's default branch and every local or remote secondmate through its guarded update path (never forced, never disruptive), then re-reads AGENTS.md and restarts every live second mate through the persist-gated restart, with a fallback re-read nudge only where a restart cannot be proven.
 user-invocable: true
 metadata:
@@ -83,9 +83,9 @@ This touches only the firstmate repo and its own worktrees, never anything under
    It is a gentle steer, not an interruption: the mate already got a safe tracked-files fast-forward, and the steer never forces, tears down, or discards its work.
    Never describe one of these as reloaded; its agent is still running the wiring it launched with.
 
-5. **Report to the captain in plain outcomes, in one line where you can.**
-   Summarize what landed under `AGENTS.md` section 9 without firstmate's internal vocabulary: which parts of the fleet are now on the latest, and which were left as-is and why.
-   For example: "Captain, firstmate and both second mates are now on the latest."
+5. **Report to the user in plain outcomes, in one line where you can.**
+   Summarize what landed under `AGENTS.md` section 9 without internal vocabulary: which parts of the fleet are now on the latest, and which were left as-is and why.
+   For example: "shuvbro and both second mates are now on the latest."
    Say plainly when a mate got the message rather than a clean reload, and why - never let a partial reload read as a full one.
    Surface any skipped target whose reason needs the captain's attention - for instance a home with its own un-landed changes (diverged) or local edits (dirty), which were left untouched on purpose.
 
