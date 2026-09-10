@@ -213,6 +213,10 @@
       "audience": "agent-runtime"
     },
     {
+      "path": ".agents/skills/harness-adapters/references/harness/opencode-v2.md",
+      "audience": "agent-runtime"
+    },
+    {
       "path": ".agents/skills/harness-adapters/references/harness/pi.md",
       "audience": "agent-runtime"
     },
@@ -414,6 +418,10 @@
     },
     {
       "path": "docs/supervision-protocols/opencode.md",
+      "audience": "agent-runtime"
+    },
+    {
+      "path": "docs/supervision-protocols/opencode-v2.md",
       "audience": "agent-runtime"
     },
     {

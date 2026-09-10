@@ -3,7 +3,7 @@ name: harness-adapters
 description: >-
   Agent-only reference for firstmate harness operations.
   Use before spawning or recovering a crewmate or secondmate, handling a trust dialog, sending a harness-specific skill invocation, interrupting or exiting an agent, resuming an exited agent, or verifying a new harness adapter.
-  Contains verified facts for claude, codex, opencode, pi, pi-signed, grok, kimi, cursor, gemini, muse, rovo, and omp.
+  Contains verified facts for claude, codex, opencode, opencode-v2, pi, pi-signed, grok, kimi, cursor, gemini, muse, rovo, and omp.
 user-invocable: false
 metadata:
   internal: true
@@ -40,6 +40,7 @@ Muse and Gemini are verified only for crewmate and scout work, never a secondmat
 ## Detection
 
 `../../../bin/fm-harness.sh` prints firstmate's own harness from verified environment markers, then process ancestry.
+Shuvcode (OpenCode V2 fork) detects as `opencode-v2` from a `shuvcode` process or its node launcher in the ancestry; V1 `opencode` and the `opencode2` beta are never claimed, as `references/harness/opencode-v2.md` records.
 Only `FM_PI_HARNESS=pi-signed` at the launch boundary together with `PI_CODING_AGENT=true` selects Pi-signed; shared unmarked launcher ancestry remains Pi.
 omp publishes no marker of its own; `FM_OMP_HARNESS=omp` is Firstmate's launch marker and the anchored process name `omp` is its ancestry evidence, as `references/harness/omp.md` records.
 `../../../bin/fm-spawn.sh` owns worker marker establishment, while the README launch command owns the signed-primary boundary.
@@ -85,6 +86,7 @@ A new tool remains undispatchable until the `verify` plan, its harness entry, ev
     "claude": "references/harness/claude.md",
     "codex": "references/harness/codex.md",
     "opencode": "references/harness/opencode.md",
+    "opencode-v2": "references/harness/opencode-v2.md",
     "pi": "references/harness/pi.md",
     "pi-signed": "references/harness/pi.md",
     "grok": "references/harness/grok.md",

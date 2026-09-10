@@ -2,6 +2,20 @@ import { spawn, spawnSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { encodeFirstmateOperationalInput } from "./lib/fm-operational-input.js";
+import { pluginRoot } from "./lib/fm-plugin-common.js";
+import {
+  createWatchArmCoordinator,
+  registerWatchOwner,
+  unregisterWatchOwner,
+} from "./lib/fm-watch-arm-v2.js";
+import { createSessionBinder } from "./lib/fm-session-bind-v2.js";
+import {
+  definePlugin,
+  eventSessionID,
+  isIdleEvent,
+  promptQueued,
+  subscribeEvents,
+} from "./lib/fm-plugin-v2.js";
 
 const COORDINATOR_KEY = "__firstmateOpenCodeWatchArm";
 // 35s on Windows so the budget stays above arm's MSYS confirm default (30s in
@@ -492,4 +506,43 @@ export const FmPrimaryWatchArm = async ({ client, directory, worktree }) => {
       void ensureArm(paths, sessionID, client);
     },
   };
+};
+
+async function setupWatchArmV2(ctx) {
+  const root = pluginRoot(ctx);
+  if (!root) return;
+  const paths = { root, home: root, state: `${root}/state`, config: `${root}/config` };
+  if (!(await isPrimaryRoot(paths.root, paths.home))) return;
+  const binder = createSessionBinder(ctx);
+  const coordinator = createWatchArmCoordinator(paths, (sessionID, text) => promptQueued(ctx, sessionID, text));
+  registerWatchOwner(paths.home, coordinator);
+  const abort = new AbortController();
+  void (async () => {
+    try {
+      for await (const event of subscribeEvents(ctx, abort.signal)) {
+        binder.observe(event);
+        if (!isIdleEvent(event)) continue;
+        const sessionID = eventSessionID(event);
+        if (!(await binder.owns(sessionID))) continue;
+        void coordinator.ensureArmed(sessionID);
+      }
+    } catch {
+      if (abort.signal.aborted) return;
+    }
+  })();
+  return () => {
+    abort.abort();
+    coordinator.cleanup();
+    unregisterWatchOwner(paths.home, coordinator);
+  };
+}
+
+export default {
+  ...definePlugin({
+    id: "fm-primary-watch-arm",
+    setup: setupWatchArmV2,
+  }),
+  async server(input) {
+    return FmPrimaryWatchArm(input);
+  },
 };

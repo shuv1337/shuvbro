@@ -103,6 +103,14 @@ test_cross_harness_ordinary_continuation_and_repair_matrix() {
   out=$("$RENDER" --harness opencode --repair-line)
   assert_contains "$out" "manual recovery probe" "opencode recovery line lost its manual probe"
 
+  out=$("$RENDER" --harness opencode-v2)
+  assert_contains "$out" "primary harness: opencode-v2" "opencode-v2 heading missing"
+  assert_contains "$out" "Mode: OpenCode V2 plugin background wake." "opencode-v2 snippet missing"
+  ordinary=$(printf '%s\n' "$out" | grep -F -- '- Ordinary wake:')
+  assert_contains "$ordinary" "plugin already owns watcher continuity" "opencode-v2 ordinary-wake line does not leave continuity to the plugin"
+  out=$("$RENDER" --harness opencode-v2 --repair-line)
+  assert_contains "$out" "manual recovery probe" "opencode-v2 recovery line lost its manual probe"
+
   out=$("$RENDER" --harness claude)
   ordinary=$(printf '%s\n' "$out" | grep -F -- '- Ordinary wake:')
   assert_contains "$ordinary" "Stop-owned auto-arm" "claude ordinary-wake line does not leave continuity to the Stop hook"

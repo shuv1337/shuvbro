@@ -2,6 +2,16 @@ import { spawn } from "node:child_process";
 import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { encodeFirstmateOperationalInput } from "./lib/fm-operational-input.js";
+import { effectivePaths, pluginRoot } from "./lib/fm-plugin-common.js";
+import { watchOwnerFor } from "./lib/fm-watch-arm-v2.js";
+import { createSessionBinder } from "./lib/fm-session-bind-v2.js";
+import {
+  definePlugin,
+  eventSessionID,
+  isIdleEvent,
+  promptQueued,
+  subscribeEvents,
+} from "./lib/fm-plugin-v2.js";
 
 const COORDINATOR_KEY = "__firstmateOpenCodeWatchArm";
 
@@ -94,4 +104,73 @@ export const FmPrimaryTurnendGuard = async ({ client, directory, worktree }) => 
       }
     },
   };
+};
+
+const turnendSkip = new Map();
+
+function skipKey(home, sessionID) {
+  return `${home}\0${sessionID}`;
+}
+
+async function setupTurnendGuardV2(ctx) {
+  const root = pluginRoot(ctx);
+  if (!root) return;
+  const paths = { root, home: root, state: `${root}/state`, config: `${root}/config` };
+  const binder = createSessionBinder(ctx);
+  const abort = new AbortController();
+
+  void (async () => {
+    try {
+      for await (const event of subscribeEvents(ctx, abort.signal)) {
+        binder.observe(event);
+        if (!isIdleEvent(event)) continue;
+        const sessionID = eventSessionID(event);
+        if (!(await binder.owns(sessionID))) continue;
+        const key = skipKey(paths.home, sessionID);
+        if (turnendSkip.get(key)) {
+          turnendSkip.delete(key);
+          continue;
+        }
+        const coordinator = watchOwnerFor(paths.home);
+        if (coordinator?.ensureArmed) {
+          const status = await coordinator.ensureArmed(sessionID);
+          if (status === "armed" || status === "wake" || status === "failed") continue;
+        }
+        const result = await runGuard(root);
+        if (result.code !== 2) continue;
+        try {
+          const text = await encodeFirstmateOperationalInput(
+            root,
+            "turn-end-guard",
+            "TURN WOULD END BLIND - supervision is off. " +
+              "The watcher cycle is missing, failed, or unhealthy. Follow the harness recovery instruction below before ending the turn.\n\n" +
+              result.stderr,
+          );
+          await promptQueued(ctx, sessionID, text);
+          turnendSkip.set(key, true);
+        } catch {
+          turnendSkip.delete(key);
+        }
+      }
+    } catch {
+      if (abort.signal.aborted) return;
+    }
+  })();
+
+  return () => {
+    abort.abort();
+    for (const key of [...turnendSkip.keys()]) {
+      if (key.startsWith(`${paths.home}\0`)) turnendSkip.delete(key);
+    }
+  };
+}
+
+export default {
+  ...definePlugin({
+    id: "fm-primary-turnend-guard",
+    setup: setupTurnendGuardV2,
+  }),
+  async server(input) {
+    return FmPrimaryTurnendGuard(input);
+  },
 };

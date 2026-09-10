@@ -1,6 +1,8 @@
 import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { spawn } from "node:child_process";
+import { setupCommandGuardV2 } from "./lib/fm-command-guard-v2.js";
+import { definePlugin } from "./lib/fm-plugin-v2.js";
 
 // PreToolUse seatbelt for OpenCode: the arm mechanism itself lives entirely in
 // fm-primary-watch-arm.js (a plugin-owned child process, never a model tool
@@ -61,4 +63,18 @@ export const FmPrimaryPretoolCheck = async ({ directory, worktree }) => {
       throw new Error(reason);
     },
   };
+};
+
+export default {
+  ...definePlugin({
+    id: "fm-primary-pretool-check",
+    setup: (ctx) =>
+      setupCommandGuardV2(ctx, {
+        helper: "fm-arm-pretool-check.sh",
+        fallbackReason: "denied by the watcher-arm PreToolUse seatbelt",
+      }),
+  }),
+  async server(input) {
+    return FmPrimaryPretoolCheck(input);
+  },
 };

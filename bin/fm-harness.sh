@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Detect the agent harness this process tree runs on.
-# Usage: fm-harness.sh                  print own harness: claude|codex|opencode|pi|pi-signed|grok|kimi|cursor|gemini|muse|rovo|omp|unknown
+# Usage: fm-harness.sh                  print own harness: claude|codex|opencode|opencode-v2|pi|pi-signed|grok|kimi|cursor|gemini|muse|rovo|omp|unknown
 #        fm-harness.sh crew             print the effective CREWMATE harness
 #                                        (config/crew-harness; "default" resolves to own)
 #        fm-harness.sh secondmate       print the harness the PRIMARY uses to launch
@@ -37,6 +37,12 @@ CONFIG="${FM_CONFIG_OVERRIDE:-$FM_HOME/config}"
 . "$SCRIPT_DIR/fm-cursor-lib.sh"
 # shellcheck source=bin/fm-gemini-lib.sh
 . "$SCRIPT_DIR/fm-gemini-lib.sh"
+# shellcheck source=bin/fm-shuvcode-lib.sh
+if [ -r "$SCRIPT_DIR/fm-shuvcode-lib.sh" ]; then
+  . "$SCRIPT_DIR/fm-shuvcode-lib.sh"
+else
+  fm_shuvcode_process_matches() { return 1; }
+fi
 
 detect_own() {
   # Layer 1: environment markers for verified harnesses.
@@ -121,9 +127,23 @@ detect_own() {
   local pid=$$ comm args argv0
   for _ in 1 2 3 4 5 6 7 8; do
     comm=$(ps -o comm= -p "$pid" 2>/dev/null) || break
+    args=$(ps -o args= -p "$pid" 2>/dev/null || true)
     argv0=$(fm_cursor_argv0_for_pid "$pid" "$comm" 2>/dev/null || true)
-    if fm_cursor_process_matches "$comm" '' "$argv0"; then
+    if fm_cursor_process_matches "$comm" "$args" "$argv0"; then
       echo cursor
+      return
+    fi
+    # shuvcode (OpenCode V2 fork) publishes OPENCODE_* env signals (a config
+    # dir ending in /shuvcode, OPENCODE_TERMINAL=1 on tool subprocesses), but
+    # they share the upstream opencode namespace and can survive in a stored
+    # terminal environment, the precedence hazard above. Like the other
+    # markerless harnesses it is therefore detected by ancestry alone - the
+    # reliable path, because the shuvcode binary or its node launcher parents
+    # every tool subprocess - and a deliberately-exported CLAUDECODE keeps the
+    # marker layer's existing precedence. bin/fm-shuvcode-lib.sh owns the
+    # structural match and never executes a stranger binary.
+    if fm_shuvcode_process_matches "$comm" "$args" "$argv0"; then
+      echo opencode-v2
       return
     fi
     if fm_gemini_path_is_gemini "$comm"; then
@@ -146,7 +166,11 @@ detect_own() {
       # command carrying a harness name in its arguments claim an identity.
       *claude*) echo claude; return ;;
       *codex*) echo codex; return ;;
-      *opencode*) echo opencode; return ;;
+      # V1 opencode is a compiled binary whose process name is exactly
+      # `opencode`. Anchored rather than *opencode*, so the upstream
+      # `opencode2` beta and any opencode-v2-named process are never claimed
+      # as V1 opencode (they fall through to unknown below).
+      opencode) echo opencode; return ;;
       *grok*) echo grok; return ;;
       kimi) echo kimi; return ;;
       rovo) echo rovo; return ;;
@@ -169,15 +193,21 @@ detect_own() {
       omp) echo omp; return ;;
       node*|python*)
         # Bare interpreter: match the harness name in its script path.
-        args=$(ps -o args= -p "$pid" 2>/dev/null)
+        # V1 opencode runs as a compiled binary, so this arm is legacy
+        # coverage; anchor opencode to a whole path component so
+        # opencode2/opencode-v2/opencode-ai directory or executable names in
+        # the args are never claimed as V1 opencode.
         if fm_gemini_args_are_gemini "$args"; then
           echo gemini
+          return
+        fi
+        if printf '%s' "$args" | grep -qE '(^|[[:space:]/])opencode([[:space:]/]|$)'; then
+          echo opencode
           return
         fi
         case "$args" in
           *claude*) echo claude; return ;;
           *codex*) echo codex; return ;;
-          *opencode*) echo opencode; return ;;
           *grok*) echo grok; return ;;
           *" pi "*|*/pi) echo pi; return ;;
         esac ;;

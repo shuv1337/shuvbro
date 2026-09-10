@@ -1445,6 +1445,13 @@ launch_template() {
       fi
       ;;
     opencode) printf '%s' 'OPENCODE_CONFIG_CONTENT='\''{"permission":{"*":"allow"}}'\'' opencode __MODELFLAG__--prompt "$(__OPINPUT__ encode launch-brief < __BRIEF__)"' ;;
+    opencode-v2)
+      if [ "$kind" = secondmate ]; then
+        echo "error: opencode-v2 secondmates are not qualified; refuse before creating a worker" >&2
+        return 1
+      fi
+      printf '%s' 'shuvcode __MODELFLAG__--prompt "$(__OPINPUT__ encode launch-brief < __BRIEF__)"'
+      ;;
     pi|pi-signed)
       printf '%s' '__PIBIN____PITUIMODE__'
       if [ "$kind" = secondmate ]; then
@@ -1835,7 +1842,7 @@ model_flag_for_harness() {
   local harness=$1 model=$2
   [ -n "$model" ] && [ "$model" != default ] || return 0
   case "$harness" in
-    claude|codex|opencode|pi|pi-signed|grok|kimi|cursor|gemini|muse|rovo|omp)
+    claude|codex|opencode|opencode-v2|pi|pi-signed|grok|kimi|cursor|gemini|muse|rovo|omp)
       printf -- '--model %s ' "$(shell_quote "$model")"
       ;;
   esac
@@ -3274,16 +3281,18 @@ EOF
       ;;
     opencode*)
       mkdir -p "$WT/.opencode/plugins"
+      cat > "$WT/.opencode/plugins/package.json" <<'PKG'
+{"private":true,"type":"module"}
+PKG
       cat > "$WT/.opencode/plugins/fm-busy-state.js" <<EOF
 // Firstmate semantic busy-state events + turn-end notification; written by
 // fm-spawn under the contract owned by bin/fm-busy-lib.sh.
 // Semantic state comes from OpenCode's session.status events: busy and retry
-// are active, idle is inactive. Scoping latches the first session that
-// reports activity (the worker's main session - a subagent child session can
-// only start while the main session is already busy) and ignores other
-// sessions' status until the latched session settles, so a child's idle can
-// never clear the worker's busy state. The session.idle touch stays the
-// watcher's wake NOTIFICATION, never current-state truth.
+// are active, idle is inactive. The V1 factory latches the first session that
+// reports activity. The V2 setup binds only sessions at this plugin instance
+// location that are not child sessions, then latches that worker session so a
+// shared-service neighbor cannot own the worker's busy state. The session.idle
+// touch stays the watcher's wake NOTIFICATION, never current-state truth.
 import { execFile } from "node:child_process";
 const busyEvent = (state, event) =>
   new Promise((resolve) => {
@@ -3291,6 +3300,10 @@ const busyEvent = (state, event) =>
       "apply", "$STATE_REAL", "$ID", state,
       "--gen", "$BUSY_GEN", "--source", "opencode-plugin", "--event", event,
     ], () => resolve());
+  });
+const touchTurnend = () =>
+  new Promise((resolve) => {
+    execFile("touch", ["$TURNEND"], () => resolve());
   });
 export const FmBusyState = async () => {
   let activeSession = null;
@@ -3315,15 +3328,84 @@ export const FmBusyState = async () => {
           activeSession = null;
           await busyEvent("idle", "session-idle");
         }
-        await new Promise((resolve) => {
-          execFile("touch", ["$TURNEND"], () => resolve());
-        });
+        await touchTurnend();
       }
     },
   };
 };
+async function setupBusyStateV2(ctx) {
+  const abort = new AbortController();
+  const ownDir = ctx.location && ctx.location.directory;
+  const owned = new Set();
+  let latched = null;
+  const sessionData = (event) => event.data || event.properties || {};
+  async function owns(sessionID) {
+    if (!sessionID) return false;
+    if (owned.has(sessionID)) return true;
+    if (!ctx.session || typeof ctx.session.get !== "function") return false;
+    try {
+      const result = await ctx.session.get({ sessionID });
+      const info = result && result.data ? result.data : result;
+      if (!info || info.parentID) return false;
+      const dir = info.location && info.location.directory;
+      if (!dir || !ownDir || dir !== ownDir) return false;
+      owned.add(sessionID);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  void (async () => {
+    if (!ctx.event || typeof ctx.event.subscribe !== "function") return;
+    try {
+      for await (const event of ctx.event.subscribe({ signal: abort.signal })) {
+        const data = sessionData(event);
+        const sessionID = data.sessionID;
+        if (event.type === "session.created") {
+          if (!data.parentID && data.location && data.location.directory === ownDir && sessionID) {
+            owned.add(sessionID);
+          }
+          continue;
+        }
+        if (event.type === "session.status") {
+          if (!(await owns(sessionID))) continue;
+          const statusType = data.status && data.status.type;
+          if (statusType === "busy" || statusType === "retry") {
+            if (latched === null) latched = sessionID;
+            if (sessionID === latched) await busyEvent("busy", "session-" + statusType);
+            continue;
+          }
+          if (statusType === "idle" && sessionID === latched) {
+            latched = null;
+            await busyEvent("idle", "session-status-idle");
+          }
+          continue;
+        }
+        if (event.type === "session.idle") {
+          if (!(await owns(sessionID))) continue;
+          if (sessionID === latched) {
+            latched = null;
+            await busyEvent("idle", "session-idle");
+          }
+          await touchTurnend();
+        }
+      }
+    } catch {
+      if (abort.signal.aborted) return;
+    }
+  })();
+  return () => abort.abort();
+}
+export default {
+  id: "fm-busy-state",
+  setup: setupBusyStateV2,
+  async server() {
+    return FmBusyState();
+  },
+};
 EOF
       exclude_path '.opencode/plugins/fm-busy-state.js'
+      exclude_path '.opencode/plugins/package.json'
       ;;
     pi|pi-signed)
       # Written OUTSIDE the worktree: pi's project-trust gate fires on any extension

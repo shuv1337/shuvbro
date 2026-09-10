@@ -227,6 +227,89 @@ test_opencode_plugin_semantic_lifecycle() {
   pass "opencode plugin classifies from session.status, scoped to the latched worker session"
 }
 
+drive_oc_plugin_v2() {
+  local plugin=$1
+  shift
+  PLUGIN_PATH="$plugin" node --input-type=module - "$@" 2>&1 <<'EOF'
+import { pathToFileURL } from "node:url";
+const spec = JSON.parse(process.argv[2]);
+const mod = await import(pathToFileURL(process.env.PLUGIN_PATH).href);
+if (!mod.default || typeof mod.default.setup !== "function") {
+  throw new Error("generated plugin missing V2 setup");
+}
+const queue = [];
+let notify = null;
+const abort = new AbortController();
+const ctx = {
+  location: { directory: spec.directory },
+  event: {
+    subscribe({ signal } = {}) {
+      const stop = signal || abort.signal;
+      return {
+        async *[Symbol.asyncIterator]() {
+          while (!stop.aborted) {
+            if (queue.length) {
+              yield queue.shift();
+              continue;
+            }
+            await new Promise((resolve) => {
+              notify = resolve;
+            });
+          }
+        },
+      };
+    },
+  },
+  session: {
+    async get({ sessionID }) {
+      const info = spec.sessions[sessionID];
+      if (!info) throw new Error("missing");
+      return info;
+    },
+  },
+};
+const cleanup = await mod.default.setup(ctx);
+await new Promise((resolve) => setTimeout(resolve, 30));
+for (const event of spec.events) {
+  queue.push(event);
+  notify?.();
+}
+await new Promise((resolve) => setTimeout(resolve, 400));
+if (typeof cleanup === "function") cleanup();
+abort.abort();
+notify?.();
+EOF
+}
+
+test_opencode_v2_plugin_scopes_to_this_location() {
+  local rec id=busy-oc-v2 out state plugin
+  rec=$(make_spawn_case oc-v2-scope opencode "$id")
+  read_case_record "$rec"
+  out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$id" "$PROJ_DIR")
+  expect_code 0 $? "opencode spawn should succeed: $out"
+  state="$HOME_DIR/state"
+  plugin="$WT_DIR/.opencode/plugins/fm-busy-state.js"
+  assert_present "$plugin" "opencode spawn did not write the busy-state plugin"
+
+  out=$(drive_oc_plugin_v2 "$plugin" "$(jq -nc --arg dir "$WT_DIR" '{
+    directory: $dir,
+    sessions: {
+      ses_worker: { id: "ses_worker", location: { directory: $dir } },
+      ses_other: { id: "ses_other", location: { directory: "/tmp/other-session" } }
+    },
+    events: [
+      {"type":"session.status","data":{"sessionID":"ses_other","status":{"type":"busy"}}},
+      {"type":"session.status","data":{"sessionID":"ses_other","status":{"type":"idle"}}},
+      {"type":"session.status","data":{"sessionID":"ses_worker","status":{"type":"busy"}}},
+      {"type":"session.status","data":{"sessionID":"ses_other","status":{"type":"idle"}}},
+      {"type":"session.status","data":{"sessionID":"ses_worker","status":{"type":"idle"}}}
+    ]
+  }')") || fail "v2 busy drive failed: $out"
+  out=$(classify opencode "$id" "$state")
+  [ "$out" = "idle opencode-plugin" ] || fail "the worker session at this location must own busy/idle, got '$out'"
+  pass "opencode V2 plugin latches the worker session at this location, not a shared-server neighbor"
+}
+
 run_claude_hook() {  # <settings.json> <hook-event>
   local cmd
   cmd=$(jq -r ".hooks[\"$2\"][0].hooks[0].command" "$1")
@@ -427,6 +510,7 @@ test_pi_extension_serializes_settle_before_next_start
 test_pi_extension_stale_incarnation_rejected
 test_kimi_and_grok_install_no_unverified_wiring
 test_opencode_plugin_semantic_lifecycle
+test_opencode_v2_plugin_scopes_to_this_location
 test_claude_hooks_semantic_lifecycle
 test_claude_hooks_stale_incarnation_harmless
 test_gemini_hooks_semantic_lifecycle
