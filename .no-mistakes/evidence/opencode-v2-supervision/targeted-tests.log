@@ -1,0 +1,110 @@
+### tests/fm-opencode-v2-plugin.test.sh
+ok - OpenCode V2 watch-arm binds one location and does not cross-own
+ok - OpenCode V2 watch-arm binds only the first root session at a location
+ok - OpenCode V2 watch-arm stays inert in a worker worktree whose project canonical is the primary
+ok - OpenCode V2 binder releases a deleted lead so a replacement root session binds
+ok - OpenCode V2 turnend treats one execution terminal event per busy period as one turn end
+ok - OpenCode plugin defaults are structs with id, setup, and a server wrapping the V1 factory
+ok - OpenCode V2 watch-arm setup returns cleanup
+ok - OpenCode V2 turnend queues a follow-up only for the bound session
+ok - OpenCode V2 sessionstart retries after failed admission and handles resume
+ok - OpenCode V2 sessionstart ignores sessions at another location
+ok - OpenCode V2 pretool denies only through permission.evaluate with the helper reason
+ok - OpenCode V2 pretool denies through permission.evaluate
+ok - OpenCode V2 pretool denies when the guard helper cannot be evaluated
+ok - OpenCode plugins keep V1 named factories beside V2 setup
+### exit=0 tests/fm-opencode-v2-plugin.test.sh
+### tests/fm-harness-shuvcode.test.sh
+ok - fm-harness.sh: a shuvcode binary ancestry prints opencode-v2
+ok - fm-harness.sh: the shuvcode node launcher prints opencode-v2 on linux and macos shapes
+ok - fm-harness.sh: a real V1 opencode still prints opencode
+ok - fm-harness.sh: the opencode2 beta and unrelated node processes are returned as unknown
+ok - fm-harness.sh: ambient OPENCODE markers never misidentify a process tree
+ok - fm-harness.sh: an exported CLAUDECODE keeps the marker layer's existing precedence
+ok - fm-harness.sh: the walk finds shuvcode several ancestors up
+### exit=0 tests/fm-harness-shuvcode.test.sh
+### tests/fm-session-lock-ancestry.test.sh
+ok - session-lock: a version-named Claude Code session is identified from its install path and argv[0]
+ok - session-lock: ordinary script paths under a harness directory are not harness processes
+ok - session-lock: ownership stops at the first non-harness gap above the contiguous run
+ok - session-lock: a live version-named session holding the lock is not mistaken for a stale owner
+ok - session-lock: a shuvcode binary session is identified on both platforms
+ok - session-lock: a tool child of the shuvcode node launcher is found on linux and macos
+ok - session-lock: a tool child of the compiled shuvcode binary resolves to that binary
+ok - session-lock: a V1 opencode session still matches for lock purposes
+ok - session-lock: an unrelated node process is never claimed as the harness
+ok - session-lock e2e: a version-named session claims the home and arms supervision
+ok - session-lock e2e: a session parented by a harness-named daemon claims the home and arms supervision
+ok - session-lock e2e: a version-named session under a harness-named daemon keeps its own lock
+### exit=0 tests/fm-session-lock-ancestry.test.sh
+### tests/fm-spawn-dispatch-profile.test.sh
+ok - allowlist=absent preserves the operational floor and filters only when opted in
+ok - allowlist=missing-config preserves the operational floor and filters only when opted in
+ok - allowlist=enabled preserves the operational floor and filters only when opted in
+ok - allowlist=empty preserves the operational floor and filters only when opted in
+ok - invalid allowlist names refuse before launch or task publication
+ok - inaccessible config with present allowlist refuses before launch or task publication
+ok - inaccessible config with absent allowlist refuses before launch or task publication
+ok - inaccessible ancestor with present allowlist refuses before launch or task publication
+ok - inaccessible ancestor with absent allowlist refuses before launch or task publication
+ok - secondmate launch inherits the allowlist for subsequent worker launches
+ok - local inheritance preserves the allowlist on source errors and mirrors proven absence
+ok - remote inheritance preserves the allowlist on source errors and mirrors proven absence
+ok - fm-spawn: actual ship/scout launch commands deliver the worker role contract
+ok - no --model/--effort records defaults and types the claude launch instructions
+ok - non-cursor launches clear inherited Cursor identity markers
+ok - relative home overrides ignore CDPATH and become absolute before spawn launch construction
+ok - FM_HOME defaults resolve relative paths and preserve absolute spellings
+ok - absolute override spellings are preserved in spawn launch paths
+ok - unresolvable relative spawn overrides fail with named diagnostics
+ok - active crew-dispatch profile requires an explicit harness for ship spawns
+ok - active crew-dispatch profile requires an explicit harness for scout spawns
+ok - active crew-dispatch profile allows an explicit resolved harness
+ok - active crew-dispatch profile allows the legacy positional harness form
+ok - active crew-dispatch profile allows the raw launch-command escape hatch
+ok - claude receives --model and --effort profile flags
+ok - opencode-v2 launches shuvcode with --auto and without the unsupported --model flag
+ok - opencode worker wiring leaves a tracked plugins package.json untouched
+ok - codex receives --model and model_reasoning_effort profile flags
+ok - codex omits unsupported max effort instead of passing a bad config value
+ok - grok receives --model and --reasoning-effort profile flags
+ok - grok omits unsupported max reasoning effort
+ok - grok omits unsupported xhigh reasoning effort
+ok - cursor receives its model-qualified reasoning class and exact task workspace
+ok - cursor refuses model ids absent from its resolved binary's live catalog
+ok - cursor preserves the requested model when its live catalog is unreachable
+ok - opencode receives --model and omits the unsupported effort axis
+ok - native effort validator checks harness and model as separate axes
+ok - Ultra is explicit for native Pi and Pi-signed, including direct-PR, and refuses unsupported profiles before provisioning
+ok - batch dispatch preserves native Ultra in metadata and launch flags
+ok - pi receives --model and --thinking max profile flags
+ok - Pi launch probing omits --tui-mode on older Pi and preserves it on supporting Pi
+ok - pi-signed shares Pi launch semantics while preserving its configured and recorded identity
+ok - pi-signed refuses safely and actionably when the selected executable is unavailable
+ok - pi-signed is a distinct persistent secondmate runtime with shared Pi supervision semantics
+ok - batch dispatch forwards shared --harness, --model, and --effort to every pair
+ok - claude forwards firstmate's CLAUDE_CONFIG_DIR so the crewmate uses the same credential store
+ok - claude omits the config-dir prefix when firstmate runs with the single-store default
+ok - non-claude harnesses do not receive the claude CLAUDE_CONFIG_DIR prefix
+ok - a claude crewmate launch carries the attribution-off policy in its own settings
+ok - a claude secondmate launch carries the attribution-off policy too
+ok - active crew-dispatch profile does not block secondmate launches
+# all fm-spawn-dispatch-profile tests passed
+### exit=0 tests/fm-spawn-dispatch-profile.test.sh
+### tests/fm-busy-adapter-wiring.test.sh
+ok - pi extension reports agent_start busy, settles idle only via ctx.isIdle(), and keeps turn_end a notification
+ok - pi extension awaits agent_settled before the next agent_start without a test delay
+ok - pi extension events from a superseded incarnation are rejected as stale
+ok - kimi and grok install no unverified semantic wiring and classify through their own gates
+ok - opencode plugin classifies from session.status, scoped to the latched worker session
+ok - opencode V2 plugin latches the worker session at this location, not a shared-server neighbor
+ok - claude hooks open on UserPromptSubmit and close on Stop, StopFailure, and SessionEnd
+ok - claude hook events from a superseded incarnation are rejected without breaking the hook
+ok - gemini hooks open on BeforeAgent and close on AfterAgent and a repeated SessionEnd
+ok - gemini hook events from a superseded incarnation are rejected without breaking the hook
+ok - raw gemini launch remains unwired and classifies unknown
+ok - gemini is refused as a secondmate because it has no primary supervision protocol
+ok - opencode-v2 is refused as a positional secondmate before any worker is created
+ok - codex classifies unknown until a semantic source is verified, never idle or footer-matched
+all fm-busy-adapter-wiring tests passed
+### exit=0 tests/fm-busy-adapter-wiring.test.sh

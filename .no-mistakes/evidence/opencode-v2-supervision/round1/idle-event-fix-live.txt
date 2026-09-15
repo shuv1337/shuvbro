@@ -1,0 +1,37 @@
+# Live re-check after fix: standalone shuvcode v2.0.0-alpha-20 server (pid 3590465), primary clone /tmp/fm-v2-live/project with .opencode/plugins/lib/fm-plugin-v2.js switched to session.execution.* terminal events
+## session
+{"data":{"id":"ses_f5b1d763affesRDwv1hVMsD6nA","projectID":"ccdea30b8c89e5725695e35c54b414e5b3509b5d","cost":0,"tokens":{"input":0,"output":0,"reasoning":0,"cache":{"read":0,"write":0}},"time":{"created":1789472704974,"updated":1789472704974},"title":"lead","location":{"directory":"/tmp/fm-v2-live/project"}}}
+## helper invocations after one real turn (prompt: 'Reply with the single word ok')
+2026-09-15T11:45:07Z fm-sessionstart-nudge.sh args=
+2026-09-15T11:45:07Z invoked args=--restart ppid=3590475 cwd=/tmp/fm-v2-live/project
+2026-09-15T11:45:22Z invoked args=--restart ppid=3590475 cwd=/tmp/fm-v2-live/project
+2026-09-15T11:45:23Z invoked args=--handling-delivered 3594080.1789472713.AINVej --watcher-pid 3594917 ppid=3590475 cwd=/tmp/fm-v2-live/project
+## watcher processes
+3594888 bash /tmp/fm-v2-live/project/bin/fm-watch-arm.real.sh --restart
+3594917 bash /tmp/fm-v2-live/project/bin/fm-watch.sh
+## state after turn
+total 56
+drwxr-xr-x  4 shuv shuv 480 Sep 15 04:45 .
+drwxr-xr-x 19 shuv shuv 600 Sep 15 04:44 ..
+-rw-r--r--  1 shuv shuv   2 Sep 15 04:45 .heartbeat-streak
+-rw-------  1 shuv shuv 940 Sep 15 04:45 home-summary.json
+-rw-------  1 shuv shuv  25 Sep 15 04:45 .inactive-outcome-reconcile
+-rw-r--r--  1 shuv shuv   0 Sep 15 04:45 .last-check
+-rw-r--r--  1 shuv shuv   0 Sep 15 04:45 .last-heartbeat
+-rw-r--r--  1 shuv shuv   0 Sep 15 04:45 .last-watcher-beat
+-rw-r--r--  1 shuv shuv   8 Sep 15 04:45 .lock
+-rw-------  1 shuv shuv   8 Sep 15 04:45 .session-start-complete
+-rw-------  1 shuv shuv  14 Sep 15 04:45 .startup-network.report
+-rw-------  1 shuv shuv 170 Sep 15 04:45 .startup-network.status
+-rw-------  1 shuv shuv 203 Sep 15 04:45 .startup-network.timings
+-rw-r--r--  1 shuv shuv   0 Sep 15 04:44 task.meta
+drwxr-xr-x  2 shuv shuv  40 Sep 15 04:45 terminal-outcomes
+-rw-------  1 shuv shuv  12 Sep 15 04:45 .trace-context-effective
+-rw-r--r--  1 shuv shuv 180 Sep 15 04:45 .wake-queue
+-rw-r--r--  1 shuv shuv   2 Sep 15 04:45 .wake-queue.seq
+-rw-------  1 shuv shuv   0 Sep 15 04:45 .watch-arm-output.o6tDud
+-rw-r--r--  1 shuv shuv 374 Sep 15 04:45 .watch-cycle-exits.log
+-rw-r--r--  1 shuv shuv 158 Sep 15 04:45 .watch-deliveries.log
+-rw-------  1 shuv shuv  45 Sep 15 04:45 .watcher-down
+lrwxrwxrwx  1 shuv shuv  54 Sep 15 04:45 .watch.lock -> /tmp/fm-v2-live/project/state/.watch.lock.owner.MonGm8
+drwx------  2 shuv shuv 120 Sep 15 04:45 .watch.lock.owner.MonGm8

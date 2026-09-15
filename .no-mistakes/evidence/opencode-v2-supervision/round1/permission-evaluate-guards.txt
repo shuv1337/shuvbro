@@ -1,0 +1,17 @@
+# Real standalone shuvcode server (pid 3481665), plugins loaded from /tmp/fm-v2-lab/project/.opencode/plugins
+# permission.evaluate driven via POST /api/session/ses_f5b2d7527ffeZpdtdgP7AojkFM/permission with action=shell
+
+## guard helpers executable
+echo benign-ok                           -> {"data":{"id":"per_0a4d2edd0001G72uu7rpmZzpa7","effect":"allow"}}
+bin/fm-watch-arm.sh --restart &          -> {"data":{"id":"per_0a4d2edf9001uosu8JKSQRbrBY","effect":"deny"}}
+bin/fm-watch-arm.sh --restart | cat      -> {"data":{"id":"per_0a4d2ee230016WOl52GghXTHPo","effect":"deny"}}
+cd /tmp                                  -> {"data":{"id":"per_0a4d2ee4e001dzSo0x6QNZMOlq","effect":"deny"}}
+
+## fail-closed: bin/fm-arm-pretool-check.sh made non-executable (chmod -x)
+echo benign-ok                           -> {"data":{"id":"per_0a4d2ee60001bYtfY2lyPTXSIR","effect":"deny"}}
+
+## fail-closed: helper replaced by one that exits 1 (unevaluable, not a policy deny)
+echo benign-ok                           -> {"data":{"id":"per_0a4d2ee7400188xZscGo7dX2mI","effect":"deny"}}
+
+## helper restored
+echo benign-ok                           -> {"data":{"id":"per_0a4d2ee87001tVvJDUHo6OcEG9","effect":"allow"}}

@@ -1,0 +1,13 @@
+# Live secondmate refusal: bin/fm-spawn.sh --secondmate with the opencode-v2 adapter, FM_HOME=/tmp/fm-v2-lab2/project (lab clone of the target commit e2a645a)
+$ bin/fm-spawn.sh sm-v2-probe --harness opencode-v2 --secondmate
+error: opencode-v2 secondmates are not qualified; refuse before creating a worker
+error: unknown harness 'opencode-v2'; pass a raw launch command to use an unverified adapter
+exit=1
+$ bin/fm-spawn.sh sm-v2-probe opencode-v2 --secondmate
+error: opencode-v2 secondmates are not qualified; refuse before creating a worker
+error: unknown harness 'opencode-v2'; pass a raw launch command to use an unverified adapter
+exit=1
+## no worker state/home created:
+(none in state/)
+(no secondmate home)
+(no process)

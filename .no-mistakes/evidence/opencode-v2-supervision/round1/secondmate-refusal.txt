@@ -1,0 +1,3 @@
+error: opencode-v2 secondmates are not qualified; refuse before creating a worker
+error: unknown harness 'opencode-v2'; pass a raw launch command to use an unverified adapter
+exit=1

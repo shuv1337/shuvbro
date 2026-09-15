@@ -1,0 +1,64 @@
+# Clean run: standalone shuvcode v2.0.0-alpha-20 server pid 3526734, lead session ses_f5b2d7527ffeZpdtdgP7AojkFM, one prompt ('Reply with the single word ok')
+
+## event types on the HTTP feed /api/event during the turn
+      1 "type":"agent.updated"
+      1 "type":"catalog.updated"
+      1 "type":"command.updated"
+      1 "type":"integration.updated"
+      1 "type":"plugin.updated"
+      1 "type":"reference.updated"
+      1 "type":"server.connected"
+      1 "type":"session.execution.started"
+      1 "type":"session.execution.succeeded"
+      1 "type":"session.inbox.delivered"
+      1 "type":"session.inbox.enqueued"
+      1 "type":"session.reasoning.ended"
+      1 "type":"session.reasoning.started"
+      1 "type":"session.step.ended"
+      1 "type":"session.step.started"
+      1 "type":"session.step.streamed"
+      1 "type":"session.text.delta"
+      1 "type":"session.text.ended"
+      1 "type":"session.text.started"
+      1 "type":"session.usage.updated"
+      1 "type":"skill.updated"
+      1 "type":"user"
+      1 "type":"vcs.branch.updated"
+      1 "type":"websearch.updated"
+
+## event types delivered to plugins via ctx.event.subscribe (lab probe plugin)
+      1 agent.updated
+      1 catalog.updated
+      1 command.updated
+      1 integration.updated
+      1 plugin.updated
+      1 reference.updated
+      1 session.execution.started
+      1 session.execution.succeeded
+      1 session.inbox.delivered
+      1 session.inbox.enqueued
+      1 session.reasoning.ended
+      1 session.reasoning.started
+      1 session.step.ended
+      1 session.step.started
+      1 session.step.streamed
+      1 session.text.delta
+      1 session.text.ended
+      1 session.text.started
+      1 session.usage.updated
+      1 skill.updated
+      1 vcs.branch.updated
+      1 websearch.updated
+
+## session.status / session.idle events seen by plugins:
+0
+
+## helper invocations (fm-watch-arm.sh / fm-sessionstart-nudge.sh / fm-turnend-guard.sh wrappers):
+(none)
+
+## watcher processes / state after the turn
+(no fm-watch process)
+ls: cannot access '/tmp/fm-v2-lab/project/state/.watch.lock': No such file or directory
+
+## session after turn
+{"data":{"id":"ses_f5b2d7527ffeZpdtdgP7AojkFM","projectID":"ccdea30b8c89e5725695e35c54b414e5b3509b5d","cost":0,"tokens":{"input":99539,"output":959,"reasoning":1270,"cache":{"read":259833,"write":0}},"outcome":"succeeded","time":{"created":1789471656671,"updated":1789472282551,"idle":1789472286224},"title":"lead","location":{"directory":"/tmp/fm-v2-lab/project"}}}

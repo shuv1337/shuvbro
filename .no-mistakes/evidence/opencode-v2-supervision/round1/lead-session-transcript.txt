@@ -1,0 +1,28 @@
+Lead session ses_f5b2d7527ffeZpdtdgP7AojkFM on a real standalone shuvcode server (v2.0.0-alpha-20), project /tmp/fm-v2-lab/project (clone of this branch), plugins from .opencode/plugins
+Model: opencode/muse-spark-1.3-contributor-free (cost 0). Only user input typed: 'hello'.
+
+[USER msg_0a4d414870015PYXSOkgM6zcss] hello
+
+[ASSISTANT text] Starting up — running session checks.
+[ASSISTANT tool shell] {"command": "bin/fm-session-start.sh"}
+
+[ASSISTANT text] Digest read — draining wakes and reconciling tasks.
+[ASSISTANT tool shell] {"command": "bin/fm-wake-drain.sh; echo \"---REPORT---\"; bin/fm-startup-network.sh report || true"}
+
+[ASSISTANT tool skill] {"id": "bootstrap-diagnostics"}
+
+[ASSISTANT tool shell] {"command": "gh auth status 2>&1; echo \"---\"; ping -c1 -W3 github.com 2>&1 | head -5; echo \"---\"; env | grep -i -E \"GH_|GITHUB_\" | sed 's/=.*/=.../' || true"}
+
+[ASSISTANT tool shell] {"command": "ls -la state/ 2>&1; echo \"---\"; cat state/task.meta 2>&1 | head -n 100; echo \"---\"; ls -la data/ 2>&1; echo \"---\"; cat .tasks.toml 2>&1 | head -n 50"}
+
+[ASSISTANT tool shell] {"command": "cat state/.wake-queue; echo \"---wdown---\"; cat state/.watcher-down; echo \"---tout---\"; ls -R state/terminal-outcomes 2>&1; cat state/terminal-outcomes/* 2>&1 | head -n 100; echo \"---netreport---\"; cat state/.startup-network.report; echo \"---netstatus---\"; cat state/.startup-network.status"}
+
+[ASSISTANT tool shell] {"command": "bin/fm-crew-state.sh task 2>&1; echo \"---\"; bin/fm-wake-drain.sh 2>&1 | head -n 80"}
+
+[ASSISTANT tool shell] {"command": "bin/fm-wake-drain.sh --ack-through 1 --recovery-generation 3494553.1789471764.eAVmup 2>&1; echo \"ACK_DONE\""}
+
+[ASSISTANT text] Quick check for local projects before greeting.
+[ASSISTANT tool shell] {"command": "ls -la projects/ 2>&1 | head -n 30; echo \"---\"; ls -la /tmp/fm-v2-lab/project/ | head -n 40"}
+
+[ASSISTANT text] Hey — ready here. /  / Quick heads-up: GitHub isn't logged in on this machine (`gh` reports no login, network to github.com is fine). If we'll need PRs or repo access, run `gh auth login` in a terminal, then let me know and I'll re-check. /  / No projects registered and no work in flight right now. What do you want to work on?
+

@@ -1,0 +1,18 @@
+# Informational: model-driven shell tool call on lead A (ses_f5b1819e2ffe44ctSz7DJtco5Y) - prompt asks it to run 'cd /tmp && pwd' with the shell tool
+outcome=succeeded
+{"type":"user","text":null,"tool":null,"input":null,"output":"null"}
+
+# Deleted lead releases the binding: DELETE lead A, then session B (ses_f5b134401ffeLkzqPW1gI7qAaE) takes a turn and should now be served
+## helper log before
+2026-09-15T11:50:59Z fm-watch-arm.sh args=--restart ppid=3615660 cwd=/tmp/fm-v2-lab2/project FM_HOME=/tmp/fm-v2-lab2/project
+2026-09-15T11:56:27Z fm-sessionstart-nudge.sh args= ppid=3615660 cwd=/tmp/fm-v2-lab2/project FM_HOME=
+DELETE A -> 204
+session B turn outcome=succeeded
+## helper log after B turn (expect a new sessionstart-nudge invocation for B's idle)
+2026-09-15T11:50:59Z fm-watch-arm.sh args=--restart ppid=3615660 cwd=/tmp/fm-v2-lab2/project FM_HOME=/tmp/fm-v2-lab2/project
+2026-09-15T11:56:27Z fm-sessionstart-nudge.sh args= ppid=3615660 cwd=/tmp/fm-v2-lab2/project FM_HOME=
+2026-09-15T11:57:49Z fm-sessionstart-nudge.sh args= ppid=3615660 cwd=/tmp/fm-v2-lab2/project FM_HOME=
+2026-09-15T11:57:54Z fm-sessionstart-nudge.sh args= ppid=3615660 cwd=/tmp/fm-v2-lab2/project FM_HOME=
+## watcher processes
+3618443 bash /tmp/fm-v2-lab2/project/bin/fm-watch-arm.real.sh --restart
+3618510 bash /tmp/fm-v2-lab2/project/bin/fm-watch.sh

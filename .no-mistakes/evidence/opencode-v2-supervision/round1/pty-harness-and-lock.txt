@@ -1,0 +1,11 @@
+pty pid 3483360 ppid 3481665
+    PID    PPID COMMAND         COMMAND
+3481665 3481656 shuvcode        /home/shuv/.npm-global/lib/node_modules/shuvcode/node_modules/shuvcode-linux-x64/bin/shuvcode serve --port 4877 --hostname 127.0.0.1 --print-logs --log-level info
+1
+harness=opencode-v2
+lock acquired: harness pid 3481665
+lock_exit=0
+lockfile=3481665
+lock: held by live harness pid 3481665
+    PID COMMAND         COMMAND
+3481665 shuvcode        /home/shuv/.npm-global/lib/node_modules/shuvcode/node_modules/shuvcode-linux-x64/bin/shuvcode serve --port 4877 --hostname 127.0.0.1 --print-logs --log-level info

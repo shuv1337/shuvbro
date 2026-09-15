@@ -1,0 +1,15 @@
+# V1 opencode still detected: real bin/fm-harness.sh and bin/fm-lock.sh from the target commit e2a645a run under a process whose comm is a V1-style name (bash symlinked as that name; no real V1 binary is installed on this host), double-forked so the tree is orphaned away from Claude Code and the shuvcode server
+## process named opencode
+  self pid=3690505 comm=opencode ppid=1585 (systemd)
+  fm-harness.sh -> opencode
+  fm-lock.sh    -> lock acquired: harness pid 3690665 exit=0
+  lock pid 3690665 comm=exited
+## process named opencode2
+  self pid=3690510 comm=opencode2 ppid=1585 (systemd)
+  fm-harness.sh -> unknown
+  fm-lock.sh    -> lock acquired: harness pid 3690739 exit=0
+  lock pid 3690739 comm=exited
+## process named shuvcode-helper
+  self pid=3690514 comm=shuvcode-helper ppid=1585 (systemd)
+  fm-harness.sh -> unknown
+  fm-lock.sh    -> error: cannot locate harness process in ancestry exit=1

@@ -1,0 +1,34 @@
+# shuvcode v2.0.0-alpha-20 root command flags (live)
+FLAGS
+  --standalone            Run with a private server instead of the background service
+  --server string         Connect to a server URL instead of the background service
+  --auto                  Auto-approve permissions that are not explicitly denied
+  --continue, -c          Continue the last session
+  --session, -s string    Session ID to continue
+  --prompt string         Prompt to use
+
+GLOBAL FLAGS
+
+# shuvcode --model foo --prompt hi  (root command, stdin closed, 15s timeout)
+DESCRIPTION
+  shuvcode — OpenCode v2 fork command line interface
+
+USAGE
+  shuvcode <subcommand> [flags] [<directory>]
+
+ARGUMENTS
+  directory string    Directory to start shuvcode in (optional)
+
+FLAGS
+  --standalone            Run with a private server instead of the background service
+  --server string         Connect to a server URL instead of the background service
+  --auto                  Auto-approve permissions that are not explicitly denied
+  --continue, -c          Continue the last session
+  --session, -s string    Session ID to continue
+exit=1
+
+# shuvcode --auto --help (flags the template uses are accepted by the parser)
+DESCRIPTION
+  shuvcode — OpenCode v2 fork command line interface
+
+exit=0

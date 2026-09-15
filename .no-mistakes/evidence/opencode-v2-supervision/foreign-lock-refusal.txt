@@ -1,0 +1,4 @@
+# bin/fm-lock.sh run from a plain bash (Claude Code tool shell, not a shuvcode descendant) at the same home while the shuvcode server holds the lock
+error: another live firstmate session holds the lock (pid 3615660); operate read-only until resolved
+exit=1
+lockfile still=3615660

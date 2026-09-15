@@ -1,0 +1,15 @@
+orphaned tree: parent=systemd pid=1585
+# process named opencode (symlink to bash) running the real scripts
+  self pid=3501072 comm=opencode
+  fm-harness.sh -> opencode
+  fm-lock.sh    -> lock acquired: harness pid 3501072
+  lock pid 3501072 was: (exited)
+# process named opencode2 (symlink to bash) running the real scripts
+  self pid=3501171 comm=opencode2
+  fm-harness.sh -> unknown
+  fm-lock.sh    -> lock acquired: harness pid 3501171
+  lock pid 3501171 was: (exited)
+# process named shuvcode-helper (symlink to bash) running the real scripts
+  self pid=3501297 comm=shuvcode-helper
+  fm-harness.sh -> unknown
+  fm-lock.sh    -> error: cannot locate harness process in ancestry

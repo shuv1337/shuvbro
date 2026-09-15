@@ -1,0 +1,7 @@
+2026-09-15T11:50:56Z fm-sessionstart-nudge.sh args= ppid=3615660 cwd=/tmp/fm-v2-lab2/project FM_HOME=
+2026-09-15T11:50:59Z fm-sessionstart-nudge.sh args= ppid=3615660 cwd=/tmp/fm-v2-lab2/project FM_HOME=
+2026-09-15T11:50:59Z fm-watch-arm.sh args=--restart ppid=3615660 cwd=/tmp/fm-v2-lab2/project FM_HOME=/tmp/fm-v2-lab2/project
+2026-09-15T11:56:27Z fm-sessionstart-nudge.sh args= ppid=3615660 cwd=/tmp/fm-v2-lab2/project FM_HOME=
+2026-09-15T11:57:49Z fm-sessionstart-nudge.sh args= ppid=3615660 cwd=/tmp/fm-v2-lab2/project FM_HOME=
+2026-09-15T11:57:54Z fm-sessionstart-nudge.sh args= ppid=3615660 cwd=/tmp/fm-v2-lab2/project FM_HOME=
+2026-09-15T11:58:49Z fm-sessionstart-nudge.sh args= ppid=3615660 cwd=/tmp/fm-v2-lab2/project FM_HOME=

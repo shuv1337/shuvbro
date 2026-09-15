@@ -1,0 +1,26 @@
+# Executed through the real shuvcode v2.0.0-alpha-20 server's shell runner (POST /api/shell): a child of the shuvcode binary, cwd=/tmp/fm-v2-lab2/project
+# server launched with a sanitized env (no CLAUDE*/OPENCODE*/FM_* vars); node launcher pid 3615648, shuvcode binary pid 3615660
+## process ancestry of the shell child
+    PID    PPID COMMAND         COMMAND
+3615648    1585 node-MainThread node /home/shuv/.local/bin/shuvcode serve --port 4879 --hostname 127.0.0.1 --print-logs --log-level info
+3615660 3615648 shuvcode        /home/shuv/.npm-global/lib/node_modules/shuvcode/node_modules/shuvcode-linux-x64/bin/shuvcode serve --port 4
+3616792 3615660 bash            /usr/bin/bash -c ps -o pid,ppid,comm,args -p $$ $PPID $(ps -o ppid= -p $PPID) | cut -c1-140
+
+## bin/fm-harness.sh from the tool child
+opencode-v2
+exit=0
+
+## bin/fm-lock.sh from the tool child (acquire fleet lock at this home)
+lock acquired: harness pid 3615660
+exit=0
+lockfile=3615660
+
+## bin/fm-lock.sh again from a second tool child (same harness, re-entrant)
+lock acquired: harness pid 3615660
+exit=0
+
+## bin/fm-session-lock-lib.sh view: is the recorded pid a live harness?
+pid 3615660 alive as harness
+    PID 
+3615660 shuvcode
+

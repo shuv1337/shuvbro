@@ -1,0 +1,25 @@
+# Real standalone shuvcode server (binary pid 3615660), plugins from /tmp/fm-v2-lab2/project/.opencode/plugins, lead session ses_f5b1819e2ffe44ctSz7DJtco5Y
+# permission.evaluate driven via POST /api/session/<id>/permission with action=shell (the channel the V2 guards register on)
+## guard helpers present and executable
+echo benign-ok                             -> {"effect":"allow","message":null}
+bin/fm-watch-arm.sh --restart &            -> {"effect":"deny","message":null}
+bin/fm-watch-arm.sh --restart | cat        -> {"effect":"deny","message":null}
+nohup bin/fm-watch-arm.sh --restart        -> {"effect":"deny","message":null}
+cd /tmp                                    -> {"effect":"deny","message":null}
+cd projects/foo && git status              -> {"effect":"deny","message":null}
+git status                                 -> {"effect":"allow","message":null}
+## fail-closed: bin/fm-arm-pretool-check.sh made non-executable
+echo benign-ok                             -> {"effect":"deny","message":null}
+## fail-closed: bin/fm-primary-cd-check.js replaced by one that exits 1 (unevaluable, not a policy deny)
+echo benign-ok                             -> {"effect":"allow","message":null}
+## helpers restored
+echo benign-ok                             -> {"effect":"allow","message":null}
+## full deny response for 'cd /tmp'
+{"data":{"id":"per_0a4e8fbe3001A1RmshIGTbzifX","effect":"deny"}}
+## fail-closed: bin/fm-cd-pretool-check.sh replaced by one that exits 1 (unevaluable, not a policy deny)
+echo benign-ok                             -> {"effect":"deny"}
+ M bin/fm-sessionstart-nudge.sh
+ M bin/fm-turnend-guard.sh
+ M bin/fm-watch-arm.sh
+## helper restored
+echo benign-ok                             -> {"effect":"allow"}

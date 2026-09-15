@@ -1,0 +1,54 @@
+# Lead first turn on the target commit e2a645a: real standalone shuvcode v2.0.0-alpha-20 server (binary pid 3615660), lead session ses_f5b1819e2ffe44ctSz7DJtco5Y, prompt 'Reply with the single word ok'
+## helper invocations (wrapper log; ppid = shuvcode binary)
+2026-09-15T11:50:56Z fm-sessionstart-nudge.sh args= ppid=3615660 cwd=/tmp/fm-v2-lab2/project FM_HOME=
+2026-09-15T11:50:59Z fm-sessionstart-nudge.sh args= ppid=3615660 cwd=/tmp/fm-v2-lab2/project FM_HOME=
+2026-09-15T11:50:59Z fm-watch-arm.sh args=--restart ppid=3615660 cwd=/tmp/fm-v2-lab2/project FM_HOME=/tmp/fm-v2-lab2/project
+2026-09-15T11:56:27Z fm-sessionstart-nudge.sh args= ppid=3615660 cwd=/tmp/fm-v2-lab2/project FM_HOME=
+2026-09-15T11:57:49Z fm-sessionstart-nudge.sh args= ppid=3615660 cwd=/tmp/fm-v2-lab2/project FM_HOME=
+2026-09-15T11:57:54Z fm-sessionstart-nudge.sh args= ppid=3615660 cwd=/tmp/fm-v2-lab2/project FM_HOME=
+2026-09-15T11:58:49Z fm-sessionstart-nudge.sh args= ppid=3615660 cwd=/tmp/fm-v2-lab2/project FM_HOME=
+## watcher processes at end of run
+3618443 bash /tmp/fm-v2-lab2/project/bin/fm-watch-arm.real.sh --restart
+3618510 bash /tmp/fm-v2-lab2/project/bin/fm-watch.sh
+## state dir
+total 12
+drwxr-xr-x  4 shuv shuv 260 Sep 15 04:59 .
+drwxr-xr-x 19 shuv shuv 600 Sep 15 04:50 ..
+-rw-------  1 shuv shuv 940 Sep 15 04:56 home-summary.json
+-rw-------  1 shuv shuv  25 Sep 15 04:50 .inactive-outcome-reconcile
+-rw-r--r--  1 shuv shuv   0 Sep 15 04:56 .last-check
+-rw-r--r--  1 shuv shuv   0 Sep 15 04:50 .last-heartbeat
+-rw-r--r--  1 shuv shuv   0 Sep 15 04:59 .last-watcher-beat
+-rw-r--r--  1 shuv shuv   8 Sep 15 04:50 .lock
+-rw-r--r--  1 shuv shuv   0 Sep 15 04:50 task.meta
+drwxr-xr-x  2 shuv shuv  40 Sep 15 04:50 terminal-outcomes
+-rw-------  1 shuv shuv   0 Sep 15 04:50 .watch-arm-output.wYLDsW
+lrwxrwxrwx  1 shuv shuv  54 Sep 15 04:50 .watch.lock -> /tmp/fm-v2-lab2/project/state/.watch.lock.owner.chmAHO
+drwx------  2 shuv shuv 120 Sep 15 04:50 .watch.lock.owner.chmAHO
+## fleet lock
+3615660
+
+## session.* event types delivered during the run
+      2 "type":"session.created"
+      1 "type":"session.deleted"
+      1 "type":"session.execution.interrupted"
+      6 "type":"session.execution.started"
+      5 "type":"session.execution.succeeded"
+      6 "type":"session.inbox.delivered"
+      6 "type":"session.inbox.enqueued"
+      2 "type":"session.instructions.updated"
+      6 "type":"session.reasoning.ended"
+      6 "type":"session.reasoning.started"
+      6 "type":"session.step.ended"
+      1 "type":"session.step.failed"
+      7 "type":"session.step.started"
+      6 "type":"session.step.streamed"
+      6 "type":"session.text.delta"
+      6 "type":"session.text.ended"
+      6 "type":"session.text.started"
+      1 "type":"session.tool.called"
+      1 "type":"session.tool.input.ended"
+      1 "type":"session.tool.input.started"
+      1 "type":"session.tool.progress"
+      1 "type":"session.tool.success"
+      6 "type":"session.usage.updated"
