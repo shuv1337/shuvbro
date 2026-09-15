@@ -1450,7 +1450,7 @@ launch_template() {
         echo "error: opencode-v2 secondmates are not qualified; refuse before creating a worker" >&2
         return 1
       fi
-      printf '%s' 'shuvcode __MODELFLAG__--prompt "$(__OPINPUT__ encode launch-brief < __BRIEF__)"'
+      printf '%s' 'shuvcode --auto --prompt "$(__OPINPUT__ encode launch-brief < __BRIEF__)"'
       ;;
     pi|pi-signed)
       printf '%s' '__PIBIN____PITUIMODE__'
@@ -1842,7 +1842,7 @@ model_flag_for_harness() {
   local harness=$1 model=$2
   [ -n "$model" ] && [ "$model" != default ] || return 0
   case "$harness" in
-    claude|codex|opencode|opencode-v2|pi|pi-signed|grok|kimi|cursor|gemini|muse|rovo|omp)
+    claude|codex|opencode|pi|pi-signed|grok|kimi|cursor|gemini|muse|rovo|omp)
       printf -- '--model %s ' "$(shell_quote "$model")"
       ;;
   esac
@@ -3281,9 +3281,12 @@ EOF
       ;;
     opencode*)
       mkdir -p "$WT/.opencode/plugins"
-      cat > "$WT/.opencode/plugins/package.json" <<'PKG'
+      if [ ! -e "$WT/.opencode/plugins/package.json" ]; then
+        cat > "$WT/.opencode/plugins/package.json" <<'PKG'
 {"private":true,"type":"module"}
 PKG
+        exclude_path '.opencode/plugins/package.json'
+      fi
       cat > "$WT/.opencode/plugins/fm-busy-state.js" <<EOF
 // Firstmate semantic busy-state events + turn-end notification; written by
 // fm-spawn under the contract owned by bin/fm-busy-lib.sh.
@@ -3405,7 +3408,6 @@ export default {
 };
 EOF
       exclude_path '.opencode/plugins/fm-busy-state.js'
-      exclude_path '.opencode/plugins/package.json'
       ;;
     pi|pi-signed)
       # Written OUTSIDE the worktree: pi's project-trust gate fires on any extension

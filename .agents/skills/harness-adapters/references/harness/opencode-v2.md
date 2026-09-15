@@ -27,6 +27,8 @@ Process detection is structural; it never executes a stranger binary during an a
 
 ## Dispatch
 
-Ship and scout launches use `shuvcode --prompt`.
+Ship and scout launches use `shuvcode --auto --prompt`; `--auto` auto-approves permissions that are not explicitly denied so an unattended worker never parks on a permission dialog.
+The root command accepts only `--standalone`, `--server`, `--auto`, `--continue`, `--session`, `--prompt`, and a directory; it rejects `--model` with usage text and exit 1, so a requested model is not passed and the worker runs on the host's configured model.
+The worker wiring writes `.opencode/plugins/package.json` only when the project has none, so a project that tracks that file keeps its own copy.
 Secondmate launches are refused until that role is qualified.
-Busy state, exit command, interrupt, resume, and effort flags for this adapter have no verified facts yet; verify them before a control plan relies on them.
+Busy state, exit command, interrupt, resume, model selection, and effort flags for this adapter have no verified facts yet; verify them before a control plan relies on them.

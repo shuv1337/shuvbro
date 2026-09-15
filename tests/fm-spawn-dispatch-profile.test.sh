@@ -401,6 +401,46 @@ test_claude_threads_model_and_effort() {
   pass "claude receives --model and --effort profile flags"
 }
 
+test_opencode_v2_launch_uses_auto_and_omits_model() {
+  local rec id out status launch
+  id=profile-opencode-v2-z9
+  rec=$(make_spawn_case profile-opencode-v2 opencode-v2 "$id")
+  read_case_record "$rec"
+
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" --model some-model)
+  status=$?
+  expect_code 0 "$status" "opencode-v2 ship spawn should succeed: $out"
+  launch=$(cat "$LAUNCH_LOG")
+  assert_contains "$launch" "shuvcode --auto --prompt" \
+    "opencode-v2 launch must auto-approve permissions for an unattended worker"
+  assert_not_contains "$launch" "--model" \
+    "opencode-v2 launch must not pass --model to the shuvcode root command"
+  pass "opencode-v2 launches shuvcode with --auto and without the unsupported --model flag"
+}
+
+test_opencode_worker_keeps_tracked_plugins_package_json() {
+  local rec id out status before after
+  id=profile-opencode-pkg-z10
+  rec=$(make_spawn_case profile-opencode-pkg opencode "$id")
+  read_case_record "$rec"
+  mkdir -p "$PROJ_DIR/.opencode/plugins"
+  printf '{\n  "private": true,\n  "type": "module",\n  "name": "tracked"\n}\n' > "$PROJ_DIR/.opencode/plugins/package.json"
+  git -C "$PROJ_DIR" add .opencode/plugins/package.json
+  git -C "$PROJ_DIR" -c user.name=t -c user.email=t@t commit -q -m "track plugins package.json"
+  git -C "$PROJ_DIR" push -q origin main
+  before=$(git -C "$PROJ_DIR" show HEAD:.opencode/plugins/package.json)
+
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR")
+  status=$?
+  expect_code 0 "$status" "opencode ship spawn should succeed: $out"
+  after=$(cat "$WT_DIR/.opencode/plugins/package.json")
+  [ "$before" = "$after" ] || fail "spawn overwrote the project's tracked plugins package.json: $after"
+  [ -z "$(git -C "$WT_DIR" status --porcelain -- .opencode/plugins/package.json)" ] \
+    || fail "spawn dirtied the tracked plugins package.json in the worker worktree"
+  assert_present "$WT_DIR/.opencode/plugins/fm-busy-state.js" "opencode spawn did not write the busy-state plugin"
+  pass "opencode worker wiring leaves a tracked plugins package.json untouched"
+}
+
 test_codex_threads_model_and_effort() {
   local rec id out status launch
   id=profile-codex-z3
@@ -1216,6 +1256,8 @@ test_active_dispatch_profile_allows_explicit_harness
 test_active_dispatch_profile_allows_positional_harness
 test_active_dispatch_profile_allows_raw_launch_command
 test_claude_threads_model_and_effort
+test_opencode_v2_launch_uses_auto_and_omits_model
+test_opencode_worker_keeps_tracked_plugins_package_json
 test_codex_threads_model_and_effort
 test_codex_omits_invalid_max_effort
 test_grok_threads_model_and_reasoning_effort
