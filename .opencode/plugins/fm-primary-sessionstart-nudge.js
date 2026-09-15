@@ -76,7 +76,7 @@ function nudgeKey(root, sessionID) {
 }
 
 async function setupSessionstartNudgeV2(ctx) {
-  const root = pluginRoot(ctx);
+  const root = await pluginRoot(ctx);
   if (!root) return;
   const binder = createSessionBinder(ctx);
   const abort = new AbortController();
@@ -118,12 +118,11 @@ async function setupSessionstartNudgeV2(ctx) {
   };
 }
 
-export default {
-  ...definePlugin({
+export default Object.assign(
+  FmPrimarySessionstartNudge,
+  definePlugin({
     id: "fm-primary-sessionstart-nudge",
     setup: setupSessionstartNudgeV2,
+    server: FmPrimarySessionstartNudge,
   }),
-  async server(input) {
-    return FmPrimarySessionstartNudge(input);
-  },
-};
+);

@@ -49,11 +49,10 @@ export async function resolveRoot(anchor) {
 }
 
 export function effectivePaths(root) {
-  const fmRoot = process.env.FM_ROOT_OVERRIDE || root;
-  const fmHome = process.env.FM_HOME || process.env.FM_ROOT_OVERRIDE || fmRoot;
-  const state = process.env.FM_STATE_OVERRIDE || `${fmHome}/state`;
-  const config = process.env.FM_CONFIG_OVERRIDE || `${fmHome}/config`;
-  return { root: fmRoot, home: fmHome, state, config };
+  const home = process.env.FM_HOME || root;
+  const state = process.env.FM_STATE_OVERRIDE || `${home}/state`;
+  const config = process.env.FM_CONFIG_OVERRIDE || `${home}/config`;
+  return { root, home, state, config };
 }
 
 export async function isPrimaryRoot(root, home) {
@@ -82,7 +81,5 @@ export function pluginDirectory(ctx) {
 }
 
 export function pluginRoot(ctx) {
-  return resolvePath(
-    ctx?.location?.project?.canonical || ctx?.location?.project?.directory || ctx?.location?.directory || "",
-  );
+  return resolveRoot(pluginDirectory(ctx));
 }

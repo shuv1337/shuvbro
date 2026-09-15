@@ -6,9 +6,9 @@ import { effectivePaths, pluginRoot } from "./lib/fm-plugin-common.js";
 import { watchOwnerFor } from "./lib/fm-watch-arm-v2.js";
 import { createSessionBinder } from "./lib/fm-session-bind-v2.js";
 import {
+  createTurnTracker,
   definePlugin,
   eventSessionID,
-  isIdleEvent,
   promptQueued,
   subscribeEvents,
 } from "./lib/fm-plugin-v2.js";
@@ -113,17 +113,18 @@ function skipKey(home, sessionID) {
 }
 
 async function setupTurnendGuardV2(ctx) {
-  const root = pluginRoot(ctx);
+  const root = await pluginRoot(ctx);
   if (!root) return;
-  const paths = { root, home: root, state: `${root}/state`, config: `${root}/config` };
+  const paths = effectivePaths(root);
   const binder = createSessionBinder(ctx);
+  const turns = createTurnTracker();
   const abort = new AbortController();
 
   void (async () => {
     try {
       for await (const event of subscribeEvents(ctx, abort.signal)) {
         binder.observe(event);
-        if (!isIdleEvent(event)) continue;
+        if (!turns.turnEnded(event)) continue;
         const sessionID = eventSessionID(event);
         if (!(await binder.owns(sessionID))) continue;
         const key = skipKey(paths.home, sessionID);
@@ -165,12 +166,11 @@ async function setupTurnendGuardV2(ctx) {
   };
 }
 
-export default {
-  ...definePlugin({
+export default Object.assign(
+  FmPrimaryTurnendGuard,
+  definePlugin({
     id: "fm-primary-turnend-guard",
     setup: setupTurnendGuardV2,
+    server: FmPrimaryTurnendGuard,
   }),
-  async server(input) {
-    return FmPrimaryTurnendGuard(input);
-  },
-};
+);

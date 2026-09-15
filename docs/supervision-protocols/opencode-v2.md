@@ -8,6 +8,9 @@ When this session owns supervision and away mode is not active:
 4. Ownership is the plugin instance location plus a bound lead session id.
    The plugin serves only sessions whose location matches this instance and that are not child sessions.
    If that ownership cannot be proved, the plugin stays inert and never arms.
+   The root is the session directory's own checkout, never the project canonical directory, so a worker worktree session is inert even when its canonical points at the primary.
+   A deleted lead session releases the binding so a replacement root session at this location can bind.
+   `FM_HOME`, `FM_STATE_OVERRIDE`, and `FM_CONFIG_OVERRIDE` in the service environment select the home and its state and config paths for the guard helpers and the arm child.
    Shared-service process ancestry is not lock proof.
 5. After an actionable child close, the plugin verifies one singleton successor before it calls `ctx.session.prompt` with `delivery` set to `queue`; its bounded fallback is defined in `docs/watcher-continuity.md`.
 6. Ordinary wake: do not ask the model to re-arm because continuity is plugin-owned.

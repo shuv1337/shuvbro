@@ -27,9 +27,14 @@ export function createSessionBinder(ctx) {
   }
 
   function observe(event) {
-    if (eventType(event) !== "session.created") return;
+    const type = eventType(event);
     const sessionID = eventSessionID(event);
-    if (sessionID && createdOwnsThisLocation(event, ctx)) remember(sessionID);
+    if (!sessionID) return;
+    if (type === "session.deleted") {
+      bound.delete(sessionID);
+      return;
+    }
+    if (type === "session.created" && createdOwnsThisLocation(event, ctx)) remember(sessionID);
   }
 
   return { owns, remember, observe, bound };

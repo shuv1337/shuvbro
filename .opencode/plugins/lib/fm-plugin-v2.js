@@ -44,6 +44,27 @@ export function isIdleEvent(event) {
   return type === "session.status" && eventStatusType(event) === "idle";
 }
 
+export function createTurnTracker() {
+  const settled = new Set();
+  return {
+    turnEnded(event) {
+      const sessionID = eventSessionID(event);
+      if (!sessionID) return false;
+      if (eventType(event) === "session.status") {
+        const status = eventStatusType(event);
+        if (status === "busy" || status === "retry") {
+          settled.delete(sessionID);
+          return false;
+        }
+      }
+      if (!isIdleEvent(event)) return false;
+      if (settled.has(sessionID)) return false;
+      settled.add(sessionID);
+      return true;
+    },
+  };
+}
+
 export function commandFromToolInput(input) {
   if (!input || typeof input !== "object") return "";
   if (typeof input.command === "string") return input.command;

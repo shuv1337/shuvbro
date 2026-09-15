@@ -41,7 +41,7 @@ const abort = new AbortController();
 const ctx = {
   location: {
     directory: spec.directory,
-    project: { directory: spec.directory, canonical: spec.directory, id: "proj" },
+    project: { directory: spec.canonical || spec.directory, canonical: spec.canonical || spec.directory, id: "proj" },
   },
   event: {
     subscribe({ signal } = {}) {
@@ -133,7 +133,7 @@ test_v2_watch_arm_does_not_cross_own_sessions() {
   : > "$home/state/task.meta"
   cat > "$repo/bin/fm-watch-arm.sh" <<'SH'
 #!/usr/bin/env bash
-printf 'armed\n' >> "${FM_ARM_LOG:?}"
+printf 'armed %s %s\n' "${FM_HOME:-missing}" "${FM_STATE_OVERRIDE:-missing}" >> "${FM_ARM_LOG:?}"
 printf 'watcher: healthy pid=1 (beacon 0s)\n'
 SH
   cat > "$repo/bin/fm-operational-input.sh" <<'SH'
@@ -176,6 +176,8 @@ SH
   expect_code 0 "$status" "V2 watch-arm lead session should run"
   result=$(cat "$out")
   [ -f "$log" ] || fail "bound lead session did not arm: $result"
+  grep -qx "armed $home $home/state" "$log" \
+    || fail "arm child did not receive the FM_HOME home and its state dir: $(cat "$log")"
   printf '%s' "$result" | jq -e '.prompts | all(.sessionID == "ses_lead")' >/dev/null \
     || fail "a prompt targeted a foreign session: $result"
   printf '%s' "$result" | jq -e '.prompts | all(.delivery == "queue")' >/dev/null \
@@ -469,8 +471,171 @@ test_v2_pretool_helper_error_is_not_approval() {
   pass "OpenCode V2 pretool denies when the guard helper cannot be evaluated"
 }
 
+test_v2_worker_worktree_is_inert_when_canonical_is_primary() {
+  local repo wt log out status
+  repo="$TMP_ROOT/canonical-primary"
+  wt="$TMP_ROOT/canonical-worker"
+  make_primary "$repo"
+  git -C "$repo" -c user.name=t -c user.email=t@t commit -q --allow-empty -m init
+  git -C "$repo" worktree add -q "$wt" -b worker
+  mkdir -p "$wt/bin" "$wt/state"
+  : > "$wt/AGENTS.md"
+  : > "$wt/state/task.meta"
+  cat > "$repo/bin/fm-watch-arm.sh" <<'SH'
+#!/usr/bin/env bash
+printf 'armed\n' >> "${FM_ARM_LOG:?}"
+printf 'watcher: healthy pid=1 (beacon 0s)\n'
+SH
+  cp "$repo/bin/fm-watch-arm.sh" "$wt/bin/fm-watch-arm.sh"
+  cat > "$repo/bin/fm-operational-input.sh" <<'SH'
+#!/usr/bin/env bash
+cat
+SH
+  cp "$repo/bin/fm-operational-input.sh" "$wt/bin/fm-operational-input.sh"
+  chmod +x "$repo/bin/"*.sh "$wt/bin/"*.sh
+  log="$TMP_ROOT/canonical-worker.log"
+  out="$TMP_ROOT/canonical-worker.json"
+  status=0
+  FM_ARM_LOG="$log" drive_v2 "$ROOT/.opencode/plugins/fm-primary-watch-arm.js" "$(jq -nc \
+    --arg dir "$wt" --arg canonical "$repo" --arg out "$out" \
+    '{
+      directory: $dir,
+      canonical: $canonical,
+      out: $out,
+      settleMs: 800,
+      sessions: { ses_worker: { id: "ses_worker", location: { directory: $dir } } },
+      events: [
+        { type: "session.created", data: { sessionID: "ses_worker", location: { directory: $dir } } },
+        { type: "session.status", data: { sessionID: "ses_worker", status: { type: "idle" } } }
+      ]
+    }')" || status=$?
+  expect_code 0 "$status" "worker worktree setup should run"
+  [ ! -f "$log" ] || fail "a worker worktree session armed the primary's watcher: $(cat "$log")"
+  pass "OpenCode V2 watch-arm stays inert in a worker worktree whose project canonical is the primary"
+}
+
+test_v2_binder_releases_deleted_lead_session() {
+  local repo log out status result
+  repo="$TMP_ROOT/rebind-primary"
+  make_primary "$repo"
+  cat > "$repo/bin/fm-watch-arm.sh" <<'SH'
+#!/usr/bin/env bash
+printf 'armed\n' >> "${FM_ARM_LOG:?}"
+printf 'watcher: healthy pid=1 (beacon 0s)\n'
+SH
+  cat > "$repo/bin/fm-operational-input.sh" <<'SH'
+#!/usr/bin/env bash
+cat
+SH
+  chmod +x "$repo/bin/fm-watch-arm.sh" "$repo/bin/fm-operational-input.sh"
+  log="$TMP_ROOT/rebind.log"
+  out="$TMP_ROOT/rebind.json"
+  status=0
+  FM_ARM_LOG="$log" drive_v2 "$ROOT/.opencode/plugins/fm-primary-watch-arm.js" "$(jq -nc \
+    --arg dir "$repo" --arg out "$out" \
+    '{
+      directory: $dir,
+      out: $out,
+      settleMs: 800,
+      sessions: {
+        ses_a: { id: "ses_a", location: { directory: $dir } },
+        ses_b: { id: "ses_b", location: { directory: $dir } }
+      },
+      events: [
+        { type: "session.created", data: { sessionID: "ses_a", location: { directory: $dir } } },
+        { type: "session.deleted", data: { sessionID: "ses_a", info: { id: "ses_a" } } },
+        { type: "session.created", data: { sessionID: "ses_b", location: { directory: $dir } } },
+        { type: "session.status", data: { sessionID: "ses_b", status: { type: "idle" } } }
+      ]
+    }')" || status=$?
+  expect_code 0 "$status" "rebind after delete should run"
+  result=$(cat "$out")
+  [ -f "$log" ] || fail "replacement root session did not bind after the lead was deleted: $result"
+  pass "OpenCode V2 binder releases a deleted lead so a replacement root session binds"
+}
+
+test_v2_turnend_double_idle_consumes_skip_once() {
+  local repo out status result
+  repo="$TMP_ROOT/turnend-double-idle"
+  make_primary "$repo"
+  cat > "$repo/bin/fm-turnend-guard.sh" <<'SH'
+#!/usr/bin/env bash
+printf 'guard-fired\n' >&2
+exit 2
+SH
+  cat > "$repo/bin/fm-operational-input.sh" <<'SH'
+#!/usr/bin/env bash
+cat
+SH
+  chmod +x "$repo/bin/fm-turnend-guard.sh" "$repo/bin/fm-operational-input.sh"
+  out="$TMP_ROOT/turnend-double-idle.json"
+  status=0
+  drive_v2 "$ROOT/.opencode/plugins/fm-primary-turnend-guard.js" "$(jq -nc \
+    --arg dir "$repo" --arg out "$out" \
+    '{
+      directory: $dir,
+      out: $out,
+      settleMs: 800,
+      sessions: { ses_lead: { id: "ses_lead", location: { directory: $dir } } },
+      events: [
+        { type: "session.status", data: { sessionID: "ses_lead", status: { type: "idle" } } },
+        { type: "session.idle", data: { sessionID: "ses_lead" } },
+        { type: "session.status", data: { sessionID: "ses_lead", status: { type: "busy" } } },
+        { type: "session.status", data: { sessionID: "ses_lead", status: { type: "idle" } } },
+        { type: "session.idle", data: { sessionID: "ses_lead" } },
+        { type: "session.status", data: { sessionID: "ses_lead", status: { type: "busy" } } },
+        { type: "session.status", data: { sessionID: "ses_lead", status: { type: "idle" } } },
+        { type: "session.idle", data: { sessionID: "ses_lead" } }
+      ]
+    }')" || status=$?
+  expect_code 0 "$status" "double idle turnend should run"
+  result=$(cat "$out")
+  printf '%s' "$result" | jq -e '.prompts | length == 2' >/dev/null \
+    || fail "expected one blind-turn prompt, one skipped follow-up, then one more prompt; got $result"
+  pass "OpenCode V2 turnend treats session.status idle plus session.idle as one turn end"
+}
+
+test_v2_default_export_loads_as_v1_factory() {
+  local out status wt
+  wt="$TMP_ROOT/v1-loader-worktree"
+  mkdir -p "$wt"
+  out=$(WT="$wt" node --input-type=module 2>&1 <<EOF
+import { pathToFileURL } from "node:url";
+const files = [
+  "fm-primary-watch-arm.js",
+  "fm-primary-turnend-guard.js",
+  "fm-primary-sessionstart-nudge.js",
+  "fm-primary-pretool-check.js",
+  "fm-primary-cd-check.js",
+];
+const input = { client: {}, directory: process.env.WT, worktree: process.env.WT };
+for (const file of files) {
+  const mod = await import(pathToFileURL("$ROOT/.opencode/plugins/" + file).href);
+  const seen = new Set();
+  let hooks = 0;
+  for (const [, fn] of Object.entries(mod)) {
+    if (seen.has(fn)) continue;
+    seen.add(fn);
+    const init = await fn(input);
+    if (!init || typeof init !== "object") throw new Error(file + ": V1 factory returned no hooks");
+    hooks += 1;
+  }
+  if (hooks !== 1) throw new Error(file + ": V1 loader initialized " + hooks + " factories, expected 1");
+  if (typeof mod.default.setup !== "function") throw new Error(file + ": default lost V2 setup");
+}
+EOF
+)
+  status=$?
+  expect_code 0 "$status" "V1 loader shape over the default export: $out"
+  pass "OpenCode plugin default exports stay callable V1 factories that carry V2 setup"
+}
+
 test_v2_watch_arm_does_not_cross_own_sessions
 test_v2_watch_arm_same_location_binds_only_first_session
+test_v2_worker_worktree_is_inert_when_canonical_is_primary
+test_v2_binder_releases_deleted_lead_session
+test_v2_turnend_double_idle_consumes_skip_once
+test_v2_default_export_loads_as_v1_factory
 test_v2_watch_arm_cleanup_stops_children
 test_v2_turnend_queues_follow_up_for_bound_session
 test_v2_sessionstart_does_not_mark_failed_admission

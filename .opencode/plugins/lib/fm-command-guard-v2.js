@@ -1,16 +1,17 @@
-import { pluginRoot, runProcess } from "./fm-plugin-common.js";
+import { effectivePaths, pluginRoot, runProcess } from "./fm-plugin-common.js";
 import { commandFromPermission, commandFromShellEvent, commandFromToolInput } from "./fm-plugin-v2.js";
 
 export async function setupCommandGuardV2(ctx, { helper, fallbackReason }) {
-  const root = pluginRoot(ctx);
+  const root = await pluginRoot(ctx);
   if (!root) return;
+  const paths = effectivePaths(root);
   const helperPath = `${root}/bin/${helper}`;
   const childEnv = {
     ...process.env,
     FM_ROOT_OVERRIDE: root,
-    FM_HOME: root,
-    FM_STATE_OVERRIDE: `${root}/state`,
-    FM_CONFIG_OVERRIDE: `${root}/config`,
+    FM_HOME: paths.home,
+    FM_STATE_OVERRIDE: paths.state,
+    FM_CONFIG_OVERRIDE: paths.config,
   };
 
   async function denyReason(command) {

@@ -1325,7 +1325,7 @@ if [ "$RELAUNCH" -eq 1 ]; then
   }
 elif [ "$KIND" = secondmate ]; then
   case "${POS[1]:-}" in
-    ''|claude|codex|opencode|pi|pi-signed|grok|kimi|cursor|gemini|muse|rovo|omp)
+    ''|claude|codex|opencode|opencode-v2|pi|pi-signed|grok|kimi|cursor|gemini|muse|rovo|omp)
       ARG3=${POS[1]:-}
       ;;
     *' '*)
@@ -3396,13 +3396,11 @@ async function setupBusyStateV2(ctx) {
   })();
   return () => abort.abort();
 }
-export default {
+export default Object.assign(FmBusyState, {
   id: "fm-busy-state",
   setup: setupBusyStateV2,
-  async server() {
-    return FmBusyState();
-  },
-};
+  server: FmBusyState,
+});
 EOF
       exclude_path '.opencode/plugins/fm-busy-state.js'
       exclude_path '.opencode/plugins/package.json'

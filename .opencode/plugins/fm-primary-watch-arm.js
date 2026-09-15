@@ -2,7 +2,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { encodeFirstmateOperationalInput } from "./lib/fm-operational-input.js";
-import { pluginRoot } from "./lib/fm-plugin-common.js";
+import { effectivePaths as effectiveV2Paths, pluginRoot } from "./lib/fm-plugin-common.js";
 import {
   createWatchArmCoordinator,
   registerWatchOwner,
@@ -509,9 +509,9 @@ export const FmPrimaryWatchArm = async ({ client, directory, worktree }) => {
 };
 
 async function setupWatchArmV2(ctx) {
-  const root = pluginRoot(ctx);
+  const root = await pluginRoot(ctx);
   if (!root) return;
-  const paths = { root, home: root, state: `${root}/state`, config: `${root}/config` };
+  const paths = effectiveV2Paths(root);
   if (!(await isPrimaryRoot(paths.root, paths.home))) return;
   const binder = createSessionBinder(ctx);
   const coordinator = createWatchArmCoordinator(paths, (sessionID, text) => promptQueued(ctx, sessionID, text));
@@ -537,12 +537,11 @@ async function setupWatchArmV2(ctx) {
   };
 }
 
-export default {
-  ...definePlugin({
+export default Object.assign(
+  FmPrimaryWatchArm,
+  definePlugin({
     id: "fm-primary-watch-arm",
     setup: setupWatchArmV2,
+    server: FmPrimaryWatchArm,
   }),
-  async server(input) {
-    return FmPrimaryWatchArm(input);
-  },
-};
+);
