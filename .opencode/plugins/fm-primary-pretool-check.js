@@ -65,15 +65,14 @@ export const FmPrimaryPretoolCheck = async ({ directory, worktree }) => {
   };
 };
 
-export default Object.assign(
-  FmPrimaryPretoolCheck,
-  definePlugin({
-    id: "fm-primary-pretool-check",
-    setup: (ctx) =>
-      setupCommandGuardV2(ctx, {
-        helper: "fm-arm-pretool-check.sh",
-        fallbackReason: "denied by the watcher-arm PreToolUse seatbelt",
-      }),
-    server: FmPrimaryPretoolCheck,
-  }),
-);
+export default definePlugin({
+  id: "fm-primary-pretool-check",
+  setup: (ctx) =>
+    setupCommandGuardV2(ctx, {
+      helper: "fm-arm-pretool-check.sh",
+      fallbackReason: "denied by the watcher-arm PreToolUse seatbelt",
+    }),
+  async server(input) {
+    return FmPrimaryPretoolCheck(input);
+  },
+});

@@ -65,15 +65,14 @@ export const FmPrimaryCdCheck = async ({ directory, worktree }) => {
   };
 };
 
-export default Object.assign(
-  FmPrimaryCdCheck,
-  definePlugin({
-    id: "fm-primary-cd-check",
-    setup: (ctx) =>
-      setupCommandGuardV2(ctx, {
-        helper: "fm-cd-pretool-check.sh",
-        fallbackReason: "denied by the cd-guard PreToolUse seatbelt",
-      }),
-    server: FmPrimaryCdCheck,
-  }),
-);
+export default definePlugin({
+  id: "fm-primary-cd-check",
+  setup: (ctx) =>
+    setupCommandGuardV2(ctx, {
+      helper: "fm-cd-pretool-check.sh",
+      fallbackReason: "denied by the cd-guard PreToolUse seatbelt",
+    }),
+  async server(input) {
+    return FmPrimaryCdCheck(input);
+  },
+});

@@ -537,11 +537,10 @@ async function setupWatchArmV2(ctx) {
   };
 }
 
-export default Object.assign(
-  FmPrimaryWatchArm,
-  definePlugin({
-    id: "fm-primary-watch-arm",
-    setup: setupWatchArmV2,
-    server: FmPrimaryWatchArm,
-  }),
-);
+export default definePlugin({
+  id: "fm-primary-watch-arm",
+  setup: setupWatchArmV2,
+  async server(input) {
+    return FmPrimaryWatchArm(input);
+  },
+});

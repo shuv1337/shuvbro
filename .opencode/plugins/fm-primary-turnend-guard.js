@@ -166,11 +166,10 @@ async function setupTurnendGuardV2(ctx) {
   };
 }
 
-export default Object.assign(
-  FmPrimaryTurnendGuard,
-  definePlugin({
-    id: "fm-primary-turnend-guard",
-    setup: setupTurnendGuardV2,
-    server: FmPrimaryTurnendGuard,
-  }),
-);
+export default definePlugin({
+  id: "fm-primary-turnend-guard",
+  setup: setupTurnendGuardV2,
+  async server(input) {
+    return FmPrimaryTurnendGuard(input);
+  },
+});

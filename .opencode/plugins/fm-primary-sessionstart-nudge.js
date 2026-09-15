@@ -118,11 +118,10 @@ async function setupSessionstartNudgeV2(ctx) {
   };
 }
 
-export default Object.assign(
-  FmPrimarySessionstartNudge,
-  definePlugin({
-    id: "fm-primary-sessionstart-nudge",
-    setup: setupSessionstartNudgeV2,
-    server: FmPrimarySessionstartNudge,
-  }),
-);
+export default definePlugin({
+  id: "fm-primary-sessionstart-nudge",
+  setup: setupSessionstartNudgeV2,
+  async server(input) {
+    return FmPrimarySessionstartNudge(input);
+  },
+});

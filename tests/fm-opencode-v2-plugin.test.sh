@@ -595,7 +595,7 @@ SH
   pass "OpenCode V2 turnend treats session.status idle plus session.idle as one turn end"
 }
 
-test_v2_default_export_loads_as_v1_factory() {
+test_v2_default_export_is_struct_with_one_v1_factory() {
   local out status wt
   wt="$TMP_ROOT/v1-loader-worktree"
   mkdir -p "$wt"
@@ -611,23 +611,25 @@ const files = [
 const input = { client: {}, directory: process.env.WT, worktree: process.env.WT };
 for (const file of files) {
   const mod = await import(pathToFileURL("$ROOT/.opencode/plugins/" + file).href);
-  const seen = new Set();
-  let hooks = 0;
-  for (const [, fn] of Object.entries(mod)) {
-    if (seen.has(fn)) continue;
-    seen.add(fn);
-    const init = await fn(input);
-    if (!init || typeof init !== "object") throw new Error(file + ": V1 factory returned no hooks");
-    hooks += 1;
+  const def = mod.default;
+  if (!def || typeof def !== "object" || typeof def === "function") throw new Error(file + ": default is not a plain struct");
+  if (typeof def.id !== "string" || !def.id) throw new Error(file + ": default.id missing");
+  if (typeof def.setup !== "function") throw new Error(file + ": default.setup missing");
+  if (typeof def.server !== "function") throw new Error(file + ": default.server missing");
+  const factories = new Set();
+  for (const [name, value] of Object.entries(mod)) {
+    const factory = name === "default" ? value.server : value;
+    if (typeof factory === "function") factories.add(factory);
   }
-  if (hooks !== 1) throw new Error(file + ": V1 loader initialized " + hooks + " factories, expected 1");
-  if (typeof mod.default.setup !== "function") throw new Error(file + ": default lost V2 setup");
+  if (factories.size !== 2) throw new Error(file + ": expected the named V1 factory plus default.server, got " + factories.size);
+  const hooks = await def.server(input);
+  if (!hooks || typeof hooks !== "object") throw new Error(file + ": default.server returned no V1 hooks");
 }
 EOF
 )
   status=$?
-  expect_code 0 "$status" "V1 loader shape over the default export: $out"
-  pass "OpenCode plugin default exports stay callable V1 factories that carry V2 setup"
+  expect_code 0 "$status" "plugin export shape: $out"
+  pass "OpenCode plugin defaults are structs with id, setup, and a server wrapping the V1 factory"
 }
 
 test_v2_watch_arm_does_not_cross_own_sessions
@@ -635,7 +637,7 @@ test_v2_watch_arm_same_location_binds_only_first_session
 test_v2_worker_worktree_is_inert_when_canonical_is_primary
 test_v2_binder_releases_deleted_lead_session
 test_v2_turnend_double_idle_consumes_skip_once
-test_v2_default_export_loads_as_v1_factory
+test_v2_default_export_is_struct_with_one_v1_factory
 test_v2_watch_arm_cleanup_stops_children
 test_v2_turnend_queues_follow_up_for_bound_session
 test_v2_sessionstart_does_not_mark_failed_admission

@@ -3396,11 +3396,13 @@ async function setupBusyStateV2(ctx) {
   })();
   return () => abort.abort();
 }
-export default Object.assign(FmBusyState, {
+export default {
   id: "fm-busy-state",
   setup: setupBusyStateV2,
-  server: FmBusyState,
-});
+  async server() {
+    return FmBusyState();
+  },
+};
 EOF
       exclude_path '.opencode/plugins/fm-busy-state.js'
       exclude_path '.opencode/plugins/package.json'
