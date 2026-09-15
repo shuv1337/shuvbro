@@ -111,7 +111,7 @@ if (spec.toolEvent) {
   if (!hook) throw new Error("missing permission.evaluate");
   const event = spec.permissionEvent;
   await hook.callback(event);
-  writeFileSync(spec.out, JSON.stringify({ prompts, effect: event.effect, message: event.message || "" }));
+  writeFileSync(spec.out, JSON.stringify({ prompts, effect: event.effect, message: event.message || "", toolHooks: toolHooks.map((h) => h.name), shellHooks: shellHooks.map((h) => h.name) }));
 } else {
   if (spec.cleanup) {
     if (typeof cleanup !== "function") throw new Error("setup did not return cleanup");
@@ -322,7 +322,7 @@ SH
   pass "OpenCode V2 sessionstart ignores sessions at another location"
 }
 
-test_v2_pretool_reads_tool_input_not_output_args() {
+test_v2_pretool_registers_no_throwing_hooks() {
   local repo out status result
   repo="$TMP_ROOT/pretool-primary"
   make_primary "$repo"
@@ -339,22 +339,20 @@ SH
     '{
       directory: $dir,
       out: $out,
-      toolEvent: {
-        tool: "shell",
+      permissionEvent: {
         sessionID: "ses_lead",
-        agent: "build",
-        messageID: "msg_1",
-        id: "call_1",
-        input: { command: "bin/fm-watch-arm.sh --restart &" }
+        action: "shell",
+        resources: ["bin/fm-watch-arm.sh --restart &"],
+        effect: "ask"
       }
     }')" || status=$?
   expect_code 0 "$status" "V2 pretool setup should run"
   result=$(cat "$out")
-  printf '%s' "$result" | jq -e '.denied == true' >/dev/null \
-    || fail "tool.execute.before did not deny from input.command: $result"
-  printf '%s' "$result" | jq -e '.shellHooks | index("create.before")' >/dev/null \
-    || fail "shell.create.before was not registered: $result"
-  pass "OpenCode V2 pretool reads tool input and registers shell.create.before"
+  printf '%s' "$result" | jq -e '.toolHooks == [] and .shellHooks == []' >/dev/null \
+    || fail "guard registered a tool or shell hook that would throw into an Effect defect: $result"
+  printf '%s' "$result" | jq -e '.effect == "deny" and .message == "denied-by-seatbelt"' >/dev/null \
+    || fail "permission.evaluate did not carry the helper reason: $result"
+  pass "OpenCode V2 pretool denies only through permission.evaluate with the helper reason"
 }
 
 test_v2_pretool_permission_deny() {
@@ -462,11 +460,11 @@ test_v2_pretool_helper_error_is_not_approval() {
     '{
       directory: $dir,
       out: $out,
-      toolEvent: { tool: "shell", input: { command: "true" } }
+      permissionEvent: { sessionID: "ses_lead", action: "shell", resources: ["true"], effect: "ask" }
     }')" || status=$?
   expect_code 0 "$status" "missing helper should still return from setup"
   result=$(cat "$out")
-  printf '%s' "$result" | jq -e '.denied == true' >/dev/null \
+  printf '%s' "$result" | jq -e '.effect == "deny"' >/dev/null \
     || fail "missing helper was treated as approval: $result"
   pass "OpenCode V2 pretool denies when the guard helper cannot be evaluated"
 }
@@ -642,7 +640,7 @@ test_v2_watch_arm_cleanup_stops_children
 test_v2_turnend_queues_follow_up_for_bound_session
 test_v2_sessionstart_does_not_mark_failed_admission
 test_v2_sessionstart_ignores_foreign_session
-test_v2_pretool_reads_tool_input_not_output_args
+test_v2_pretool_registers_no_throwing_hooks
 test_v2_pretool_permission_deny
 test_v2_pretool_helper_error_is_not_approval
 test_v2_named_v1_factory_still_exported

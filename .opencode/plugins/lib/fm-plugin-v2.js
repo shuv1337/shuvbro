@@ -65,17 +65,6 @@ export function createTurnTracker() {
   };
 }
 
-export function commandFromToolInput(input) {
-  if (!input || typeof input !== "object") return "";
-  if (typeof input.command === "string") return input.command;
-  return "";
-}
-
-export function commandFromShellEvent(event) {
-  if (typeof event?.command === "string") return event.command;
-  return "";
-}
-
 export function commandFromPermission(event) {
   if (!event || typeof event !== "object") return "";
   if (typeof event.metadata?.command === "string") return event.metadata.command;
