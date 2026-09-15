@@ -20,14 +20,6 @@ export function eventSessionID(event) {
   return data.sessionID || data.info?.id || event?.sessionID || "";
 }
 
-export function eventStatusType(event) {
-  const data = eventData(event);
-  const status = data.status;
-  if (!status) return "";
-  if (typeof status === "string") return status;
-  return status.type || "";
-}
-
 export function eventParentID(event) {
   const data = eventData(event);
   return data.parentID || "";
@@ -38,10 +30,17 @@ export function eventLocationDirectory(event) {
   return resolvePath(data.location?.directory || event?.location?.directory || "");
 }
 
+// shuvcode publishes no session.status or session.idle event to plugins; the
+// runtime settles a turn with exactly one Execution terminal event, which its
+// own projector maps to the session's idle time.
+const IDLE_EVENT_TYPES = new Set([
+  "session.execution.succeeded",
+  "session.execution.failed",
+  "session.execution.interrupted",
+]);
+
 export function isIdleEvent(event) {
-  const type = eventType(event);
-  if (type === "session.idle") return true;
-  return type === "session.status" && eventStatusType(event) === "idle";
+  return IDLE_EVENT_TYPES.has(eventType(event));
 }
 
 export function createTurnTracker() {
@@ -50,12 +49,9 @@ export function createTurnTracker() {
     turnEnded(event) {
       const sessionID = eventSessionID(event);
       if (!sessionID) return false;
-      if (eventType(event) === "session.status") {
-        const status = eventStatusType(event);
-        if (status === "busy" || status === "retry") {
-          settled.delete(sessionID);
-          return false;
-        }
+      if (eventType(event) === "session.execution.started") {
+        settled.delete(sessionID);
+        return false;
       }
       if (!isIdleEvent(event)) return false;
       if (settled.has(sessionID)) return false;

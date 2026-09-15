@@ -4,7 +4,7 @@ When this session owns supervision and away mode is not active:
 1. Drain first with `bin/fm-wake-drain.sh`.
    After handling all emitted wakes and reconciling open decisions and unread status lines, run the exact `--ack-through` command printed as `WAKE_ACK_REQUIRED`; until then the work remains durable for idempotent re-handling after interruption.
 2. First cycle: let `.opencode/plugins/fm-primary-watch-arm.js` arm supervision after this location's lead session reports idle.
-3. The plugin listens for `session.status` idle and the deprecated `session.idle` event, spawns `bin/fm-watch-arm.sh --restart` without awaiting it in the idle handler, and owns every later successor launch.
+3. The plugin listens for the `session.execution.succeeded`, `session.execution.failed`, and `session.execution.interrupted` terminal events (shuvcode publishes no `session.status` or `session.idle` event to plugins), spawns `bin/fm-watch-arm.sh --restart` without awaiting it in the idle handler, and owns every later successor launch.
 4. Ownership is the plugin instance location plus a bound lead session id.
    The plugin serves only sessions whose location matches this instance and that are not child sessions.
    If that ownership cannot be proved, the plugin stays inert and never arms.

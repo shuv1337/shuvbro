@@ -154,7 +154,7 @@ SH
         ses_other: { id: "ses_other", location: { directory: "/tmp/other-project" } }
       },
       events: [
-        { type: "session.status", data: { sessionID: "ses_other", status: { type: "idle" } } }
+        { type: "session.execution.succeeded", data: { sessionID: "ses_other" } }
       ]
     }')" || status=$?
   expect_code 0 "$status" "V2 watch-arm foreign session should run"
@@ -170,7 +170,7 @@ SH
         ses_lead: { id: "ses_lead", location: { directory: $dir } }
       },
       events: [
-        { type: "session.status", data: { sessionID: "ses_lead", status: { type: "idle" } } }
+        { type: "session.execution.succeeded", data: { sessionID: "ses_lead" } }
       ]
     }')" || status=$?
   expect_code 0 "$status" "V2 watch-arm lead session should run"
@@ -212,7 +212,7 @@ SH
       out: $out,
       cleanup: true,
       sessions: { ses_lead: { id: "ses_lead", location: { directory: $dir } } },
-      events: [ { type: "session.idle", data: { sessionID: "ses_lead" } } ]
+      events: [ { type: "session.execution.failed", data: { sessionID: "ses_lead", error: { name: "UnknownError" } } } ]
     }')" || status=$?
   expect_code 0 "$status" "V2 watch-arm cleanup should run"
   result=$(cat "$out")
@@ -249,8 +249,8 @@ SH
         ses_other: { id: "ses_other", location: { directory: "/tmp/other" } }
       },
       events: [
-        { type: "session.status", data: { sessionID: "ses_other", status: { type: "idle" } } },
-        { type: "session.status", data: { sessionID: "ses_lead", status: { type: "idle" } } }
+        { type: "session.execution.succeeded", data: { sessionID: "ses_other" } },
+        { type: "session.execution.succeeded", data: { sessionID: "ses_lead" } }
       ]
     }')" || status=$?
   expect_code 0 "$status" "V2 turnend setup should run"
@@ -284,7 +284,7 @@ SH
       sessions: { ses_lead: { id: "ses_lead", location: { directory: $dir } } },
       events: [
         { type: "session.created", data: { sessionID: "ses_lead", location: { directory: $dir } } },
-        { type: "session.status", data: { sessionID: "ses_lead", status: { type: "idle" } } }
+        { type: "session.execution.succeeded", data: { sessionID: "ses_lead" } }
       ]
     }')" || status=$?
   expect_code 0 "$status" "V2 sessionstart setup should run"
@@ -441,7 +441,7 @@ SH
       events: [
         { type: "session.created", data: { sessionID: "ses_a", location: { directory: $dir } } },
         { type: "session.created", data: { sessionID: "ses_b", location: { directory: $dir } } },
-        { type: "session.status", data: { sessionID: "ses_b", status: { type: "idle" } } }
+        { type: "session.execution.succeeded", data: { sessionID: "ses_b" } }
       ]
     }')" || status=$?
   expect_code 0 "$status" "same-location second session should run"
@@ -504,7 +504,7 @@ SH
       sessions: { ses_worker: { id: "ses_worker", location: { directory: $dir } } },
       events: [
         { type: "session.created", data: { sessionID: "ses_worker", location: { directory: $dir } } },
-        { type: "session.status", data: { sessionID: "ses_worker", status: { type: "idle" } } }
+        { type: "session.execution.succeeded", data: { sessionID: "ses_worker" } }
       ]
     }')" || status=$?
   expect_code 0 "$status" "worker worktree setup should run"
@@ -543,7 +543,7 @@ SH
         { type: "session.created", data: { sessionID: "ses_a", location: { directory: $dir } } },
         { type: "session.deleted", data: { sessionID: "ses_a", info: { id: "ses_a" } } },
         { type: "session.created", data: { sessionID: "ses_b", location: { directory: $dir } } },
-        { type: "session.status", data: { sessionID: "ses_b", status: { type: "idle" } } }
+        { type: "session.execution.succeeded", data: { sessionID: "ses_b" } }
       ]
     }')" || status=$?
   expect_code 0 "$status" "rebind after delete should run"
@@ -576,21 +576,21 @@ SH
       settleMs: 800,
       sessions: { ses_lead: { id: "ses_lead", location: { directory: $dir } } },
       events: [
-        { type: "session.status", data: { sessionID: "ses_lead", status: { type: "idle" } } },
-        { type: "session.idle", data: { sessionID: "ses_lead" } },
-        { type: "session.status", data: { sessionID: "ses_lead", status: { type: "busy" } } },
-        { type: "session.status", data: { sessionID: "ses_lead", status: { type: "idle" } } },
-        { type: "session.idle", data: { sessionID: "ses_lead" } },
-        { type: "session.status", data: { sessionID: "ses_lead", status: { type: "busy" } } },
-        { type: "session.status", data: { sessionID: "ses_lead", status: { type: "idle" } } },
-        { type: "session.idle", data: { sessionID: "ses_lead" } }
+        { type: "session.execution.succeeded", data: { sessionID: "ses_lead" } },
+        { type: "session.execution.interrupted", data: { sessionID: "ses_lead", reason: "user" } },
+        { type: "session.execution.started", data: { sessionID: "ses_lead" } },
+        { type: "session.execution.succeeded", data: { sessionID: "ses_lead" } },
+        { type: "session.execution.interrupted", data: { sessionID: "ses_lead", reason: "user" } },
+        { type: "session.execution.started", data: { sessionID: "ses_lead" } },
+        { type: "session.execution.succeeded", data: { sessionID: "ses_lead" } },
+        { type: "session.execution.interrupted", data: { sessionID: "ses_lead", reason: "user" } }
       ]
     }')" || status=$?
   expect_code 0 "$status" "double idle turnend should run"
   result=$(cat "$out")
   printf '%s' "$result" | jq -e '.prompts | length == 2' >/dev/null \
     || fail "expected one blind-turn prompt, one skipped follow-up, then one more prompt; got $result"
-  pass "OpenCode V2 turnend treats session.status idle plus session.idle as one turn end"
+  pass "OpenCode V2 turnend treats one execution terminal event per busy period as one turn end"
 }
 
 test_v2_default_export_is_struct_with_one_v1_factory() {
