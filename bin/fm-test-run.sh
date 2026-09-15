@@ -1297,7 +1297,7 @@ families_for_changed_path() {
     bin/fm-quota-choose.sh)
       printf '%s\n' "__script__:fm-quota-choose.test.sh"
       ;;
-    .opencode/plugins/*|.opencode/plugins/lib/*)
+    .opencode/plugins/*)
       printf '%s\n' __script__:fm-opencode-v2-plugin.test.sh
       printf '%s\n' __script__:fm-pi-watch-extension.test.sh
       printf '%s\n' __script__:fm-turnend-guard.test.sh
