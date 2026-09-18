@@ -1,19 +1,15 @@
 import { effectivePaths, pluginRoot, runProcess } from "./fm-plugin-common.js";
-import { commandFromPermission } from "./fm-plugin-v2.js";
 
-// Shuvcode resolves these runtime packages for local plugins. Keep the imports
-// optional so the credential-free Node unit harness can still inspect the
-// dual V1/V2 export shape without installing Shuvcode's internal packages.
-let EffectRuntime;
-let ToolRuntime;
-try {
-  [{ Effect: EffectRuntime }, { Tool: ToolRuntime }] = await Promise.all([
-    import("effect"),
-    import("@opencode/schema/tool"),
-  ]);
-} catch {
-  // The Effect entrypoint below is never invoked by the standalone unit loader.
-}
+// Shuvcode resolves a project plugin's bare imports natively and shares none
+// of its own modules, so the Effect runtime is the pinned dependency of
+// .opencode/plugins/package.json (install: npm ci --prefix .opencode/plugins).
+// The import stays dynamic because V1 opencode and the Node unit harness load
+// this file without that install; the Effect entrypoint reports the retained
+// failure instead of registering nothing silently.
+const runtime = await import("effect").then(
+  (module) => ({ module }),
+  (error) => ({ error }),
+);
 
 export function commandFromTool(event) {
   if (!event || typeof event !== "object") return "";
@@ -47,39 +43,34 @@ function commandGuard(ctx, { helper, fallbackReason }) {
   };
 }
 
-export function setupCommandGuardEffectV2(ctx, options) {
-  if (!EffectRuntime || !ToolRuntime) {
-    throw new Error("Shuvcode Effect plugin runtime is unavailable");
+export function setupCommandGuardEffectV2(ctx, options, effectModule = runtime.module) {
+  if (!effectModule) {
+    throw new Error(
+      "the shell guard cannot load the effect runtime; run: npm ci --prefix .opencode/plugins",
+      { cause: runtime.error },
+    );
   }
+  const { Data, Effect } = effectModule;
+  // Shuvcode matches a rejected tool call on the Tool.Error tag, not on its
+  // own class, which a project plugin cannot import.
+  class ToolError extends Data.TaggedError("Tool.Error") {}
   const build = commandGuard(ctx, options);
-  return EffectRuntime.gen(function* () {
-    const guard = yield* EffectRuntime.promise(build);
+  return Effect.gen(function* () {
+    const guard = yield* Effect.promise(build);
     yield* ctx.tool.hook("execute.before", (event) => {
       const command = commandFromTool(event);
-      if (!command) return EffectRuntime.void;
-      return EffectRuntime.tryPromise({
+      if (!command) return Effect.void;
+      return Effect.tryPromise({
         try: () => guard.denyReason(command),
-        catch: (cause) => new ToolRuntime.Error({
+        catch: (cause) => new ToolError({
           message: "unable to evaluate the required shell guard",
           error: cause,
         }),
       }).pipe(
-        EffectRuntime.flatMap((reason) => reason
-          ? EffectRuntime.fail(new ToolRuntime.Error({ message: reason }))
-          : EffectRuntime.void),
+        Effect.flatMap((reason) => reason
+          ? Effect.fail(new ToolError({ message: reason }))
+          : Effect.void),
       );
     });
-  });
-}
-
-export async function setupCommandGuardV2(ctx, { helper, fallbackReason }) {
-  const guard = await commandGuard(ctx, { helper, fallbackReason })();
-
-  if (!ctx.permission?.hook) return;
-  await ctx.permission.hook("evaluate", async (event) => {
-    const reason = await guard.denyReason(commandFromPermission(event));
-    if (!reason) return;
-    event.effect = "deny";
-    event.message = reason;
   });
 }

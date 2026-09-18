@@ -30,9 +30,6 @@ if (!mod.default || typeof mod.default.setup !== "function") {
 }
 
 const prompts = [];
-const toolHooks = [];
-const shellHooks = [];
-const permissionHooks = [];
 const queue = [];
 let notify = null;
 const sessions = new Map(Object.entries(spec.sessions || {}));
@@ -73,21 +70,6 @@ const ctx = {
       return sessions.get(sessionID);
     },
   },
-  tool: {
-    async hook(name, callback) {
-      toolHooks.push({ name, callback });
-    },
-  },
-  shell: {
-    async hook(name, callback) {
-      shellHooks.push({ name, callback });
-    },
-  },
-  permission: {
-    async hook(name, callback) {
-      permissionHooks.push({ name, callback });
-    },
-  },
 };
 
 const cleanup = await mod.default.setup(ctx);
@@ -97,31 +79,86 @@ for (const event of spec.events || []) {
   notify?.();
 }
 await new Promise((resolve) => setTimeout(resolve, spec.settleMs || 400));
-if (spec.toolEvent) {
-  const hook = toolHooks.find((item) => item.name === "execute.before");
-  if (!hook) throw new Error("missing tool.execute.before");
-  try {
-    await hook.callback(spec.toolEvent);
-    writeFileSync(spec.out, JSON.stringify({ prompts, tool: "ran", denied: false, toolHooks: toolHooks.map((h) => h.name), shellHooks: shellHooks.map((h) => h.name) }));
-  } catch (error) {
-    writeFileSync(spec.out, JSON.stringify({ prompts, tool: "threw", denied: true, reason: String(error.message || error), toolHooks: toolHooks.map((h) => h.name), shellHooks: shellHooks.map((h) => h.name) }));
-  }
-} else if (spec.permissionEvent) {
-  const hook = permissionHooks.find((item) => item.name === "evaluate");
-  if (!hook) throw new Error("missing permission.evaluate");
-  const event = spec.permissionEvent;
-  await hook.callback(event);
-  writeFileSync(spec.out, JSON.stringify({ prompts, effect: event.effect, message: event.message || "", toolHooks: toolHooks.map((h) => h.name), shellHooks: shellHooks.map((h) => h.name) }));
-} else {
-  if (spec.cleanup) {
-    if (typeof cleanup !== "function") throw new Error("setup did not return cleanup");
-    cleanup();
-  }
-  writeFileSync(spec.out, JSON.stringify({ prompts, cleaned: Boolean(spec.cleanup) }));
+if (spec.cleanup) {
+  if (typeof cleanup !== "function") throw new Error("setup did not return cleanup");
+  cleanup();
 }
+writeFileSync(spec.out, JSON.stringify({ prompts, cleaned: Boolean(spec.cleanup) }));
 abort.abort();
 notify?.();
 EOF
+}
+
+# The guard plugins deny through the Effect runtime pinned in
+# .opencode/plugins/package.json, the same install a shuvcode lead needs. CI
+# installs it, so there a missing runtime is a failure rather than a skip.
+guard_runtime_ready() {
+  [ -f "$ROOT/.opencode/plugins/node_modules/effect/package.json" ] && return 0
+  [ -z "${CI:-}" ] || fail "effect runtime missing in CI; run: npm ci --prefix .opencode/plugins"
+  printf 'note: %s needs the effect runtime (npm ci --prefix .opencode/plugins)\n' "$1"
+  return 1
+}
+
+# Runs a guard plugin's Effect entrypoint the way shuvcode does: run the
+# registration Effect, then run the registered execute.before hook for one tool
+# event and record the Exit.
+drive_v2_guard() {
+  local plugin=$1
+  shift
+  PLUGIN="$plugin" PLUGINS_DIR="$ROOT/.opencode/plugins" node --input-type=module - "$@" <<'EOF'
+import { createRequire } from "node:module";
+import { pathToFileURL } from "node:url";
+import { writeFileSync } from "node:fs";
+
+const spec = JSON.parse(process.argv[2]);
+const require = createRequire(process.env.PLUGINS_DIR + "/package.json");
+const { Cause, Effect, Exit, Option } = await import(pathToFileURL(require.resolve("effect")).href);
+const mod = await import(pathToFileURL(process.env.PLUGIN).href);
+
+const hooks = [];
+const ctx = {
+  location: {
+    directory: spec.directory,
+    project: { directory: spec.directory, canonical: spec.directory, id: "proj" },
+  },
+  tool: {
+    hook: (name, callback) => Effect.sync(() => {
+      hooks.push({ name, callback });
+    }),
+  },
+};
+
+await Effect.runPromise(mod.default.effect(ctx));
+const hook = hooks.find((item) => item.name === "execute.before");
+if (!hook) throw new Error("missing tool execute.before hook");
+const exit = await Effect.runPromiseExit(hook.callback(spec.toolEvent));
+const result = { hooks: hooks.map((item) => item.name) };
+if (Exit.isSuccess(exit)) {
+  result.outcome = "allowed";
+} else {
+  const failure = Cause.findErrorOption(exit.cause);
+  if (Option.isSome(failure)) {
+    result.outcome = "failed";
+    result.tag = failure.value._tag;
+    result.message = failure.value.message;
+  } else {
+    result.outcome = "defect";
+    result.message = Cause.pretty(exit.cause);
+  }
+}
+writeFileSync(spec.out, JSON.stringify(result));
+EOF
+}
+
+install_guard_helpers() {
+  local repo=$1
+  cp "$ROOT/bin/fm-arm-pretool-check.sh" "$ROOT/bin/fm-cd-pretool-check.sh" \
+    "$ROOT/bin/fm-arm-command-policy.mjs" "$ROOT/bin/fm-cd-command-policy.mjs" "$repo/bin/"
+}
+
+guard_tool_event() {  # <dir> <out> <tool> <command>
+  jq -nc --arg dir "$1" --arg out "$2" --arg tool "$3" --arg command "$4" \
+    '{directory: $dir, out: $out, toolEvent: {tool: $tool, sessionID: "ses_lead", input: {command: $command}}}'
 }
 
 test_v2_watch_arm_does_not_cross_own_sessions() {
@@ -322,68 +359,65 @@ SH
   pass "OpenCode V2 sessionstart ignores sessions at another location"
 }
 
-test_v2_pretool_registers_no_throwing_hooks() {
+test_v2_cd_guard_fails_bare_cd_with_typed_tool_error() {
   local repo out status result
-  repo="$TMP_ROOT/pretool-primary"
+  guard_runtime_ready "cd-guard Effect denial" || return 0
+  repo="$TMP_ROOT/cd-guard-primary"
   make_primary "$repo"
-  cat > "$repo/bin/fm-arm-pretool-check.sh" <<'SH'
-#!/usr/bin/env bash
-printf 'denied-by-seatbelt\n' >&2
-exit 2
-SH
-  chmod +x "$repo/bin/fm-arm-pretool-check.sh"
-  out="$TMP_ROOT/pretool-out.json"
+  install_guard_helpers "$repo"
+  mkdir -p "$repo/projects/x"
+  out="$TMP_ROOT/cd-guard-deny.json"
   status=0
-  drive_v2 "$ROOT/.opencode/plugins/fm-primary-pretool-check.js" "$(jq -nc \
-    --arg dir "$repo" --arg out "$out" \
-    '{
-      directory: $dir,
-      out: $out,
-      permissionEvent: {
-        sessionID: "ses_lead",
-        action: "shell",
-        resources: ["bin/fm-watch-arm.sh --restart &"],
-        effect: "ask"
-      }
-    }')" || status=$?
-  expect_code 0 "$status" "V2 pretool setup should run"
+  drive_v2_guard "$ROOT/.opencode/plugins/fm-primary-cd-check.js" \
+    "$(guard_tool_event "$repo" "$out" shell "cd projects/x")" || status=$?
+  expect_code 0 "$status" "V2 cd-guard Effect entrypoint should run"
   result=$(cat "$out")
-  printf '%s' "$result" | jq -e '.toolHooks == [] and .shellHooks == []' >/dev/null \
-    || fail "guard registered a tool or shell hook that would throw into an Effect defect: $result"
-  printf '%s' "$result" | jq -e '.effect == "deny" and .message == "denied-by-seatbelt"' >/dev/null \
-    || fail "permission.evaluate did not carry the helper reason: $result"
-  pass "OpenCode V2 pretool denies only through permission.evaluate with the helper reason"
+  printf '%s' "$result" | jq -e '.hooks == ["execute.before"]' >/dev/null \
+    || fail "cd-guard registered unexpected hooks: $result"
+  printf '%s' "$result" | jq -e '.outcome == "failed" and .tag == "Tool.Error" and (.message | length > 0)' >/dev/null \
+    || fail "bare cd was not rejected as a typed Tool.Error: $result"
+
+  out="$TMP_ROOT/cd-guard-allow.json"
+  status=0
+  drive_v2_guard "$ROOT/.opencode/plugins/fm-primary-cd-check.js" \
+    "$(guard_tool_event "$repo" "$out" shell "git -C projects/x status")" || status=$?
+  expect_code 0 "$status" "V2 cd-guard should evaluate an allowed command"
+  jq -e '.outcome == "allowed"' "$out" >/dev/null \
+    || fail "cd-guard rejected a command that does not relocate the shell: $(cat "$out")"
+
+  out="$TMP_ROOT/cd-guard-other-tool.json"
+  status=0
+  drive_v2_guard "$ROOT/.opencode/plugins/fm-primary-cd-check.js" \
+    "$(guard_tool_event "$repo" "$out" read "cd projects/x")" || status=$?
+  expect_code 0 "$status" "V2 cd-guard should ignore a non-shell tool"
+  jq -e '.outcome == "allowed"' "$out" >/dev/null \
+    || fail "cd-guard evaluated a non-shell tool: $(cat "$out")"
+  pass "OpenCode V2 cd-guard rejects a bare cd as a typed Tool.Error and passes other commands"
 }
 
-test_v2_pretool_permission_deny() {
+test_v2_pretool_fails_compound_backgrounded_arm_with_typed_tool_error() {
   local repo out status result
-  repo="$TMP_ROOT/pretool-perm"
+  guard_runtime_ready "watcher-arm Effect denial" || return 0
+  repo="$TMP_ROOT/pretool-primary"
   make_primary "$repo"
-  cat > "$repo/bin/fm-arm-pretool-check.sh" <<'SH'
-#!/usr/bin/env bash
-printf 'denied-by-seatbelt\n' >&2
-exit 2
-SH
-  chmod +x "$repo/bin/fm-arm-pretool-check.sh"
-  out="$TMP_ROOT/pretool-perm.json"
+  install_guard_helpers "$repo"
+  out="$TMP_ROOT/pretool-deny.json"
   status=0
-  drive_v2 "$ROOT/.opencode/plugins/fm-primary-pretool-check.js" "$(jq -nc \
-    --arg dir "$repo" --arg out "$out" \
-    '{
-      directory: $dir,
-      out: $out,
-      permissionEvent: {
-        sessionID: "ses_lead",
-        action: "shell",
-        resources: ["bin/fm-watch-arm.sh --restart &"],
-        effect: "ask"
-      }
-    }')" || status=$?
-  expect_code 0 "$status" "V2 permission deny should run"
+  drive_v2_guard "$ROOT/.opencode/plugins/fm-primary-pretool-check.js" \
+    "$(guard_tool_event "$repo" "$out" shell "echo ok; bin/fm-watch-arm.sh --restart &")" || status=$?
+  expect_code 0 "$status" "V2 pretool Effect entrypoint should run"
   result=$(cat "$out")
-  printf '%s' "$result" | jq -e '.effect == "deny"' >/dev/null \
-    || fail "permission.evaluate did not deny: $result"
-  pass "OpenCode V2 pretool denies through permission.evaluate"
+  printf '%s' "$result" | jq -e '.outcome == "failed" and .tag == "Tool.Error" and (.message | length > 0)' >/dev/null \
+    || fail "backgrounded arm inside a compound command was not rejected as a typed Tool.Error: $result"
+
+  out="$TMP_ROOT/pretool-allow.json"
+  status=0
+  drive_v2_guard "$ROOT/.opencode/plugins/fm-primary-pretool-check.js" \
+    "$(guard_tool_event "$repo" "$out" shell "echo ok")" || status=$?
+  expect_code 0 "$status" "V2 pretool should evaluate an allowed command"
+  jq -e '.outcome == "allowed"' "$out" >/dev/null \
+    || fail "pretool rejected an unrelated command: $(cat "$out")"
+  pass "OpenCode V2 pretool rejects a compound backgrounded arm as a typed Tool.Error"
 }
 
 test_v2_named_v1_factory_still_exported() {
@@ -395,7 +429,7 @@ const turn = await import(pathToFileURL("$ROOT/.opencode/plugins/fm-primary-turn
 const nudge = await import(pathToFileURL("$ROOT/.opencode/plugins/fm-primary-sessionstart-nudge.js").href);
 const pre = await import(pathToFileURL("$ROOT/.opencode/plugins/fm-primary-pretool-check.js").href);
 const cd = await import(pathToFileURL("$ROOT/.opencode/plugins/fm-primary-cd-check.js").href);
-for (const [name, mod] of Object.entries({ watch, turn, nudge, pre, cd })) {
+for (const [name, mod] of Object.entries({ watch, turn, nudge })) {
   if (typeof mod.default?.setup !== "function") throw new Error(name + " missing setup");
 }
 if (typeof pre.default.effect !== "function") throw new Error("pretool Effect entrypoint missing");
@@ -410,7 +444,7 @@ EOF
   status=$?
   expect_code 0 "$status" "dual export shape: $out"
   [ -z "$out" ] || fail "dual export check printed: $out"
-  pass "OpenCode plugins keep V1 named factories beside V2 setup"
+  pass "OpenCode plugins keep V1 named factories beside their V2 entrypoint"
 }
 
 test_v2_command_guard_reads_complete_tool_input() {
@@ -472,22 +506,40 @@ SH
 
 test_v2_pretool_helper_error_is_not_approval() {
   local repo out status result
+  guard_runtime_ready "unevaluable guard denial" || return 0
   repo="$TMP_ROOT/pretool-missing"
   make_primary "$repo"
   out="$TMP_ROOT/pretool-missing.json"
   status=0
-  drive_v2 "$ROOT/.opencode/plugins/fm-primary-pretool-check.js" "$(jq -nc \
-    --arg dir "$repo" --arg out "$out" \
-    '{
-      directory: $dir,
-      out: $out,
-      permissionEvent: { sessionID: "ses_lead", action: "shell", resources: ["true"], effect: "ask" }
-    }')" || status=$?
-  expect_code 0 "$status" "missing helper should still return from setup"
+  drive_v2_guard "$ROOT/.opencode/plugins/fm-primary-pretool-check.js" \
+    "$(guard_tool_event "$repo" "$out" shell "true")" || status=$?
+  expect_code 0 "$status" "missing helper should still evaluate"
   result=$(cat "$out")
-  printf '%s' "$result" | jq -e '.effect == "deny"' >/dev/null \
+  printf '%s' "$result" | jq -e '.outcome == "failed" and .tag == "Tool.Error"' >/dev/null \
     || fail "missing helper was treated as approval: $result"
-  pass "OpenCode V2 pretool denies when the guard helper cannot be evaluated"
+  pass "OpenCode V2 pretool rejects the call when the guard helper cannot be evaluated"
+}
+
+test_v2_guard_without_runtime_refuses_to_register() {
+  local out status
+  out=$(node --input-type=module 2>&1 <<EOF
+import { pathToFileURL } from "node:url";
+const mod = await import(pathToFileURL("$ROOT/.opencode/plugins/lib/fm-command-guard-v2.js").href);
+let registered = false;
+const ctx = { location: { directory: "$TMP_ROOT" }, tool: { hook() { registered = true; } } };
+try {
+  mod.setupCommandGuardEffectV2(ctx, { helper: "fm-cd-pretool-check.sh", fallbackReason: "x" }, null);
+} catch (error) {
+  if (!String(error.message).includes("npm ci --prefix .opencode/plugins")) throw error;
+  if (registered) throw new Error("a hook was registered without the runtime");
+  process.exit(0);
+}
+throw new Error("guard setup succeeded without the effect runtime");
+EOF
+)
+  status=$?
+  expect_code 0 "$status" "guard without runtime: $out"
+  pass "OpenCode V2 guard fails loudly with the install command when the effect runtime is missing"
 }
 
 test_v2_worker_worktree_is_inert_when_canonical_is_primary() {
@@ -633,11 +685,9 @@ for (const file of files) {
   const def = mod.default;
   if (!def || typeof def !== "object" || typeof def === "function") throw new Error(file + ": default is not a plain struct");
   if (typeof def.id !== "string" || !def.id) throw new Error(file + ": default.id missing");
-  if (typeof def.setup !== "function") throw new Error(file + ": default.setup missing");
+  const entry = file.includes("pretool") || file.includes("cd-check") ? "effect" : "setup";
+  if (typeof def[entry] !== "function") throw new Error(file + ": default." + entry + " missing");
   if (typeof def.server !== "function") throw new Error(file + ": default.server missing");
-  if ((file.includes("pretool") || file.includes("cd-check")) && typeof def.effect !== "function") {
-    throw new Error(file + ": default.effect missing");
-  }
   const factories = new Set();
   for (const [name, value] of Object.entries(mod)) {
     const factory = name === "default" ? value.server : value;
@@ -651,7 +701,7 @@ EOF
 )
   status=$?
   expect_code 0 "$status" "plugin export shape: $out"
-  pass "OpenCode plugin defaults are structs with id, setup, and a server wrapping the V1 factory"
+  pass "OpenCode plugin defaults are structs with id, a V2 entrypoint, and a server wrapping the V1 factory"
 }
 
 test_v2_watch_arm_does_not_cross_own_sessions
@@ -664,8 +714,9 @@ test_v2_watch_arm_cleanup_stops_children
 test_v2_turnend_queues_follow_up_for_bound_session
 test_v2_sessionstart_does_not_mark_failed_admission
 test_v2_sessionstart_ignores_foreign_session
-test_v2_pretool_registers_no_throwing_hooks
-test_v2_pretool_permission_deny
+test_v2_cd_guard_fails_bare_cd_with_typed_tool_error
+test_v2_pretool_fails_compound_backgrounded_arm_with_typed_tool_error
 test_v2_pretool_helper_error_is_not_approval
+test_v2_guard_without_runtime_refuses_to_register
 test_v2_command_guard_reads_complete_tool_input
 test_v2_named_v1_factory_still_exported

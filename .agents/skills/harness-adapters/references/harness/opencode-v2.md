@@ -25,6 +25,14 @@ Ancestry is the reliable path: an exact `shuvcode` process name, or a node inter
 The published `OPENCODE_*` env signals share the upstream opencode namespace and can survive a stored terminal environment, so they are corroborating evidence only and drive no verdict.
 Process detection is structural; it never executes a stranger binary during an ancestry walk.
 
+## Guard runtime
+
+Verified on 2026-09-18 with shuvcode v2.0.3-shuv.4 on Linux.
+Shuvcode resolves a project plugin's bare imports natively and shares none of its own modules, so `import("effect")` from `.opencode/plugins/` fails until the dependency pinned in `.opencode/plugins/package.json` is installed.
+Run `npm ci --prefix .opencode/plugins` in the primary checkout before starting a shuvcode lead.
+Without it shuvcode marks `fm-primary-cd-check` and `fm-primary-pretool-check` as `failed` with the install command in the error, and the lead's shell commands run unguarded, so do not proceed with a lead whose guard plugins failed.
+A project plugin cannot import shuvcode's own `Tool.Error` class; shuvcode matches the rejection on the `Tool.Error` tag, so the guards fail `execute.before` with a locally tagged error and the model receives the helper's reason as an ordinary tool failure.
+
 ## Dispatch
 
 Ship and scout launches use `shuvcode --standalone --auto --prompt`; `--standalone` gives each worker a leased server whose lifetime matches the session, while `--auto` auto-approves permissions that are not explicitly denied so an unattended worker never parks on a permission dialog.

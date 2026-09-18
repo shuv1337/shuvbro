@@ -61,17 +61,6 @@ export function createTurnTracker() {
   };
 }
 
-export function commandFromPermission(event) {
-  if (!event || typeof event !== "object") return "";
-  if (typeof event.metadata?.command === "string") return event.metadata.command;
-  const action = event.action;
-  if (action !== "shell" && action !== "bash") return "";
-  const resources = event.resources;
-  if (!Array.isArray(resources)) return "";
-  const first = resources.find((item) => typeof item === "string" && item);
-  return first || "";
-}
-
 export function sameDirectory(left, right) {
   const a = resolvePath(left);
   const b = resolvePath(right);
