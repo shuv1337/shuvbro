@@ -1,0 +1,4 @@
+{"tool":"shell","status":"completed","executed":false,"command":"bin/fm-harness.sh","error":null,"output":"opencode-v2\n"}
+{"tool":"shell","status":"completed","executed":false,"command":"bin/fm-lock.sh; echo exit=$?","error":null,"output":"lock acquired: harness pid 123751\nexit=0\n"}
+{"tool":"shell","status":"completed","executed":false,"command":"bin/fm-lock.sh status; cat state/.lock; echo; ps -o pid=,comm=,args= -p $(cat state/.lock) | cut -c1-150","error":null,"output":"lock: held by live harness pid 123751\n123751\n\n 123751 shuvcode        /home/shuv/.npm-global/lib/node_modules/shuvcode/node_modules/shuvcode-linux-x64/bin/shuvcode serve --stdio --port 0\n"}
+{"assistant_text":"DONE."}

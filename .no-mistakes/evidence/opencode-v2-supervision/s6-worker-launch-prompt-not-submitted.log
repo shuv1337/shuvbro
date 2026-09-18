@@ -1,0 +1,32 @@
+== exact launch command fm-spawn typed into the worker pane:
+shuvcode --standalone --auto --prompt "$('/home/shuv/.no-mistakes/worktrees/8a7692f99431/01M2SWKJ6RYA7MCSQDPVDT1SYF/bin/fm-operational-input.sh' encode launch-brief < '/tmp/fm-v2-live.hzRsvt/busycase/c/home/data/busy-live-v2/launch-brief.md')"
+== 20s after launch: busy record UNCHANGED
+== 45s after launch: busy record UNCHANGED
+== 75s after launch: busy record UNCHANGED
+== TUI screen at 75s (no key sent):
+                                                                  ▄                           ▄
+                                                             █▀▀▀ █▀▀█ █  █ █  █ █▀▀▀ █▀▀█ █▀▀█ █▀▀█
+                                                             ▀▀▀█ █░░█ █░░█ █░░█ █░░░ █░░█ █░░█ █▀▀▀
+                                                             ▀▀▀▀ ▀  ▀ ▀▀▀▀  ▀▀  ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀
+                                           ┃
+                                           ┃  supplied by the captain.
+                                           ┃  Use the serialized captain intent below plus any later words the
+                                           ┃  captain actually supplied as `--intent`; never include Firstmate
+                                           ┃  specification or other mixed Task content.
+                                           ┃
+                                           ┃  ## Captain intent authorized for --intent
+                                           ┃  brief for busy-live-v2
+                                           ┃
+                                           ┃  Firstmate-authored constraints, acceptance criteria, implementation
+                                           ┃  details, decisions, and tradeoffs are specification, not captain
+                                           ┃  intent.
+                                           ┃  The Definition of done's rule that `--intent` must be self-sufficient
+                                           ┃  still governs the string you pass: resolve any report, decision, or PR
+                                           ┃  the intent above refers to into its substance rather than passing the
+                                           ┃  pointer.
+                                           ┃
+                                           ┃  Build auto · GPT-5.6 Sol OpenAI · medium
+                                           ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+                                           /…/fm-v2-live.h…/busycase/c/wt:wt-live  shift+tab agents  ctrl+x p commands
+  ⊙ 4 MCP /mcps                                                                                                                                   2.0.3-shuv.4
+ ✓ Server  ○ UI  Theme  Tools  Experiments

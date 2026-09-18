@@ -1,0 +1,8 @@
+timestamp=2026-09-18T09:33:33.411Z level=WARN run=fff11c20 message="configured plugin path must be a directory" target=/home/shuv/repos/plannotator/apps/opencode-plugin/dist/server.js http.span=59 role=server
+timestamp=2026-09-18T09:33:33.418Z level=INFO run=fff11c20 msg="loading plugin" id=/home/shuv/.config/shuvcode/plugins/herdr-agent-state entrypoint=file:///home/shuv/.config/shuvcode/plugins/herdr-agent-state/index.ts ht
+timestamp=2026-09-18T09:33:33.421Z level=INFO run=fff11c20 msg="loading plugin" id=/home/shuv/.config/shuvcode/plugins/moshi-hooks.ts entrypoint=file:///home/shuv/.config/shuvcode/plugins/moshi-hooks.ts http.span=69 role
+timestamp=2026-09-18T09:33:33.423Z level=INFO run=fff11c20 msg="loading plugin" id=/tmp/fm-v2-live.hzRsvt/primary/.opencode/plugins/fm-primary-cd-check.js entrypoint=file:///tmp/fm-v2-live.hzRsvt/primary/.opencode/plugin
+timestamp=2026-09-18T09:33:33.464Z level=INFO run=fff11c20 msg="loading plugin" id=/tmp/fm-v2-live.hzRsvt/primary/.opencode/plugins/fm-primary-pretool-check.js entrypoint=file:///tmp/fm-v2-live.hzRsvt/primary/.opencode/p
+timestamp=2026-09-18T09:33:33.465Z level=INFO run=fff11c20 msg="loading plugin" id=/tmp/fm-v2-live.hzRsvt/primary/.opencode/plugins/fm-primary-sessionstart-nudge.js entrypoint=file:///tmp/fm-v2-live.hzRsvt/primary/.openc
+timestamp=2026-09-18T09:33:33.467Z level=INFO run=fff11c20 msg="loading plugin" id=/tmp/fm-v2-live.hzRsvt/primary/.opencode/plugins/fm-primary-turnend-guard.js entrypoint=file:///tmp/fm-v2-live.hzRsvt/primary/.opencode/p
+timestamp=2026-09-18T09:33:33.476Z level=INFO run=fff11c20 msg="loading plugin" id=/tmp/fm-v2-live.hzRsvt/primary/.opencode/plugins/fm-primary-watch-arm.js entrypoint=file:///tmp/fm-v2-live.hzRsvt/primary/.opencode/plugi

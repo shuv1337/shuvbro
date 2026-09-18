@@ -1,0 +1,3 @@
+{"tool": "shell", "status": "completed", "command": "ps -o pid=,comm=,args= -p $PPID | cut -c1-150", "error": null, "output": "2401474 shuvcode        /home/shuv/.npm-global/lib/node_modules/shuvcode/node_modules/shuvcode-linux-x64/bin/shuvcode serve --service\n"}
+{"tool": "shell", "status": "completed", "command": "bin/fm-lock.sh; echo exit=$?", "error": null, "output": "error: cannot locate harness process in ancestry\nexit=1\n"}
+{"tool": "shell", "status": "completed", "command": "bin/fm-lock.sh status", "error": null, "output": "lock: stale (pid 570582 dead or not a harness)\n"}

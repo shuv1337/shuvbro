@@ -1,0 +1,55 @@
+02:40:37 before launch: unknown source-mismatch turn-ended=no
+02:40:37 unknown source-mismatch turn-ended=no
+== worker TUI still alive after the turn:
+pane_pid=163539 cmd=node dead=0
+== TUI screen:
+                                                                  ▄                           ▄
+                                                             █▀▀▀ █▀▀█ █  █ █  █ █▀▀▀ █▀▀█ █▀▀█ █▀▀█
+                                                             ▀▀▀█ █░░█ █░░█ █░░█ █░░░ █░░█ █░░█ █▀▀▀
+                                                             ▀▀▀▀ ▀  ▀ ▀▀▀▀  ▀▀  ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀
+                                           ┃
+                                           ┃  Use the shell tool to run exactly: sleep 10; echo worker-done   Then
+                                           ┃  reply DONE.
+                                           ┃
+                                           ┃  Build auto · GPT-5.6 Sol OpenAI · medium
+                                           ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+                                           /…/fm-v2-live.h…/busycase/c/wt:wt-live  shift+tab agents  ctrl+x p commands
+  ⊙ 4 MCP /mcps                                                                                                                                   2.0.3-shuv.4
+ ✓ Server  ○ UI  Theme  Tools  Experiments
+== busy record:
+v1 gen=g1789724161.132412.9520 seq=5 state=idle source=test-reset event=reset ts=1789724437
+02:42:03 TUI launched with --prompt ~3 min ago, no key sent; busy record unchanged: v1 gen=g1789724161.132412.9520 seq=5 state=idle source=test-reset event=reset ts=1789724437
+02:42:03 sending Enter to the TUI
+02:42:03 unknown source-mismatch turn-ended=no
+02:42:03 busy opencode-plugin turn-ended=no
+02:42:17 idle opencode-plugin turn-ended=yes
+== worker TUI still alive after the turn:
+pane_pid=163539 cmd=node dead=0
+== TUI screen:
+  ┃                                                                                                                     Run sleep command and confirm
+  ┃  Use the shell tool to run exactly: sleep 10; echo worker-done   Then reply DONE.                                   completion
+  ┃
+                                                                                                                        ▼ Quota
+     + Thought: Planning exact shell execution · 678ms                                                                   ▶ • ChatGPT Pro 20x              98%
+                                                                                                                         ▶ • Claude                        6%
+  ┃                                                                                                                      ▶ • xAI Tier 7                   75%
+  ┃  $ sleep 10; echo worker-done                                                                                        ▶ • Google Google AI Pro         80%
+  ┃
+  ┃  worker-done                                                                                                        Context
+  ┃                                                                                                                     16,232 tokens
+  ┃  Command exited with code 0.                                                                                        4% used
+  ┃
+                                                                                                                        ▼ MCP
+     DONE                                                                                                               • cua-driver                Connected
+                                                                                                                        • executor                  Connected
+     Build · GPT-5.6 Sol · 14.3s · 27.4 tok/s                                                                           • macos-cua                 Connected
+                                                                                                                        • skills-mcp                Connected
+  ┃
+  ┃
+  ┃
+  ┃  Build auto · GPT-5.6 Sol OpenAI · medium                                                                           /…/fm-v2-live.h…/busycase/c/wt:wt-live
+  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+  /tmp/fm-v2-live.hzRsvt/busycase/c/wt:wt-live                                         16.2K (4%)  ctrl+x p commands    shuvcode 2.0.3-shuv.4
+ ✓ Server  ○ UI  Theme  Tools  Experiments
+== busy record:
+v1 gen=g1789724161.132412.9520 seq=7 state=idle source=opencode-plugin event=session-execution-succeeded ts=1789724537

@@ -1,0 +1,3 @@
+{"tool":"shell","status":"error","executed":false,"command":"echo hello","error":"every shell command is denied: the firstmate shell guards cannot load the effect runtime. Stop and ask the captain to run `npm ci --prefix .opencode/plugins` in the primary checkout, then restart this session.","output":null}
+{"tool":"shell","status":"completed","executed":false,"command":"cd projects/foo","error":null,"output":"(no output)"}
+{"assistant_text":"DONE."}

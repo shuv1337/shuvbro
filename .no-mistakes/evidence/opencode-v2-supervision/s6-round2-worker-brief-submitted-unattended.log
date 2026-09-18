@@ -1,0 +1,35 @@
+== round 2 re-drive (2026-09-18 ~02:59 PDT): real bin/fm-spawn.sh, real tmux (private socket), real shuvcode v2.0.3-shuv.4, sandbox fleet home under /tmp
+== fm-spawn output (no key was sent by the tester at any point):
+warning: /tmp/fm-v2-r2.zgj4mh/home/data/v2-live-r2/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode local-only - confirm its definition of done matches
+notice: v2-live-r2 ships mode=local-only while the standing posture for project is no-mistakes - less rigor than the captain's standing posture; proceed only on a current explicit captain instruction or an intake judgment you can state
+spawned v2-live-r2 harness=opencode-v2 kind=ship mode=local-only yolo=off window=firstmate:fm-v2-live-r2 worktree=/home/shuv/.treehouse/project-8e79c7/1/project
+== busy record polled after spawn returned:
+02:59:36 seq=2 state=busy source=opencode-plugin event=session-execution-started turn-ended=no
+02:59:51 seq=3 state=idle source=opencode-plugin event=session-execution-succeeded turn-ended=yes
+== final busy-state file:
+v1 gen=g1789725566.427933.27538 seq=3 state=idle source=opencode-plugin event=session-execution-succeeded ts=1789725587
+== worker process tree under the pane:
+bash,426465
+  `-treehouse,426677 get
+      |-bash,426703
+      |   `-node-MainThread,428439 /home/shuv/.local/bin/shuvcode --standalone --auto --prompt...
+      |       |-shuvcode,428467 --standalone --auto --prompt\342\201\243FIRSTM
+      |       |   |-shuvcode,428488 serve --stdio --port 0
+      |       |   |   |-cua-driver,428654 mcp --socket /run/plasma-wayland-krdp/cua-driver.sock
+== worker TUI after the turn:
+  ┃
+  ┃  $ sleep 12; echo worker-done
+  ┃
+  ┃  worker-done
+  ┃
+  ┃  Command exited with code 0.
+  ┃
+     DONE
+     Build · GPT-5.6 Sol · 18.1s · 39.8 tok/s
+  ┃
+  ┃
+  ┃
+  ┃  Build auto · GPT-5.6 Sol OpenAI · medium                                                                                                                   
+  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+  ~/.treehouse/project-8e79c7/1/project                                                                                        17.5K (4%)  ctrl+x p commands    
+ ✓ Server  ○ UI  Theme  Tools  Experiments

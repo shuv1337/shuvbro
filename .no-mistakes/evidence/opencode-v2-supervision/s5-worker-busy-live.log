@@ -1,0 +1,20 @@
+spawn exit=0
+== launch command sent to the worker pane:
+shuvcode --standalone --auto --prompt
+0
+== classify after spawn: busy fm-spawn
+02:36:01.952 busy fm-spawn turn-ended=no
+02:36:03.463 busy opencode-plugin turn-ended=no
+run exit=0
+02:36:17.548 final: busy opencode-plugin turn-ended=yes
+== busy record:
+busy-live-v2.busy-gen
+busy-live-v2.busy-state
+busy-live-v2.busy-state.lock
+busy-live-v2.meta
+busy-live-v2.turn-ended
+g1789724161.132412.9520
+v1 gen=g1789724161.132412.9520 seq=2 state=busy source=opencode-plugin event=session-execution-started ts=1789724163
+== worker tool calls:
+{"status":"completed","command":"sleep 12; echo worker-done","output":"worker-done\n"}
+== worker worktree git status:

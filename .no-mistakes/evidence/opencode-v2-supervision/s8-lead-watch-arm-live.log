@@ -1,0 +1,26 @@
+== before: watcher processes for this home: 0; beacon: none
+02:44:50 lead prompt submitted
+02:44:52 watcher armed after the lead turn ended:
+204619 bash /tmp/fm-v2-live.hzRsvt/primary/bin/fm-watch-arm.sh --restart
+204687 bash /tmp/fm-v2-live.hzRsvt/primary/bin/fm-watch.sh
+arm ancestry:
+ 204619 bash            bash /tmp/fm-v2-live.hzRsvt/primary/bin/fm-watch-arm.sh --restart
+ 203742 shuvcode        /home/shuv/.npm-global/lib/node_modules/shuvcode/node_modules/shuvcode-linux-x64/bin/shuvcode serve --stdio --port 0
+ 203731 shuvcode        /home/shuv/.npm-global/lib/node_modules/shuvcode/node_modules/shuvcode-linux-x64/bin/shuvcode --standalone --auto --
+beacon: -rw-r--r-- 1 shuv shuv 0 Sep 18 02:44 /tmp/fm-v2-live.hzRsvt/primary/state/.last-watcher-beat
+== TUI screen:
+  ┃                                                                                                                   
+  ┃  Reply with the single word READY and do nothing else.
+  ┃                                                                                                                   
+                                                                                                                      
+     READY                                                                                                            
+                                                                                                                      
+     Build · GPT-5.6 Sol · 1.8s · 24.5 tok/s                                                                          
+                                                                                                                      
+                                                                                                                      
+                                                                                                                      
+                                                                                                                      
+                                                                                                                      
+                                                                                                                      
+                                                                                                                      
+== after lead exit: watcher processes for this home: 0
