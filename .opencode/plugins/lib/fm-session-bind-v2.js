@@ -4,12 +4,6 @@ export function createSessionBinder(ctx) {
   const bound = new Set();
   const inflight = new Map();
 
-  function remember(sessionID) {
-    if (!sessionID) return;
-    if (bound.size > 0 && !bound.has(sessionID)) return;
-    bound.add(sessionID);
-  }
-
   async function owns(sessionID) {
     if (!sessionID) return false;
     if (bound.size > 0 && !bound.has(sessionID)) return false;
@@ -37,5 +31,5 @@ export function createSessionBinder(ctx) {
     if (type === "session.created" && createdOwnsThisLocation(event, ctx)) await owns(sessionID);
   }
 
-  return { owns, remember, observe, bound };
+  return { owns, observe, bound };
 }

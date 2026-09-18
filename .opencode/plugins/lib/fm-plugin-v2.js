@@ -61,12 +61,6 @@ export function createTurnTracker() {
   };
 }
 
-export function sameDirectory(left, right) {
-  const a = resolvePath(left);
-  const b = resolvePath(right);
-  return Boolean(a) && a === b;
-}
-
 export function createdOwnsThisLocation(event, ctx) {
   if (eventParentID(event)) return false;
   const sessionDir = eventLocationDirectory(event);

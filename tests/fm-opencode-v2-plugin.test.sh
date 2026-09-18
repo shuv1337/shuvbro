@@ -72,7 +72,7 @@ const ctx = {
   },
 };
 
-if (spec.lockFile) writeFileSync(spec.lockFile, String(process.pid));
+if (spec.lockFile) writeFileSync(spec.lockFile, String(spec.lockPid ?? process.pid));
 const cleanup = await mod.default.setup(ctx);
 await new Promise((resolve) => setTimeout(resolve, 50));
 for (const event of spec.events || []) {
@@ -541,6 +541,48 @@ SH
   pass "OpenCode V2 watch-arm stays inert unless this session owns the fleet lock"
 }
 
+test_v2_watch_arm_rejects_foreign_live_lock_owner() {
+  local repo log out status foreign
+  repo="$TMP_ROOT/watch-arm-foreign-lock"
+  make_primary "$repo"
+  cat > "$repo/bin/fm-watch-arm.sh" <<'SH'
+#!/usr/bin/env bash
+printf 'armed\n' >> "${FM_ARM_LOG:?}"
+printf 'watcher: healthy pid=1 (beacon 0s)\n'
+SH
+  cat > "$repo/bin/fm-operational-input.sh" <<'SH'
+#!/usr/bin/env bash
+cat
+SH
+  chmod +x "$repo/bin/fm-watch-arm.sh" "$repo/bin/fm-operational-input.sh"
+  log="$TMP_ROOT/watch-arm-foreign-lock.log"
+  out="$TMP_ROOT/watch-arm-foreign-lock.json"
+  sleep 60 &
+  foreign=$!
+  status=0
+  FM_ARM_LOG="$log" drive_v2 "$ROOT/.opencode/plugins/fm-primary-watch-arm.js" "$(jq -nc \
+    --arg dir "$repo" --arg out "$out" --arg lock "$repo/state/.lock" --argjson pid "$foreign" \
+    '{
+      directory: $dir,
+      out: $out,
+      lockFile: $lock,
+      lockPid: $pid,
+      settleMs: 800,
+      sessions: { ses_lead: { id: "ses_lead", location: { directory: $dir } } },
+      events: [
+        { type: "session.created", data: { sessionID: "ses_lead", location: { directory: $dir } } },
+        { type: "session.execution.succeeded", data: { sessionID: "ses_lead" } }
+      ]
+    }')" || status=$?
+  kill -0 "$foreign" 2>/dev/null || fail "foreign lock owner exited before the check; the lock pid was not live"
+  kill "$foreign" 2>/dev/null
+  wait "$foreign" 2>/dev/null
+  expect_code 0 "$status" "foreign-lock V2 watch-arm should stay inert"
+  [ "$(cat "$repo/state/.lock")" = "$foreign" ] || fail "fixture did not record the foreign lock pid"
+  [ ! -f "$log" ] || fail "a session whose fleet lock names a foreign live pid armed the watcher: $(cat "$log")"
+  pass "OpenCode V2 watch-arm stays inert when the fleet lock names a live pid outside this process ancestry"
+}
+
 test_v2_child_session_does_not_bind_or_arm() {
   local repo log out status
   repo="$TMP_ROOT/watch-arm-child"
@@ -630,6 +672,36 @@ EOF
   status=$?
   expect_code 0 "$status" "guard without runtime: $out"
   pass "OpenCode V2 guards deny every primary shell call with the install command when the effect runtime is missing"
+}
+
+test_v2_guard_surfaces_effect_import_failure() {
+  local repo lib out status
+  repo="$TMP_ROOT/import-failure-primary"
+  lib="$TMP_ROOT/import-failure-lib"
+  make_primary "$repo"
+  mkdir -p "$lib"
+  cp "$ROOT/.opencode/plugins/lib/"*.js "$lib/"
+  out=$(env -u NODE_PATH PRIMARY="$repo" LIB="$lib" node --input-type=module 2>&1 <<'EOF'
+import { pathToFileURL } from "node:url";
+const mod = await import(pathToFileURL(process.env.LIB + "/fm-command-guard-v2.js").href);
+const entry = mod.commandGuardEntrypoint({ helper: "fm-cd-pretool-check.sh", fallbackReason: "x" });
+if (entry.effect || typeof entry.setup !== "function") throw new Error("an unresolvable effect runtime must not offer the Effect entrypoint");
+const hooks = [];
+await entry.setup({
+  location: { directory: process.env.PRIMARY },
+  permission: { async hook(name, callback) { hooks.push({ name, callback }); } },
+});
+const event = { sessionID: "ses_lead", action: "shell", resources: ["git status"], effect: "allow" };
+for (const hook of hooks) if (hook.name === "evaluate") await hook.callback(event);
+if (event.effect !== "deny") throw new Error("primary shell call was not denied: " + JSON.stringify(event));
+if (!event.message.includes("npm ci --prefix .opencode/plugins")) throw new Error("denial lacks the install command: " + event.message);
+const reported = event.message.split("Import error: ")[1] || "";
+if (!/effect/.test(reported)) throw new Error("denial lacks the underlying import error: " + event.message);
+EOF
+)
+  status=$?
+  expect_code 0 "$status" "guard import failure: $out"
+  pass "OpenCode V2 guards surface the underlying effect import error in the primary shell denial"
 }
 
 test_v2_worker_worktree_is_inert_when_canonical_is_primary() {
@@ -797,6 +869,7 @@ EOF
 test_v2_watch_arm_does_not_cross_own_sessions
 test_v2_watch_arm_same_location_binds_only_first_session
 test_v2_watch_arm_requires_lock_ownership
+test_v2_watch_arm_rejects_foreign_live_lock_owner
 test_v2_child_session_does_not_bind_or_arm
 test_v2_worker_worktree_is_inert_when_canonical_is_primary
 test_v2_binder_releases_deleted_lead_session
@@ -810,5 +883,6 @@ test_v2_cd_guard_fails_bare_cd_with_typed_tool_error
 test_v2_pretool_fails_compound_backgrounded_arm_with_typed_tool_error
 test_v2_pretool_helper_error_is_not_approval
 test_v2_guard_without_runtime_denies_every_primary_shell_call
+test_v2_guard_surfaces_effect_import_failure
 test_v2_command_guard_reads_complete_tool_input
 test_v2_named_v1_factory_still_exported
