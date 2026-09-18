@@ -1,0 +1,8 @@
+# bin/fm-bootstrap.sh under a process named shuvcode, primary clone WITHOUT .opencode/plugins/node_modules
+opencode-v2
+NEEDS_GH_AUTH
+TANGLE: primary checkout on feature branch 'main' (expected 'opencode-v2-supervision'); the work is safe on that ref - restore the primary with: git -C /tmp/nm-v2live.myxbh9/primary2 checkout opencode-v2-supervision, then re-validate the branch in a proper worktree
+MISSING: OpenCode V2 plugin runtime (install: npm ci --prefix /tmp/nm-v2live.myxbh9/primary2/.opencode/plugins)
+
+# same, after node_modules/effect present: grep 'plugin runtime' =>
+(no MISSING line)

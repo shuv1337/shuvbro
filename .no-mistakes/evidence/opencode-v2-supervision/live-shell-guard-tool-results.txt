@@ -1,0 +1,43 @@
+# Real shuvcode v2.0.8-shuv.1 standalone server, project plugins loaded from an isolated primary clone, free model opencode/muse-spark-1.3-contributor-free
+
+## Clone WITHOUT effect installed: shell tool call result
+{
+ "input": {
+  "command": "echo hello-from-shell"
+ },
+ "status": "error",
+ "error": {
+  "type": "permission.rejected",
+  "message": "every shell command is denied: the firstmate shell guards cannot load the effect runtime. Stop and ask the captain to run `npm ci --prefix .opencode/plugins` in the primary checkout, then restart this session. Import error: Cannot find package 'effect' imported from /tmp/nm-v2live.myxbh9/primary2/.opencode/plugins/lib/fm-command-guard-v2.js"
+ }
+}
+
+## Clone WITH effect installed: first two shell tool calls
+{
+ "input": {
+  "command": "echo guard-ok"
+ },
+ "status": "completed",
+ "content": [
+  {
+   "type": "text",
+   "text": "guard-ok\n"
+  },
+  {
+   "type": "text",
+   "text": "Command exited with code 0."
+  }
+ ],
+ "error": null
+}
+{
+ "input": {
+  "command": "cd /tmp"
+ },
+ "status": "error",
+ "content": null,
+ "error": {
+  "type": "unknown",
+  "message": "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\"},\"systemMessage\":\"[persistent-cd] a persistent top-level directory change in the primary firstmate checkout is blocked; it would move the shell out of the home so a later firstmate-owned command runs inside a project clone. Reach the target without moving the shell - use git -C <dir> or an absolute path on the command itself - or scope the cd to a subshell like (cd <dir> && ...).\"}"
+ }
+}

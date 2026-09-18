@@ -1,0 +1,9 @@
+ok - fm-harness.sh: a shuvcode binary ancestry prints opencode-v2
+ok - fm-harness.sh: the shuvcode node launcher prints opencode-v2 on linux and macos shapes
+ok - fm-harness.sh: shared service is rejected while standalone server is accepted
+ok - fm-harness.sh: a real V1 opencode still prints opencode
+ok - fm-harness.sh: the opencode2 beta and unrelated node processes are returned as unknown
+ok - fm-harness.sh: ambient OPENCODE markers never misidentify a process tree
+ok - fm-harness.sh: an exported CLAUDECODE keeps the marker layer's existing precedence
+ok - fm-harness.sh: the walk finds shuvcode several ancestors up
+ok - fm-bootstrap.sh: a shuvcode primary reports its missing plugin runtime

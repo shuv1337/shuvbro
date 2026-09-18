@@ -1,0 +1,26 @@
+## A. Real live shuvcode processes on this host, classified by fm_shuvcode_process_matches (real ps output)
+pid=2401474 comm=shuvcode args='/home/shuv/.npm-global/lib/node_modules/shuvcode/node_modules/shuvcode-linux-x64/bin/shuvcode serve --service' => REJECTED
+pid=2913617 comm=shuvcode args='/home/shuv/.npm-global/lib/node_modules/shuvcode/node_modules/shuvcode-linux-x64/bin/shuvcode' => ELIGIBLE
+pid=3775811 comm=shuvcode args='/home/shuv/.npm-global/lib/node_modules/shuvcode/node_modules/shuvcode-linux-x64/bin/shuvcode' => ELIGIBLE
+pid=2913609 comm=node-MainThread args='node /home/shuv/.local/bin/shuvcode' => ELIGIBLE
+pid=3767501 comm=bash args='/usr/bin/bash -c source /home/shuv/.claude/shell-snapshots/snapshot-bash-1789763662317-dzwnb4.sh 2>/dev/null || true && shopt -u extglob 2>/' => REJECTED
+pid=3767506 comm=bash args='/usr/bin/bash -c source /home/shuv/.claude/shell-snapshots/snapshot-bash-1789763662317-dzwnb4.sh 2>/dev/null || true && shopt -u extglob 2>/' => REJECTED
+pid=3775778 comm=node-MainThread args='node /home/shuv/.local/bin/shuvcode' => ELIGIBLE
+
+## B. fm-harness.sh run beneath a real orphaned process whose executable is named shuvcode (comm=shuvcode), varying argv
+[standalone TUI] process: shuvcode        /tmp/tmp.Wgfq7YpeJ3/shuvcode-bin/shuvcode -c sleep 0.3; ps -o comm=,args= -p $$ > /tmp/tmp.Wgfq7YpeJ3/out.7107.ps; /home/shuv/.no-mistakes/worktrees/0f5566f94d1c/01M2V37V3PAZ7H726B8BGM5YCZ/bin/fm-harness.sh > /tmp/tmp.Wgfq7YpeJ3/out.7107 2>&1 shuvcode
+    fm-harness.sh => opencode-v2
+[standalone serve --stdio] process: shuvcode        /tmp/tmp.Wgfq7YpeJ3/shuvcode-bin/shuvcode -c sleep 0.3; ps -o comm=,args= -p $$ > /tmp/tmp.Wgfq7YpeJ3/out.9479.ps; /home/shuv/.no-mistakes/worktrees/0f5566f94d1c/01M2V37V3PAZ7H726B8BGM5YCZ/bin/fm-harness.sh > /tmp/tmp.Wgfq7YpeJ3/out.9479 2>&1 shuvcode serve --stdio
+    fm-harness.sh => opencode-v2
+[serve --service] process: shuvcode        /tmp/tmp.Wgfq7YpeJ3/shuvcode-bin/shuvcode -c sleep 0.3; ps -o comm=,args= -p $$ > /tmp/tmp.Wgfq7YpeJ3/out.24072.ps; /home/shuv/.no-mistakes/worktrees/0f5566f94d1c/01M2V37V3PAZ7H726B8BGM5YCZ/bin/fm-harness.sh > /tmp/tmp.Wgfq7YpeJ3/out.24072 2>&1 shuvcode serve --service
+    fm-harness.sh => unknown
+[--service before serve] process: shuvcode        /tmp/tmp.Wgfq7YpeJ3/shuvcode-bin/shuvcode -c sleep 0.3; ps -o comm=,args= -p $$ > /tmp/tmp.Wgfq7YpeJ3/out.9803.ps; /home/shuv/.no-mistakes/worktrees/0f5566f94d1c/01M2V37V3PAZ7H726B8BGM5YCZ/bin/fm-harness.sh > /tmp/tmp.Wgfq7YpeJ3/out.9803 2>&1 shuvcode --service serve
+    fm-harness.sh => unknown
+[serve --port 1 --service] process: shuvcode        /tmp/tmp.Wgfq7YpeJ3/shuvcode-bin/shuvcode -c sleep 0.3; ps -o comm=,args= -p $$ > /tmp/tmp.Wgfq7YpeJ3/out.2403.ps; /home/shuv/.no-mistakes/worktrees/0f5566f94d1c/01M2V37V3PAZ7H726B8BGM5YCZ/bin/fm-harness.sh > /tmp/tmp.Wgfq7YpeJ3/out.2403 2>&1 shuvcode serve --port 4096 --service
+    fm-harness.sh => unknown
+[serve --hostname x --service --print-logs] process: shuvcode        /tmp/tmp.Wgfq7YpeJ3/shuvcode-bin/shuvcode -c sleep 0.3; ps -o comm=,args= -p $$ > /tmp/tmp.Wgfq7YpeJ3/out.29315.ps; /home/shuv/.no-mistakes/worktrees/0f5566f94d1c/01M2V37V3PAZ7H726B8BGM5YCZ/bin/fm-harness.sh > /tmp/tmp.Wgfq7YpeJ3/out.29315 2>&1 shuvcode serve --hostname 127.0.0.1 --service --print-logs
+    fm-harness.sh => unknown
+[adversarial: --service-name is NOT the service token] process: shuvcode        /tmp/tmp.Wgfq7YpeJ3/shuvcode-bin/shuvcode -c sleep 0.3; ps -o comm=,args= -p $$ > /tmp/tmp.Wgfq7YpeJ3/out.926.ps; /home/shuv/.no-mistakes/worktrees/0f5566f94d1c/01M2V37V3PAZ7H726B8BGM5YCZ/bin/fm-harness.sh > /tmp/tmp.Wgfq7YpeJ3/out.926 2>&1 shuvcode serve --service-name=foo
+    fm-harness.sh => opencode-v2
+[adversarial: --services substring] process: shuvcode        /tmp/tmp.Wgfq7YpeJ3/shuvcode-bin/shuvcode -c sleep 0.3; ps -o comm=,args= -p $$ > /tmp/tmp.Wgfq7YpeJ3/out.1262.ps; /home/shuv/.no-mistakes/worktrees/0f5566f94d1c/01M2V37V3PAZ7H726B8BGM5YCZ/bin/fm-harness.sh > /tmp/tmp.Wgfq7YpeJ3/out.1262 2>&1 shuvcode serve --services
+    fm-harness.sh => opencode-v2

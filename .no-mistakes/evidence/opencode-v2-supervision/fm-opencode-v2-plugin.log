@@ -1,0 +1,20 @@
+ok - OpenCode V2 watch-arm binds one location and does not cross-own
+ok - OpenCode V2 watch-arm binds only the first root session at a location
+ok - OpenCode V2 watch-arm stays inert unless this session owns the fleet lock
+ok - OpenCode V2 watch-arm stays inert when the fleet lock names a live pid outside this process ancestry
+ok - OpenCode V2 session binding proves root parentage before arming
+ok - OpenCode V2 watch-arm stays inert in a worker worktree whose project canonical is the primary
+ok - OpenCode V2 binder releases a deleted lead so a replacement root session binds
+ok - OpenCode V2 turnend treats one execution terminal event per busy period as one turn end
+ok - OpenCode plugin defaults are structs with id, a V2 entrypoint, and a server wrapping the V1 factory
+ok - OpenCode V2 watch-arm setup returns cleanup
+ok - OpenCode V2 turnend queues a follow-up only for the bound session
+ok - OpenCode V2 sessionstart retries after failed admission and handles resume
+ok - OpenCode V2 sessionstart ignores sessions at another location
+ok - OpenCode V2 cd-guard rejects a bare cd as a typed Tool.Error and passes other commands
+ok - OpenCode V2 pretool rejects a compound backgrounded arm as a typed Tool.Error
+ok - OpenCode V2 pretool rejects the call when the guard helper cannot be evaluated
+ok - OpenCode V2 guards deny every primary shell call with the install command when the effect runtime is missing
+ok - OpenCode V2 guards surface the underlying effect import error in the primary shell denial
+ok - OpenCode V2 command guards read the complete shell tool input
+ok - OpenCode plugins keep V1 named factories beside their V2 entrypoint
