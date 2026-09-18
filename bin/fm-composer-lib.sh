@@ -390,9 +390,12 @@ FM_COMPOSER_SHELL_PROMPT_GLYPHS=$(printf '%s\n' '>' '$' '%' '#')
 FM_COMPOSER_IDLE_RE_DEFAULT='^Type a message\.\.\.$|^Ask anything\.\.\.|^Plan, search, build anything$|^Add a follow-up$'
 
 # Opencode draws a mode/model footer line INSIDE its left-bar composer
-# ("Build · GPT-5.5 Fast OpenAI · high"). It is composer furniture, not typed
-# text, and only the run's LAST row is ever matched against it.
-FM_COMPOSER_LEFTBAR_FOOTER_RE_DEFAULT='^(Build|Plan)[[:space:]]+·[[:space:]]+'
+# ("Build · GPT-5.5 Fast OpenAI · high"; shuvcode under --auto draws
+# "Build auto · GPT-5.6 Sol OpenAI · medium"). It is composer furniture, not
+# typed text, and only the run's LAST row is ever matched against it. The match
+# reads the PLAIN row: shuvcode v2.0.3-shuv.4 draws the `auto` word and the `·`
+# separators in a muted truecolor that ghost stripping removes (verified live).
+FM_COMPOSER_LEFTBAR_FOOTER_RE_DEFAULT='^(Build|Plan)([[:space:]]+auto)?[[:space:]]+·[[:space:]]+'
 # omp (Oh My Pi) draws a one-row status line directly BELOW its borderless
 # composer: an identity or spinner cell, then middle-dot separated model, path,
 # git, and context cells. Verified live through Herdr on omp 18.1.11:
@@ -1024,7 +1027,7 @@ _fm_composer_classify_bare_wrap() {  # <screen> <styled> <glyph-row> <cursor-row
 # can prove it real, unknown otherwise.
 _fm_composer_classify_leftbar() {  # <screen> <styled> <first-row> <last-row>
   local screen=$1 styled=$2 first=$3 last=$4
-  local row raw content pending_seen=0 footer_re leading_blank=1 placeholder_position=0
+  local row raw content footer pending_seen=0 footer_re leading_blank=1 placeholder_position=0
   footer_re=${FM_COMPOSER_LEFTBAR_FOOTER_RE:-$FM_COMPOSER_LEFTBAR_FOOTER_RE_DEFAULT}
   row=$first
   while [ "$row" -le "$last" ]; do
@@ -1045,9 +1048,15 @@ _fm_composer_classify_leftbar() {  # <screen> <styled> <first-row> <last-row>
        && fm_composer_idle_matches "$content" "${FM_COMPOSER_IDLE_RE:-$FM_COMPOSER_IDLE_RE_DEFAULT}" insensitive; then
       row=$((row + 1)); continue
     fi
-    if [ "$row" -eq "$last" ] \
-       && fm_composer_idle_matches "$content" "$footer_re" sensitive; then
-      row=$((row + 1)); continue
+    if [ "$row" -eq "$last" ]; then
+      footer=$(_fm_composer_row_content "$raw" 0)
+      case "$footer" in
+        '┃'*) footer=${footer#┃} ;;
+      esac
+      fm_composer_normalize_trim_var footer
+      if fm_composer_idle_matches "$footer" "$footer_re" sensitive; then
+        row=$((row + 1)); continue
+      fi
     fi
     pending_seen=1
     row=$((row + 1))

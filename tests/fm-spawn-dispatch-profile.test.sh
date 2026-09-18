@@ -401,13 +401,111 @@ test_claude_threads_model_and_effort() {
   pass "claude receives --model and --effort profile flags"
 }
 
+# Stateful shuvcode pane: shell -> launch typed -> (Enter) TUI with the brief
+# PRE-FILLED in its left-bar composer -> (Enter) brief submitted, composer empty.
+# The footer row carries the muted truecolor `auto` and `·` cells captured live
+# from shuvcode v2.0.3-shuv.4, so the composer read is the real styled shape.
+# Env knobs:
+#   FM_FAKE_V2_TUI=no       the TUI never appears after launch
+#   FM_FAKE_V2_SUBMIT=no    every Enter on the pre-filled composer is swallowed
+#   FM_FAKE_V2_SWALLOW_FIRST=yes  only the first such Enter is swallowed
+make_opencode_v2_tmux() {
+  local fakebin=$1
+  cat > "$fakebin/tmux" <<'SH'
+#!/usr/bin/env bash
+set -u
+state=$(cat "$FM_FAKE_V2_STATE" 2>/dev/null || true)
+footer=$'  \033[38;2;243;176;66m┃\033[38;2;255;255;255m  \033[38;2;243;176;66mBuild\033[38;2;255;255;255m \033[38;2;95;126;151mauto\033[38;2;255;255;255m \033[38;2;95;126;151m·\033[38;2;255;255;255m \033[38;2;214;222;235mGPT-5.6 Sol\033[38;2;255;255;255m \033[38;2;95;126;151mOpenAI\033[38;2;255;255;255m \033[38;2;95;126;151m·\033[38;2;255;255;255m medium\033[0m'
+fake_screen() {
+  case "$state" in
+    prefilled)
+      printf '  ┃\n  ┃  \033[38;2;255;255;255mRead the launch brief and follow it exactly.\033[0m\n  ┃\n%s\n  ╹▀▀▀▀▀▀▀▀▀▀▀▀\n' "$footer"
+      ;;
+    submitted)
+      printf '  ┃\n  ┃\n  ┃\n%s\n  ╹▀▀▀▀▀▀▀▀▀▀▀▀\n' "$footer"
+      ;;
+    *) printf 'shell starting\n$ \n' ;;
+  esac
+}
+case "$*" in
+  *"#{pane_current_path}"*) printf '%s\n' "${FM_FAKE_PANE_PATH:-}"; exit 0 ;;
+  *"#{cursor_y}"*) printf '1\n'; exit 0 ;;
+esac
+case "${1:-}" in
+  display-message) printf 'firstmate\n'; exit 0 ;;
+  send-keys)
+    prev= literal=
+    for arg in "$@"; do
+      if [ "$prev" = -l ]; then literal=$arg; break; fi
+      prev=$arg
+    done
+    if [ -n "$literal" ]; then
+      printf '%s\n' "$literal" >> "$FM_FAKE_LAUNCH_LOG"
+      case "$literal" in
+        *'shuvcode --standalone'*) printf 'launch-typed\n' > "$FM_FAKE_V2_STATE" ;;
+      esac
+      exit 0
+    fi
+    case " $* " in
+      *' Enter '*)
+        case "$state" in
+          launch-typed)
+            [ "${FM_FAKE_V2_TUI:-yes}" != yes ] || printf 'prefilled\n' > "$FM_FAKE_V2_STATE"
+            ;;
+          prefilled)
+            printf 'enter\n' >> "$FM_FAKE_V2_STATE.enters"
+            if [ "${FM_FAKE_V2_SUBMIT:-yes}" != yes ]; then
+              :
+            elif [ "${FM_FAKE_V2_SWALLOW_FIRST:-no}" = yes ] \
+               && [ "$(wc -l < "$FM_FAKE_V2_STATE.enters")" -eq 1 ]; then
+              :
+            else
+              printf 'submitted\n' > "$FM_FAKE_V2_STATE"
+            fi
+            ;;
+        esac
+        ;;
+    esac
+    exit 0
+    ;;
+  capture-pane)
+    start= end= prev=
+    for arg in "$@"; do
+      case "$prev" in
+        -S) start=$arg ;;
+        -E) end=$arg ;;
+      esac
+      case "$arg" in -S|-E) prev=$arg ;; *) prev= ;; esac
+    done
+    case "$start:$end" in
+      *[!0-9:]*|'':*|*:'') fake_screen ;;
+      *) fake_screen | awk -v start="$start" -v end="$end" \
+           'NR - 1 >= start && NR - 1 <= end' ;;
+    esac
+    exit 0
+    ;;
+esac
+exit 0
+SH
+  chmod +x "$fakebin/tmux"
+}
+
+run_opencode_v2_spawn() {  # <id> [fm-spawn args...]
+  local id=$1
+  shift
+  FM_FAKE_V2_STATE="$CASE_DIR/v2.state" \
+    FM_OPENCODE_V2_READY_POLLS=3 FM_OPENCODE_V2_POLL_INTERVAL=0 \
+    run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" "$@"
+}
+
 test_opencode_v2_launch_uses_auto_and_omits_model() {
   local rec id out status launch
   id=profile-opencode-v2-z9
   rec=$(make_spawn_case profile-opencode-v2 opencode-v2 "$id")
   read_case_record "$rec"
+  make_opencode_v2_tmux "$FAKEBIN_DIR"
 
-  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" --model some-model)
+  out=$(run_opencode_v2_spawn "$id" --model some-model)
   status=$?
   expect_code 0 "$status" "opencode-v2 ship spawn should succeed: $out"
   launch=$(cat "$LAUNCH_LOG")
@@ -416,6 +514,55 @@ test_opencode_v2_launch_uses_auto_and_omits_model() {
   assert_not_contains "$launch" "--model" \
     "opencode-v2 launch must not pass --model to the shuvcode root command"
   pass "opencode-v2 launches standalone shuvcode with --auto and no unsupported --model flag"
+}
+
+# shuvcode's --prompt only pre-fills the composer, so a worker whose brief is
+# never submitted sits idle forever. The spawn must leave the pane with the
+# brief submitted, and must retry a swallowed Enter without retyping.
+test_opencode_v2_spawn_submits_the_prefilled_brief() {
+  local rec id out status
+  id=profile-opencode-v2-submit-z11
+  rec=$(make_spawn_case profile-opencode-v2-submit opencode-v2 "$id")
+  read_case_record "$rec"
+  make_opencode_v2_tmux "$FAKEBIN_DIR"
+
+  out=$(FM_FAKE_V2_SWALLOW_FIRST=yes run_opencode_v2_spawn "$id")
+  status=$?
+  expect_code 0 "$status" "opencode-v2 spawn should submit its pre-filled brief: $out"
+  [ "$(cat "$CASE_DIR/v2.state")" = submitted ] \
+    || fail "opencode-v2 spawn left the launch brief unsubmitted in the composer"
+  [ "$(wc -l < "$CASE_DIR/v2.state.enters")" -eq 2 ] \
+    || fail "opencode-v2 spawn should retry a swallowed Enter exactly once, then stop"
+  [ "$(grep -c 'shuvcode --standalone' "$LAUNCH_LOG")" -eq 1 ] \
+    || fail "opencode-v2 spawn must never retype the launch"
+  pass "opencode-v2 spawn submits the pre-filled brief and retries a swallowed Enter"
+}
+
+test_opencode_v2_unsubmitted_brief_fails_loudly() {
+  local rec id out status
+  id=profile-opencode-v2-stuck-z12
+  rec=$(make_spawn_case profile-opencode-v2-stuck opencode-v2 "$id")
+  read_case_record "$rec"
+  make_opencode_v2_tmux "$FAKEBIN_DIR"
+
+  out=$(FM_FAKE_V2_SUBMIT=no run_opencode_v2_spawn "$id")
+  status=$?
+  [ "$status" -ne 0 ] || fail "a never-submitted opencode-v2 brief must fail the spawn: $out"
+  assert_contains "$out" "pre-filled launch brief could not be submitted" \
+    "unsubmitted opencode-v2 brief lacked a loud diagnostic"
+  assert_grep 'failed: shuvcode pre-filled launch brief could not be submitted' \
+    "$HOME_DIR/state/$id.status" "unsubmitted opencode-v2 brief left no supervisor-visible failure"
+
+  id=profile-opencode-v2-notui-z13
+  rec=$(make_spawn_case profile-opencode-v2-notui opencode-v2 "$id")
+  read_case_record "$rec"
+  make_opencode_v2_tmux "$FAKEBIN_DIR"
+  out=$(FM_FAKE_V2_TUI=no run_opencode_v2_spawn "$id")
+  status=$?
+  [ "$status" -ne 0 ] || fail "an opencode-v2 TUI that never shows its brief must fail the spawn: $out"
+  assert_contains "$out" "did not show its pre-filled launch brief" \
+    "missing opencode-v2 TUI lacked a loud diagnostic"
+  pass "opencode-v2 spawn fails loudly when the brief cannot be shown or submitted"
 }
 
 test_opencode_worker_keeps_tracked_plugins_package_json() {
@@ -1257,6 +1404,8 @@ test_active_dispatch_profile_allows_positional_harness
 test_active_dispatch_profile_allows_raw_launch_command
 test_claude_threads_model_and_effort
 test_opencode_v2_launch_uses_auto_and_omits_model
+test_opencode_v2_spawn_submits_the_prefilled_brief
+test_opencode_v2_unsubmitted_brief_fails_loudly
 test_opencode_worker_keeps_tracked_plugins_package_json
 test_codex_threads_model_and_effort
 test_codex_omits_invalid_max_effort

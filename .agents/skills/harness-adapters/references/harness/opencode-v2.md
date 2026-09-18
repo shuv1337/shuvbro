@@ -38,6 +38,8 @@ A project plugin cannot import shuvcode's own `Tool.Error` class; shuvcode match
 
 Ship and scout launches use `shuvcode --standalone --auto --prompt`; `--standalone` gives each worker a leased server whose lifetime matches the session, while `--auto` auto-approves permissions that are not explicitly denied so an unattended worker never parks on a permission dialog.
 The root command accepts only `--standalone`, `--server`, `--auto`, `--continue`, `--session`, `--prompt`, and a directory; it rejects `--model` with usage text and exit 1, so a requested model is not passed and the worker runs on the host's configured model.
+The interactive root command's `--prompt` only pre-fills the TUI composer and never submits it (verified live on shuvcode v2.0.3-shuv.4), so `bin/fm-spawn.sh` waits for the pre-filled left-bar composer and then submits it with Enter, retrying Enter only, until the shared composer classifier reads empty; a brief that never shows or never submits fails the spawn and closes the endpoint.
+Under `--auto` the composer footer reads `Build auto · <model> · <effort>` with the `auto` word and `·` separators in muted truecolor, so the classifier recognises that footer from the plain row rather than the ghost-stripped one.
 The worker wiring writes `.opencode/plugins/package.json` only when the project has none, so a project that tracks that file keeps its own copy.
 Secondmate launches are refused until that role is qualified.
 Busy state, exit command, interrupt, resume, model selection, and effort flags for this adapter have no verified facts yet; verify them before a control plan relies on them.

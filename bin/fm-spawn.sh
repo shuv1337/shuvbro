@@ -3033,6 +3033,53 @@ rovo_endpoint_cleanup() {
   fm_backend_kill "$BACKEND" "$T" "$tab_id" "fm-$ID" 2>/dev/null || true
 }
 
+# opencode-v2 (shuvcode): the root command's --prompt only PRE-FILLS the TUI
+# composer and never submits it (verified live on shuvcode v2.0.3-shuv.4: the
+# brief sat in the input box and the busy record stayed unchanged until a manual
+# Enter). So after launch the spawn waits for the pre-filled left-bar composer,
+# then submits it with Enter, retrying Enter only, until the shared classifier
+# reads the composer empty. The `╹▀` floor row is a launch-progress signal that
+# the TUI (not the pane shell) owns the screen; composer emptiness stays with
+# the shared classifier, like kimi and rovo.
+opencode_v2_composer_state() {
+  fm_backend_composer_state "$BACKEND" "$T" "$W" 2>/dev/null || true
+}
+
+opencode_v2_wait_for_prefill() {
+  local pane state i=0 max=${FM_OPENCODE_V2_READY_POLLS:-60} interval=${FM_OPENCODE_V2_POLL_INTERVAL:-0.5}
+  while [ "$i" -lt "$max" ]; do
+    pane=$(fm_backend_capture "$BACKEND" "$T" 120 "$W" 2>/dev/null || true)
+    if printf '%s\n' "$pane" | grep -Fq '╹▀'; then
+      state=$(opencode_v2_composer_state)
+      case "$state" in
+        pending|pending-unproven) return 0 ;;
+      esac
+    fi
+    i=$((i + 1))
+    [ "$i" -ge "$max" ] || sleep "$interval"
+  done
+  return 1
+}
+
+opencode_v2_submit_prefill() {
+  local i=0 max=${FM_OPENCODE_V2_SUBMIT_RETRIES:-3} interval=${FM_OPENCODE_V2_SUBMIT_SLEEP:-${FM_OPENCODE_V2_POLL_INTERVAL:-0.5}}
+  while [ "$i" -lt "$max" ]; do
+    spawn_send_key "$T" Enter || return 1
+    sleep "$interval"
+    [ "$(opencode_v2_composer_state)" != empty ] || return 0
+    i=$((i + 1))
+  done
+  return 1
+}
+
+# Same orphan hazard as rovo: a launched --auto worker with no published task
+# record must not outlive a failed spawn.
+opencode_v2_spawn_fail() {  # <detail>
+  printf 'failed: %s\n' "$1" >> "$STATE/$ID.status"
+  echo "error: $1; inspect window $T" >&2
+  rovo_endpoint_cleanup
+}
+
 if [ "$RELAUNCH" -eq 1 ]; then
   # No worktree is acquired: the recorded one is reused as-is. What must be
   # proven instead is that the adopted endpoint's shell is actually sitting in
@@ -4024,6 +4071,16 @@ if [ "$HARNESS" = rovo ]; then
   fi
   if ! rovo_wait_for_delivery; then
     rovo_spawn_fail "rovo brief pointer delivery was not confirmed in window $T"
+    exit 1
+  fi
+fi
+if [ "$HARNESS" = opencode-v2 ]; then
+  if ! opencode_v2_wait_for_prefill; then
+    opencode_v2_spawn_fail "shuvcode did not show its pre-filled launch brief in window $T"
+    exit 1
+  fi
+  if ! opencode_v2_submit_prefill; then
+    opencode_v2_spawn_fail "shuvcode pre-filled launch brief could not be submitted in window $T"
     exit 1
   fi
 fi
