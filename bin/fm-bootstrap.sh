@@ -1437,6 +1437,7 @@ detect_local_tools() {
 }
 
 detect_local_config() {
+  local own_harness
   # Worktree-tangle check: the firstmate primary checkout (FM_ROOT) must sit on its
   # default branch, not a feature branch (see fm-tangle-lib.sh). Scoped to the
   # primary only; detached-HEAD worktrees and secondmate homes never trip it.
@@ -1461,6 +1462,11 @@ detect_local_config() {
   # instead of failing at the first spawn.
   if [ "$crew" = cursor ] && ! fm_cursor_resolve_binary >/dev/null 2>&1; then
     echo "MISSING_MANUAL: cursor-agent (instructions: $(manual_install_url cursor-agent))"
+  fi
+  own_harness=$("$SCRIPT_DIR/fm-harness.sh" 2>/dev/null || true)
+  if [ "$own_harness" = opencode-v2 ] \
+    && [ ! -f "$FM_ROOT/.opencode/plugins/node_modules/effect/package.json" ]; then
+    echo "MISSING: OpenCode V2 plugin runtime (install: npm ci --prefix $FM_ROOT/.opencode/plugins)"
   fi
   crew_dispatch_validate
   if [ "${FM_BOOTSTRAP_VERBOSE_FACTS:-0}" = 1 ] \

@@ -72,6 +72,7 @@ const ctx = {
   },
 };
 
+if (spec.lockFile) writeFileSync(spec.lockFile, String(process.pid));
 const cleanup = await mod.default.setup(ctx);
 await new Promise((resolve) => setTimeout(resolve, 50));
 for (const event of spec.events || []) {
@@ -182,10 +183,11 @@ SH
   out="$TMP_ROOT/watch-arm-out.json"
   status=0
   FM_HOME="$home" FM_ROOT_OVERRIDE="$repo" FM_ARM_LOG="$log" drive_v2 "$ROOT/.opencode/plugins/fm-primary-watch-arm.js" "$(jq -nc \
-    --arg dir "$repo" --arg out "$out" \
+    --arg dir "$repo" --arg out "$out" --arg lock "$home/state/.lock" \
     '{
       directory: $dir,
       out: $out,
+      lockFile: $lock,
       settleMs: 800,
       sessions: {
         ses_other: { id: "ses_other", location: { directory: "/tmp/other-project" } }
@@ -198,10 +200,11 @@ SH
   [ ! -f "$log" ] || fail "foreign session armed the watcher: $(cat "$log")"
   status=0
   FM_HOME="$home" FM_ROOT_OVERRIDE="$repo" FM_ARM_LOG="$log" drive_v2 "$ROOT/.opencode/plugins/fm-primary-watch-arm.js" "$(jq -nc \
-    --arg dir "$repo" --arg out "$out" \
+    --arg dir "$repo" --arg out "$out" --arg lock "$home/state/.lock" \
     '{
       directory: $dir,
       out: $out,
+      lockFile: $lock,
       settleMs: 800,
       sessions: {
         ses_lead: { id: "ses_lead", location: { directory: $dir } }
@@ -243,10 +246,11 @@ SH
   out="$TMP_ROOT/watch-arm-cleanup.json"
   status=0
   FM_HOME="$home" FM_ROOT_OVERRIDE="$repo" drive_v2 "$ROOT/.opencode/plugins/fm-primary-watch-arm.js" "$(jq -nc \
-    --arg dir "$repo" --arg out "$out" \
+    --arg dir "$repo" --arg out "$out" --arg lock "$home/state/.lock" \
     '{
       directory: $dir,
       out: $out,
+      lockFile: $lock,
       cleanup: true,
       sessions: { ses_lead: { id: "ses_lead", location: { directory: $dir } } },
       events: [ { type: "session.execution.failed", data: { sessionID: "ses_lead", error: { name: "UnknownError" } } } ]
@@ -485,10 +489,11 @@ SH
   out="$TMP_ROOT/watch-arm-first.json"
   status=0
   FM_ARM_LOG="$log" drive_v2 "$ROOT/.opencode/plugins/fm-primary-watch-arm.js" "$(jq -nc \
-    --arg dir "$repo" --arg out "$out" \
+    --arg dir "$repo" --arg out "$out" --arg lock "$repo/state/.lock" \
     '{
       directory: $dir,
       out: $out,
+      lockFile: $lock,
       settleMs: 800,
       sessions: {
         ses_a: { id: "ses_a", location: { directory: $dir } },
@@ -503,6 +508,72 @@ SH
   expect_code 0 "$status" "same-location second session should run"
   [ ! -f "$log" ] || fail "second root session at the same location armed the watcher: $(cat "$log")"
   pass "OpenCode V2 watch-arm binds only the first root session at a location"
+}
+
+test_v2_watch_arm_requires_lock_ownership() {
+  local repo log out status
+  repo="$TMP_ROOT/watch-arm-read-only"
+  make_primary "$repo"
+  cat > "$repo/bin/fm-watch-arm.sh" <<'SH'
+#!/usr/bin/env bash
+printf 'armed\n' >> "${FM_ARM_LOG:?}"
+printf 'watcher: healthy pid=1 (beacon 0s)\n'
+SH
+  cat > "$repo/bin/fm-operational-input.sh" <<'SH'
+#!/usr/bin/env bash
+cat
+SH
+  chmod +x "$repo/bin/fm-watch-arm.sh" "$repo/bin/fm-operational-input.sh"
+  log="$TMP_ROOT/watch-arm-read-only.log"
+  out="$TMP_ROOT/watch-arm-read-only.json"
+  status=0
+  FM_ARM_LOG="$log" drive_v2 "$ROOT/.opencode/plugins/fm-primary-watch-arm.js" "$(jq -nc \
+    --arg dir "$repo" --arg out "$out" \
+    '{
+      directory: $dir,
+      out: $out,
+      settleMs: 800,
+      sessions: { ses_lead: { id: "ses_lead", location: { directory: $dir } } },
+      events: [ { type: "session.execution.succeeded", data: { sessionID: "ses_lead" } } ]
+    }')" || status=$?
+  expect_code 0 "$status" "read-only V2 watch-arm should stay inert"
+  [ ! -f "$log" ] || fail "a session without the fleet lock armed the watcher: $(cat "$log")"
+  pass "OpenCode V2 watch-arm stays inert unless this session owns the fleet lock"
+}
+
+test_v2_child_session_does_not_bind_or_arm() {
+  local repo log out status
+  repo="$TMP_ROOT/watch-arm-child"
+  make_primary "$repo"
+  cat > "$repo/bin/fm-watch-arm.sh" <<'SH'
+#!/usr/bin/env bash
+printf 'armed\n' >> "${FM_ARM_LOG:?}"
+printf 'watcher: healthy pid=1 (beacon 0s)\n'
+SH
+  cat > "$repo/bin/fm-operational-input.sh" <<'SH'
+#!/usr/bin/env bash
+cat
+SH
+  chmod +x "$repo/bin/fm-watch-arm.sh" "$repo/bin/fm-operational-input.sh"
+  log="$TMP_ROOT/watch-arm-child.log"
+  out="$TMP_ROOT/watch-arm-child.json"
+  status=0
+  FM_ARM_LOG="$log" drive_v2 "$ROOT/.opencode/plugins/fm-primary-watch-arm.js" "$(jq -nc \
+    --arg dir "$repo" --arg out "$out" --arg lock "$repo/state/.lock" \
+    '{
+      directory: $dir,
+      out: $out,
+      lockFile: $lock,
+      settleMs: 800,
+      sessions: { ses_child: { id: "ses_child", parentID: "ses_lead", location: { directory: $dir } } },
+      events: [
+        { type: "session.created", data: { sessionID: "ses_child", location: { directory: $dir } } },
+        { type: "session.execution.succeeded", data: { sessionID: "ses_child" } }
+      ]
+    }')" || status=$?
+  expect_code 0 "$status" "child-session V2 watch-arm should stay inert"
+  [ ! -f "$log" ] || fail "a child session bound the plugin and armed the watcher: $(cat "$log")"
+  pass "OpenCode V2 session binding proves root parentage before arming"
 }
 
 test_v2_pretool_helper_error_is_not_approval() {
@@ -622,10 +693,11 @@ SH
   out="$TMP_ROOT/rebind.json"
   status=0
   FM_ARM_LOG="$log" drive_v2 "$ROOT/.opencode/plugins/fm-primary-watch-arm.js" "$(jq -nc \
-    --arg dir "$repo" --arg out "$out" \
+    --arg dir "$repo" --arg out "$out" --arg lock "$repo/state/.lock" \
     '{
       directory: $dir,
       out: $out,
+      lockFile: $lock,
       settleMs: 800,
       sessions: {
         ses_a: { id: "ses_a", location: { directory: $dir } },
@@ -724,6 +796,8 @@ EOF
 
 test_v2_watch_arm_does_not_cross_own_sessions
 test_v2_watch_arm_same_location_binds_only_first_session
+test_v2_watch_arm_requires_lock_ownership
+test_v2_child_session_does_not_bind_or_arm
 test_v2_worker_worktree_is_inert_when_canonical_is_primary
 test_v2_binder_releases_deleted_lead_session
 test_v2_turnend_double_idle_consumes_skip_once

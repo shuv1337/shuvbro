@@ -71,6 +71,10 @@ test_shared_service_is_not_a_session() {
   local out
   out=$(run_detect shuvcode 'shuvcode serve --service')
   [ "$out" = unknown ] || fail "the shared shuvcode service must not identify as a session, got '$out'"
+  out=$(run_detect shuvcode 'shuvcode serve --port 4096 --service')
+  [ "$out" = unknown ] || fail "a reordered shared-service flag must not identify as a session, got '$out'"
+  out=$(run_detect shuvcode 'shuvcode --service')
+  [ "$out" = unknown ] || fail "a top-level shared-service flag must not identify as a session, got '$out'"
   out=$(run_detect shuvcode 'shuvcode serve --stdio --port 0')
   [ "$out" = opencode-v2 ] || fail "a standalone shuvcode server must identify as its session, got '$out'"
   pass "fm-harness.sh: shared service is rejected while standalone server is accepted"
@@ -167,6 +171,27 @@ SH
   pass "fm-harness.sh: the walk finds shuvcode several ancestors up"
 }
 
+test_bootstrap_reports_missing_v2_plugin_runtime() {
+  local home out
+  home="$TMP_ROOT/bootstrap-runtime"
+  mkdir -p "$home"
+  cp -R "$ROOT/bin" "$home/bin"
+  git init -q "$home"
+  : > "$home/AGENTS.md"
+  out=$(env -u CURSOR_AGENT -u CURSOR_INVOKED_AS -u GEMINI_CLI -u CLAUDECODE \
+        -u PI_CODING_AGENT -u FM_PI_HARNESS -u GROK_AGENT \
+        -u ATLASSIAN_AGENT_TYPE -u ROVODEV_CLI -u FM_OMP_HARNESS \
+        -u OPENCODE_TERMINAL -u OPENCODE_CONFIG_DIR \
+        FAKE_PS_COMM=shuvcode FAKE_PS_ARGS='shuvcode --standalone --auto' \
+        FM_PROC_ROOT_OVERRIDE="$NOPROC" PATH="$FAKEBIN:$PATH" \
+        FM_ROOT_OVERRIDE="$home" FM_HOME="$home" FM_BOOTSTRAP_NETWORK=skip \
+        FM_BOOTSTRAP_DETECT_ONLY=1 "$home/bin/fm-bootstrap.sh" 2>/dev/null)
+  assert_contains "$out" \
+    "MISSING: OpenCode V2 plugin runtime (install: npm ci --prefix $home/.opencode/plugins)" \
+    "bootstrap did not report the missing OpenCode V2 plugin runtime"
+  pass "fm-bootstrap.sh: a shuvcode primary reports its missing plugin runtime"
+}
+
 test_shuvcode_binary_prints_opencode_v2
 test_shuvcode_node_launcher_prints_opencode_v2
 test_shared_service_is_not_a_session
@@ -175,3 +200,4 @@ test_opencode2_beta_is_returned_unknown
 test_ambient_opencode_markers_change_nothing
 test_claudecode_marker_keeps_existing_precedence
 test_shuvcode_ancestry_is_found_several_levels_up
+test_bootstrap_reports_missing_v2_plugin_runtime

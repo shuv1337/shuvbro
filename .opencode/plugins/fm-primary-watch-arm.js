@@ -1,8 +1,16 @@
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync, realpathSync } from "node:fs";
-import { resolve } from "node:path";
 import { encodeFirstmateOperationalInput } from "./lib/fm-operational-input.js";
-import { effectivePaths as effectiveV2Paths, pluginRoot } from "./lib/fm-plugin-common.js";
+import {
+  effectivePaths,
+  isPrimaryRoot,
+  pluginRoot,
+  positiveInteger,
+  resolvePath,
+  resolveRoot,
+  runProcess,
+  sessionOwnsLock,
+  shouldArm,
+} from "./lib/fm-plugin-common.js";
 import {
   createWatchArmCoordinator,
   registerWatchOwner,
@@ -38,12 +46,6 @@ let armClose = new WeakMap();
 let armReadiness = new WeakMap();
 let armRecovery = new WeakMap();
 
-function positiveInteger(name, fallback) {
-  const value = Number(process.env[name]);
-  if (!Number.isFinite(value) || value <= 0) return fallback;
-  return Math.floor(value);
-}
-
 function setArmStatus(status) {
   armStatus = status;
 }
@@ -59,89 +61,6 @@ function waitForArmReady(armChild) {
       resolve(status);
     });
   });
-}
-
-function runProcess(command, args, options = {}) {
-  return new Promise((resolve) => {
-    const proc = spawn(command, args, {
-      stdio: ["ignore", "pipe", "pipe"],
-      ...options,
-    });
-    let stdout = "";
-    let stderr = "";
-    proc.stdout.on("data", (chunk) => {
-      stdout += chunk.toString();
-    });
-    proc.stderr.on("data", (chunk) => {
-      stderr += chunk.toString();
-    });
-    proc.on("error", (error) => resolve({ code: 127, stdout, stderr: String(error?.message ?? error) }));
-    proc.on("close", (code) => resolve({ code: code ?? 0, stdout, stderr }));
-  });
-}
-
-async function resolveRoot(anchor) {
-  if (!anchor) return "";
-  const result = await runProcess("git", ["-C", anchor, "rev-parse", "--show-toplevel"]);
-  const root = result.stdout.trim();
-  if (result.code === 0 && root) return root;
-  return resolvePath(anchor);
-}
-
-function resolvePath(anchor) {
-  try {
-    return realpathSync(anchor);
-  } catch {
-    return resolve(anchor);
-  }
-}
-
-function effectivePaths(root) {
-  const fmRoot = process.env.FM_ROOT_OVERRIDE || root;
-  const fmHome = process.env.FM_HOME || process.env.FM_ROOT_OVERRIDE || fmRoot;
-  const state = process.env.FM_STATE_OVERRIDE || `${fmHome}/state`;
-  const config = process.env.FM_CONFIG_OVERRIDE || `${fmHome}/config`;
-  return { root: fmRoot, home: fmHome, state, config };
-}
-
-async function isPrimaryRoot(root, home) {
-  if (!root) return false;
-  if (!existsSync(`${root}/AGENTS.md`) || !existsSync(`${root}/bin`)) return false;
-  if (existsSync(`${root}/.fm-secondmate-home`)) return false;
-  if (home && home !== root && existsSync(`${home}/.fm-secondmate-home`)) return false;
-  const gitDir = await runProcess("git", ["-C", root, "rev-parse", "--git-dir"]);
-  const commonDir = await runProcess("git", ["-C", root, "rev-parse", "--git-common-dir"]);
-  if (gitDir.code !== 0 || commonDir.code !== 0) return false;
-  return gitDir.stdout.trim() === commonDir.stdout.trim();
-}
-
-function shouldArm(paths) {
-  if (existsSync(`${paths.state}/.afk`)) return false;
-  if (existsSync(`${paths.config}/x-mode.env`)) return true;
-  try {
-    return readdirSync(paths.state).some((name) => name.endsWith(".meta"));
-  } catch {
-    return false;
-  }
-}
-
-async function sessionOwnsLock(paths) {
-  let lockPid = "";
-  try {
-    lockPid = readFileSync(`${paths.state}/.lock`, "utf8").trim();
-  } catch {
-    return false;
-  }
-  if (!/^[0-9]+$/.test(lockPid) || lockPid === "1") return false;
-  let pid = String(process.pid);
-  for (let i = 0; i < 8; i += 1) {
-    if (pid === lockPid) return true;
-    const result = await runProcess("ps", ["-o", "ppid=", "-p", pid]);
-    if (result.code !== 0) return false;
-    pid = result.stdout.trim();
-    if (!pid || pid === "1") return false;
-  }
-  return false;
 }
 
 function classifyArmClose(stdout, stderr, code, signal) {
@@ -511,7 +430,7 @@ export const FmPrimaryWatchArm = async ({ client, directory, worktree }) => {
 async function setupWatchArmV2(ctx) {
   const root = await pluginRoot(ctx);
   if (!root) return;
-  const paths = effectiveV2Paths(root);
+  const paths = effectivePaths(root);
   if (!(await isPrimaryRoot(paths.root, paths.home))) return;
   const binder = createSessionBinder(ctx);
   const coordinator = createWatchArmCoordinator(paths, (sessionID, text) => promptQueued(ctx, sessionID, text));
@@ -520,7 +439,7 @@ async function setupWatchArmV2(ctx) {
   void (async () => {
     try {
       for await (const event of subscribeEvents(ctx, abort.signal)) {
-        binder.observe(event);
+        await binder.observe(event);
         if (!isIdleEvent(event)) continue;
         const sessionID = eventSessionID(event);
         if (!(await binder.owns(sessionID))) continue;

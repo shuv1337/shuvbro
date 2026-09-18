@@ -1,8 +1,5 @@
-import { spawn } from "node:child_process";
-import { realpathSync } from "node:fs";
-import { resolve } from "node:path";
 import { encodeFirstmateOperationalInput } from "./lib/fm-operational-input.js";
-import { effectivePaths, pluginRoot } from "./lib/fm-plugin-common.js";
+import { effectivePaths, pluginRoot, resolvePath, resolveRoot, runProcess } from "./lib/fm-plugin-common.js";
 import { watchOwnerFor } from "./lib/fm-watch-arm-v2.js";
 import { createSessionBinder } from "./lib/fm-session-bind-v2.js";
 import {
@@ -17,44 +14,9 @@ const COORDINATOR_KEY = "__firstmateOpenCodeWatchArm";
 
 let skipNextIdle = false;
 
-function runProcess(command, args, input = "") {
-  return new Promise((resolve) => {
-    const child = spawn(command, args, {
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk.toString();
-    });
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk.toString();
-    });
-    child.on("error", () => resolve({ code: 0, stdout: "", stderr: "" }));
-    child.on("close", (code) => resolve({ code: code ?? 0, stdout, stderr }));
-    child.stdin.end(input);
-  });
-}
-
-async function resolveRoot(anchor) {
-  if (!anchor) return "";
-  const result = await runProcess("git", ["-C", anchor, "rev-parse", "--show-toplevel"]);
-  const root = result.stdout.trim();
-  if (result.code === 0 && root) return root;
-  return resolvePath(anchor);
-}
-
-function resolvePath(anchor) {
-  try {
-    return realpathSync(anchor);
-  } catch {
-    return resolve(anchor);
-  }
-}
-
 function runGuard(root) {
   if (!root) return Promise.resolve({ code: 0, stderr: "" });
-  return runProcess(`${root}/bin/fm-turnend-guard.sh`, [], '{"stop_hook_active":false}');
+  return runProcess(`${root}/bin/fm-turnend-guard.sh`, [], { input: '{"stop_hook_active":false}' });
 }
 
 async function letWatchArmRun(sessionID, client) {
@@ -123,7 +85,7 @@ async function setupTurnendGuardV2(ctx) {
   void (async () => {
     try {
       for await (const event of subscribeEvents(ctx, abort.signal)) {
-        binder.observe(event);
+        await binder.observe(event);
         if (!turns.turnEnded(event)) continue;
         const sessionID = eventSessionID(event);
         if (!(await binder.owns(sessionID))) continue;

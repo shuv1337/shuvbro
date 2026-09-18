@@ -22,7 +22,7 @@ export function eventSessionID(event) {
 
 export function eventParentID(event) {
   const data = eventData(event);
-  return data.parentID || "";
+  return data.parentID || data.info?.parentID || "";
 }
 
 export function eventLocationDirectory(event) {

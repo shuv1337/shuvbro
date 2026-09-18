@@ -64,7 +64,7 @@ fm_shuvcode_process_matches() {  # <comm> <args> [argv0]
   # session's child server is distinguishable as `serve --stdio` and remains
   # eligible, as do its launcher and TUI processes.
   case " $args " in
-    *' serve --service '*) return 1 ;;
+    *' --service '*) return 1 ;;
   esac
   argv0=${argv0:-$comm}
   base=$(basename -- "$comm")

@@ -3038,18 +3038,20 @@ rovo_endpoint_cleanup() {
 # brief sat in the input box and the busy record stayed unchanged until a manual
 # Enter). So after launch the spawn waits for the pre-filled left-bar composer,
 # then submits it with Enter, retrying Enter only, until the shared classifier
-# reads the composer empty. The `╹▀` floor row is a launch-progress signal that
-# the TUI (not the pane shell) owns the screen; composer emptiness stays with
-# the shared classifier, like kimi and rovo.
+# reads the composer empty. The `╹▀` floor row was verified on shuvcode
+# v2.0.3-shuv.4 and is a launch-progress signal that the TUI (not the pane
+# shell) owns the screen; composer emptiness stays with the shared classifier,
+# like kimi and rovo.
 opencode_v2_composer_state() {
   fm_backend_composer_state "$BACKEND" "$T" "$W" 2>/dev/null || true
 }
 
 opencode_v2_wait_for_prefill() {
   local pane state i=0 max=${FM_OPENCODE_V2_READY_POLLS:-60} interval=${FM_OPENCODE_V2_POLL_INTERVAL:-0.5}
+  local ready_marker=${FM_OPENCODE_V2_READY_MARKER:-'╹▀'}
   while [ "$i" -lt "$max" ]; do
     pane=$(fm_backend_capture "$BACKEND" "$T" 120 "$W" 2>/dev/null || true)
-    if printf '%s\n' "$pane" | grep -Fq '╹▀'; then
+    if printf '%s\n' "$pane" | grep -Fq -- "$ready_marker"; then
       state=$(opencode_v2_composer_state)
       case "$state" in
         pending|pending-unproven) return 0 ;;
@@ -3344,6 +3346,8 @@ PKG
 // worker's busy state. Each owned terminal event touches the watcher's wake
 // NOTIFICATION; that marker is never current-state truth.
 import { execFile } from "node:child_process";
+import { realpathSync } from "node:fs";
+import { resolve } from "node:path";
 const busyEvent = (state, event) =>
   new Promise((resolve) => {
     execFile("$FM_ROOT/bin/fm-busy-event.sh", [
@@ -3385,7 +3389,15 @@ export const FmBusyState = async () => {
 };
 async function setupBusyStateV2(ctx) {
   const abort = new AbortController();
-  const ownDir = ctx.location && ctx.location.directory;
+  const normalizeDir = (dir) => {
+    if (!dir) return "";
+    try {
+      return realpathSync(dir);
+    } catch {
+      return resolve(dir);
+    }
+  };
+  const ownDir = normalizeDir(ctx.location && ctx.location.directory);
   const owned = new Set();
   let latched = null;
   const sessionData = (event) => event.data || event.properties || {};
@@ -3397,7 +3409,7 @@ async function setupBusyStateV2(ctx) {
       const result = await ctx.session.get({ sessionID });
       const info = result && result.data ? result.data : result;
       if (!info || info.parentID) return false;
-      const dir = info.location && info.location.directory;
+      const dir = normalizeDir(info.location && info.location.directory);
       if (!dir || !ownDir || dir !== ownDir) return false;
       owned.add(sessionID);
       return true;
@@ -3412,9 +3424,7 @@ async function setupBusyStateV2(ctx) {
         const data = sessionData(event);
         const sessionID = data.sessionID;
         if (event.type === "session.created") {
-          if (!data.parentID && data.location && data.location.directory === ownDir && sessionID) {
-            owned.add(sessionID);
-          }
+          await owns(sessionID);
           continue;
         }
         if (event.type === "session.execution.started") {

@@ -26,7 +26,7 @@ export function createSessionBinder(ctx) {
     return pending;
   }
 
-  function observe(event) {
+  async function observe(event) {
     const type = eventType(event);
     const sessionID = eventSessionID(event);
     if (!sessionID) return;
@@ -34,7 +34,7 @@ export function createSessionBinder(ctx) {
       bound.delete(sessionID);
       return;
     }
-    if (type === "session.created" && createdOwnsThisLocation(event, ctx)) remember(sessionID);
+    if (type === "session.created" && createdOwnsThisLocation(event, ctx)) await owns(sessionID);
   }
 
   return { owns, remember, observe, bound };

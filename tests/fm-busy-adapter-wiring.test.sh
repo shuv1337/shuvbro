@@ -282,7 +282,7 @@ EOF
 }
 
 test_opencode_v2_plugin_scopes_to_this_location() {
-  local rec id=busy-oc-v2 out state plugin
+  local rec id=busy-oc-v2 out state plugin link
   rec=$(make_spawn_case oc-v2-scope opencode "$id")
   read_case_record "$rec"
   out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$id" "$PROJ_DIR")
@@ -290,9 +290,11 @@ test_opencode_v2_plugin_scopes_to_this_location() {
   state="$HOME_DIR/state"
   plugin="$WT_DIR/.opencode/plugins/fm-busy-state.js"
   assert_present "$plugin" "opencode spawn did not write the busy-state plugin"
+  link="$TMP_ROOT/oc-v2-scope-link"
+  ln -s "$WT_DIR" "$link"
 
-  out=$(drive_oc_plugin_v2 "$plugin" "$(jq -nc --arg dir "$WT_DIR" '{
-    directory: $dir,
+  out=$(drive_oc_plugin_v2 "$plugin" "$(jq -nc --arg dir "$WT_DIR" --arg link "$link" '{
+    directory: $link,
     sessions: {
       ses_worker: { id: "ses_worker", location: { directory: $dir } },
       ses_other: { id: "ses_other", location: { directory: "/tmp/other-session" } }
@@ -308,7 +310,34 @@ test_opencode_v2_plugin_scopes_to_this_location() {
   out=$(classify opencode "$id" "$state")
   [ "$out" = "idle opencode-plugin" ] || fail "the worker session at this location must own busy/idle, got '$out'"
   [ -f "$state/$id.turn-ended" ] || fail "a V2 terminal execution event did not touch the notification marker"
-  pass "opencode V2 plugin follows execution events for the worker session, not a shared-server neighbor"
+  pass "opencode V2 plugin normalizes its worker location and ignores a shared-server neighbor"
+}
+
+test_opencode_v2_plugin_rejects_child_session() {
+  local rec id=busy-oc-v2-child out state plugin
+  rec=$(make_spawn_case oc-v2-child opencode "$id")
+  read_case_record "$rec"
+  out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$id" "$PROJ_DIR")
+  expect_code 0 $? "opencode spawn should succeed: $out"
+  state="$HOME_DIR/state"
+  plugin="$WT_DIR/.opencode/plugins/fm-busy-state.js"
+  rm -f "$state/$id.turn-ended"
+
+  out=$(drive_oc_plugin_v2 "$plugin" "$(jq -nc --arg dir "$WT_DIR" '{
+    directory: $dir,
+    sessions: {
+      ses_child: { id: "ses_child", parentID: "ses_worker", location: { directory: $dir } }
+    },
+    events: [
+      {"type":"session.created","data":{"sessionID":"ses_child","location":{"directory":$dir}}},
+      {"type":"session.execution.started","data":{"sessionID":"ses_child"}},
+      {"type":"session.execution.succeeded","data":{"sessionID":"ses_child"}}
+    ]
+  }')") || fail "v2 child-session busy drive failed: $out"
+  out=$(classify opencode "$id" "$state")
+  [ "$out" = "busy fm-spawn" ] || fail "a child session changed the worker busy state, got '$out'"
+  [ ! -f "$state/$id.turn-ended" ] || fail "a child terminal event touched the worker notification marker"
+  pass "opencode V2 worker busy-state rejects child sessions after proving parentage"
 }
 
 run_claude_hook() {  # <settings.json> <hook-event>
@@ -525,6 +554,7 @@ test_pi_extension_stale_incarnation_rejected
 test_kimi_and_grok_install_no_unverified_wiring
 test_opencode_plugin_semantic_lifecycle
 test_opencode_v2_plugin_scopes_to_this_location
+test_opencode_v2_plugin_rejects_child_session
 test_claude_hooks_semantic_lifecycle
 test_claude_hooks_stale_incarnation_harmless
 test_gemini_hooks_semantic_lifecycle

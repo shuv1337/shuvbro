@@ -6,7 +6,11 @@ import { effectivePaths, isPrimaryRoot, pluginRoot, runProcess } from "./fm-plug
 // The import stays dynamic because V1 opencode and the Node unit harness load
 // this file without that install. A shuvcode primary without it cannot judge
 // any command, so commandGuardEntrypoint denies every shell call there instead.
-const runtime = await import("effect").catch(() => undefined);
+let runtimeLoadError = null;
+const runtime = await import("effect").catch((error) => {
+  runtimeLoadError = error;
+  return undefined;
+});
 
 export function commandFromTool(event) {
   if (!event || typeof event !== "object") return "";
@@ -68,7 +72,8 @@ function setupCommandGuardEffectV2(ctx, options, effectModule) {
 
 const RUNTIME_MISSING_REASON =
   "every shell command is denied: the firstmate shell guards cannot load the effect runtime. "
-  + "Stop and ask the captain to run `npm ci --prefix .opencode/plugins` in the primary checkout, then restart this session.";
+  + "Stop and ask the captain to run `npm ci --prefix .opencode/plugins` in the primary checkout, then restart this session."
+  + (runtimeLoadError ? ` Import error: ${String(runtimeLoadError?.message ?? runtimeLoadError)}` : "");
 
 async function denyShellWithoutRuntime(ctx) {
   const root = await pluginRoot(ctx);

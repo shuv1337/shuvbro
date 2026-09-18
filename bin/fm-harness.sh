@@ -141,7 +141,9 @@ detect_own() {
     # reliable path, because the shuvcode binary or its node launcher parents
     # every tool subprocess - and a deliberately-exported CLAUDECODE keeps the
     # marker layer's existing precedence. bin/fm-shuvcode-lib.sh owns the
-    # structural match and never executes a stranger binary.
+    # structural match and never executes a stranger binary. Its MainThread
+    # exception is bounded by a whole shuvcode path component in args or argv0,
+    # unlike the broad interpreter-name match forbidden below.
     if fm_shuvcode_process_matches "$comm" "$args" "$argv0"; then
       echo opencode-v2
       return

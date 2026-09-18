@@ -99,7 +99,7 @@ async function setupSessionstartNudgeV2(ctx) {
   void (async () => {
     try {
       for await (const event of subscribeEvents(ctx, abort.signal)) {
-        binder.observe(event);
+        await binder.observe(event);
         const sessionID = eventSessionID(event);
         if (eventType(event) === "session.created" || isIdleEvent(event)) {
           await deliverNudge(sessionID);

@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
 import { encodeFirstmateOperationalInput } from "./fm-operational-input.js";
-import { isPrimaryRoot, positiveInteger, shouldArm } from "./fm-plugin-common.js";
+import { isPrimaryRoot, positiveInteger, sessionOwnsLock, shouldArm } from "./fm-plugin-common.js";
 
 const ARM_READY_TIMEOUT_DEFAULT_MS = process.platform === "win32" ? 35000 : 12000;
 const ARM_READY_TIMEOUT_MS = positiveInteger("FM_OPENCODE_ARM_READY_TIMEOUT_MS", ARM_READY_TIMEOUT_DEFAULT_MS);
@@ -364,6 +364,7 @@ export function createWatchArmCoordinator(paths, deliverPrompt) {
     if (state.stopped) return { status: "skipped", armChild: null };
     if (!sessionID) return { status: "skipped", armChild: null };
     if (!(await isPrimaryRoot(paths.root, paths.home))) return { status: "not-primary", armChild: null };
+    if (!(await sessionOwnsLock(paths))) return { status: "read-only", armChild: null };
     if (state.child) return { status: "existing", armChild: state.child };
     if (state.retryTimer) return { status: "retrying", armChild: null };
     if (!shouldArm(paths)) return { status: "not-needed", armChild: null };

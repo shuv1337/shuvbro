@@ -629,12 +629,12 @@ tests/fm-fleet-snapshot-view.test.sh 8547
 tests/fm-fleet-sync.test.sh 37749
 tests/fm-fork-boundary.test.sh 3250
 tests/fm-gate-refuse.test.sh 4977
-tests/fm-harness-shuvcode.test.sh 2000
 tests/fm-gitignore-config.test.sh 62
 tests/fm-gotmp.test.sh 1310
 tests/fm-grok-continuity-live-e2e.test.sh 20
 tests/fm-grok-stop-live-e2e.test.sh 21
 tests/fm-guard-stale-banner.test.sh 32981
+tests/fm-harness-shuvcode.test.sh 2000
 tests/fm-harness-adapter-instructions-live-e2e.test.sh 20
 tests/fm-harness-adapter-references.test.sh 55
 tests/fm-harness-liveness-drift-live-e2e.test.sh 21

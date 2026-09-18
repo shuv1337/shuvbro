@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { existsSync, readdirSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import { resolve } from "node:path";
 
 export function positiveInteger(name, fallback) {
@@ -19,9 +19,10 @@ export function resolvePath(anchor) {
 
 export function runProcess(command, args, options = {}) {
   return new Promise((resolveResult) => {
+    const { input, ...spawnOptions } = options;
     const proc = spawn(command, args, {
-      stdio: ["ignore", "pipe", "pipe"],
-      ...options,
+      stdio: [input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
+      ...spawnOptions,
     });
     let stdout = "";
     let stderr = "";
@@ -37,6 +38,7 @@ export function runProcess(command, args, options = {}) {
     proc.on("close", (code) => {
       resolveResult({ code: code ?? 0, stdout, stderr });
     });
+    if (input !== undefined) proc.stdin.end(input);
   });
 }
 
@@ -49,10 +51,30 @@ export async function resolveRoot(anchor) {
 }
 
 export function effectivePaths(root) {
-  const home = process.env.FM_HOME || root;
+  const fmRoot = process.env.FM_ROOT_OVERRIDE || root;
+  const home = process.env.FM_HOME || process.env.FM_ROOT_OVERRIDE || fmRoot;
   const state = process.env.FM_STATE_OVERRIDE || `${home}/state`;
   const config = process.env.FM_CONFIG_OVERRIDE || `${home}/config`;
-  return { root, home, state, config };
+  return { root: fmRoot, home, state, config };
+}
+
+export async function sessionOwnsLock(paths) {
+  let lockPid = "";
+  try {
+    lockPid = readFileSync(`${paths.state}/.lock`, "utf8").trim();
+  } catch {
+    return false;
+  }
+  if (!/^[0-9]+$/.test(lockPid) || lockPid === "1") return false;
+  let pid = String(process.pid);
+  for (let i = 0; i < 8; i += 1) {
+    if (pid === lockPid) return true;
+    const result = await runProcess("ps", ["-o", "ppid=", "-p", pid]);
+    if (result.code !== 0) return false;
+    pid = result.stdout.trim();
+    if (!pid || pid === "1") return false;
+  }
+  return false;
 }
 
 export async function isPrimaryRoot(root, home) {

@@ -271,6 +271,12 @@ test_shuvcode_shared_service_cannot_hold_a_session_lock() {
   if bash -c '. "$1"; fm_shuvcode_process_matches shuvcode "shuvcode serve --service"' _ "$LIB"; then
     fail "the shared shuvcode service was accepted as a session-lock owner"
   fi
+  if bash -c '. "$1"; fm_shuvcode_process_matches shuvcode "shuvcode serve --port 4096 --service"' _ "$LIB"; then
+    fail "a reordered shared-service flag was accepted as a session-lock owner"
+  fi
+  if bash -c '. "$1"; fm_shuvcode_process_matches shuvcode "shuvcode --service"' _ "$LIB"; then
+    fail "a top-level shared-service flag was accepted as a session-lock owner"
+  fi
   bash -c '. "$1"; fm_shuvcode_process_matches shuvcode "shuvcode serve --stdio --port 0"' _ "$LIB" \
     || fail "a standalone shuvcode server was not accepted as its session-lock owner"
   pass "session-lock: shared shuvcode service is rejected while standalone server is accepted"
