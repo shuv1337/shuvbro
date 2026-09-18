@@ -179,6 +179,13 @@ jobs:
           set -eu
           npm install -g @earendil-works/pi-coding-agent
           npm ls -g --depth 0 @earendil-works/pi-coding-agent
+      # The OpenCode V2 guard plugins reject tool calls through the effect
+      # runtime pinned in .opencode/plugins, the same install a shuvcode lead
+      # needs; tests/fm-opencode-v2-plugin.test.sh fails in CI without it.
+      - name: Install the pinned effect runtime for the OpenCode V2 guard tests
+        run: |
+          set -eu
+          npm ci --prefix .opencode/plugins --ignore-scripts
       - name: Run portable serial shard ${{ matrix.shard }}
         env:
           # job-total rather than a literal, so shrinking or growing the matrix

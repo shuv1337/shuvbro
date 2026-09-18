@@ -414,6 +414,15 @@ test_matrix_opencode_leftbar_signals() {
   assert_screen "opencode placeholder-like input on plain backends" unknown "$CAPS_PLAIN" "$typed"
   typed=$'┃  refactor the parser please\n┃\n┃  Build · GPT-5.5 Fast OpenAI · high'
   assert_screen "opencode multiline draft above blank cursor row" pending "$CAPS_TMUX" "$typed" 1
+  # shuvcode under --auto (captured live, v2.0.3-shuv.4): the footer gains an
+  # `auto` mode word, and it and the `·` separators are muted truecolor that the
+  # ghost strip removes, so the footer must be recognised from the plain row.
+  local v2_footer
+  v2_footer="  ┃  ${ESC}[38;2;243;176;66mBuild${ESC}[38;2;255;255;255m ${ESC}[38;2;95;126;151mauto${ESC}[38;2;255;255;255m ${ESC}[38;2;95;126;151m·${ESC}[38;2;255;255;255m ${ESC}[38;2;214;222;235mGPT-5.6 Sol${ESC}[38;2;255;255;255m ${ESC}[38;2;95;126;151mOpenAI${ESC}[38;2;255;255;255m ${ESC}[38;2;95;126;151m·${ESC}[38;2;255;255;255m medium${ESC}[0m"
+  screen=$'  ┃\n  ┃\n  ┃\n'"$v2_footer"$'\n  ╹▀▀▀▀'
+  assert_screen "shuvcode --auto idle on tmux" empty "$CAPS_TMUX" "$screen" 0
+  typed=$'  ┃\n  ┃  '"${ESC}[38;2;255;255;255mrefactor the parser please${ESC}[0m"$'\n  ┃\n'"$v2_footer"$'\n  ╹▀▀▀▀'
+  assert_screen "shuvcode --auto typed on tmux" pending "$CAPS_TMUX" "$typed" 1
   pass "matrix: opencode's left-bar composer reads empty everywhere and scans the full active run"
 }
 

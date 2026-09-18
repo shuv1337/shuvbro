@@ -227,6 +227,119 @@ test_opencode_plugin_semantic_lifecycle() {
   pass "opencode plugin classifies from session.status, scoped to the latched worker session"
 }
 
+drive_oc_plugin_v2() {
+  local plugin=$1
+  shift
+  PLUGIN_PATH="$plugin" node --input-type=module - "$@" 2>&1 <<'EOF'
+import { pathToFileURL } from "node:url";
+const spec = JSON.parse(process.argv[2]);
+const mod = await import(pathToFileURL(process.env.PLUGIN_PATH).href);
+if (!mod.default || typeof mod.default.setup !== "function") {
+  throw new Error("generated plugin missing V2 setup");
+}
+const queue = [];
+let notify = null;
+const abort = new AbortController();
+const ctx = {
+  location: { directory: spec.directory },
+  event: {
+    subscribe({ signal } = {}) {
+      const stop = signal || abort.signal;
+      return {
+        async *[Symbol.asyncIterator]() {
+          while (!stop.aborted) {
+            if (queue.length) {
+              yield queue.shift();
+              continue;
+            }
+            await new Promise((resolve) => {
+              notify = resolve;
+            });
+          }
+        },
+      };
+    },
+  },
+  session: {
+    async get({ sessionID }) {
+      const info = spec.sessions[sessionID];
+      if (!info) throw new Error("missing");
+      return info;
+    },
+  },
+};
+const cleanup = await mod.default.setup(ctx);
+await new Promise((resolve) => setTimeout(resolve, 30));
+for (const event of spec.events) {
+  queue.push(event);
+  notify?.();
+}
+await new Promise((resolve) => setTimeout(resolve, 400));
+if (typeof cleanup === "function") cleanup();
+abort.abort();
+notify?.();
+EOF
+}
+
+test_opencode_v2_plugin_scopes_to_this_location() {
+  local rec id=busy-oc-v2 out state plugin link
+  rec=$(make_spawn_case oc-v2-scope opencode "$id")
+  read_case_record "$rec"
+  out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$id" "$PROJ_DIR")
+  expect_code 0 $? "opencode spawn should succeed: $out"
+  state="$HOME_DIR/state"
+  plugin="$WT_DIR/.opencode/plugins/fm-busy-state.js"
+  assert_present "$plugin" "opencode spawn did not write the busy-state plugin"
+  link="$TMP_ROOT/oc-v2-scope-link"
+  ln -s "$WT_DIR" "$link"
+
+  out=$(drive_oc_plugin_v2 "$plugin" "$(jq -nc --arg dir "$WT_DIR" --arg link "$link" '{
+    directory: $link,
+    sessions: {
+      ses_worker: { id: "ses_worker", location: { directory: $dir } },
+      ses_other: { id: "ses_other", location: { directory: "/tmp/other-session" } }
+    },
+    events: [
+      {"type":"session.execution.started","data":{"sessionID":"ses_other"}},
+      {"type":"session.execution.succeeded","data":{"sessionID":"ses_other"}},
+      {"type":"session.execution.started","data":{"sessionID":"ses_worker"}},
+      {"type":"session.execution.succeeded","data":{"sessionID":"ses_other"}},
+      {"type":"session.execution.succeeded","data":{"sessionID":"ses_worker"}}
+    ]
+  }')") || fail "v2 busy drive failed: $out"
+  out=$(classify opencode "$id" "$state")
+  [ "$out" = "idle opencode-plugin" ] || fail "the worker session at this location must own busy/idle, got '$out'"
+  [ -f "$state/$id.turn-ended" ] || fail "a V2 terminal execution event did not touch the notification marker"
+  pass "opencode V2 plugin normalizes its worker location and ignores a shared-server neighbor"
+}
+
+test_opencode_v2_plugin_rejects_child_session() {
+  local rec id=busy-oc-v2-child out state plugin
+  rec=$(make_spawn_case oc-v2-child opencode "$id")
+  read_case_record "$rec"
+  out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$id" "$PROJ_DIR")
+  expect_code 0 $? "opencode spawn should succeed: $out"
+  state="$HOME_DIR/state"
+  plugin="$WT_DIR/.opencode/plugins/fm-busy-state.js"
+  rm -f "$state/$id.turn-ended"
+
+  out=$(drive_oc_plugin_v2 "$plugin" "$(jq -nc --arg dir "$WT_DIR" '{
+    directory: $dir,
+    sessions: {
+      ses_child: { id: "ses_child", parentID: "ses_worker", location: { directory: $dir } }
+    },
+    events: [
+      {"type":"session.created","data":{"sessionID":"ses_child","location":{"directory":$dir}}},
+      {"type":"session.execution.started","data":{"sessionID":"ses_child"}},
+      {"type":"session.execution.succeeded","data":{"sessionID":"ses_child"}}
+    ]
+  }')") || fail "v2 child-session busy drive failed: $out"
+  out=$(classify opencode "$id" "$state")
+  [ "$out" = "busy fm-spawn" ] || fail "a child session changed the worker busy state, got '$out'"
+  [ ! -f "$state/$id.turn-ended" ] || fail "a child terminal event touched the worker notification marker"
+  pass "opencode V2 worker busy-state rejects child sessions after proving parentage"
+}
+
 run_claude_hook() {  # <settings.json> <hook-event>
   local cmd
   cmd=$(jq -r ".hooks[\"$2\"][0].hooks[0].command" "$1")
@@ -407,6 +520,19 @@ test_gemini_is_refused_as_a_secondmate() {
   pass "gemini is refused as a secondmate because it has no primary supervision protocol"
 }
 
+test_opencode_v2_is_refused_as_a_positional_secondmate() {
+  local rec id=busy-oc-v2-sm out
+  rec=$(make_spawn_case oc-v2-secondmate opencode "$id")
+  read_case_record "$rec"
+  out=$(GROK_HOME="$HOME_DIR/grok-home" \
+    fm_test_run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" --secondmate "$id" opencode-v2) && {
+    fail "an opencode-v2 secondmate must be refused: $out"
+  }
+  assert_contains "$out" 'opencode-v2 secondmates are not qualified' \
+    "a positional opencode-v2 secondmate must hit the unqualified refusal, not a bogus home path: $out"
+  pass "opencode-v2 is refused as a positional secondmate before any worker is created"
+}
+
 test_kimi_and_grok_install_no_unverified_wiring() {
   local state out
   state="$TMP_ROOT/gates/state"
@@ -427,12 +553,15 @@ test_pi_extension_serializes_settle_before_next_start
 test_pi_extension_stale_incarnation_rejected
 test_kimi_and_grok_install_no_unverified_wiring
 test_opencode_plugin_semantic_lifecycle
+test_opencode_v2_plugin_scopes_to_this_location
+test_opencode_v2_plugin_rejects_child_session
 test_claude_hooks_semantic_lifecycle
 test_claude_hooks_stale_incarnation_harmless
 test_gemini_hooks_semantic_lifecycle
 test_gemini_hooks_stale_incarnation_harmless
 test_raw_gemini_launch_has_no_semantic_wiring
 test_gemini_is_refused_as_a_secondmate
+test_opencode_v2_is_refused_as_a_positional_secondmate
 test_codex_unverified_until_a_semantic_source_exists
 
 echo "all fm-busy-adapter-wiring tests passed"

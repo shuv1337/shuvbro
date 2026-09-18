@@ -1325,7 +1325,7 @@ if [ "$RELAUNCH" -eq 1 ]; then
   }
 elif [ "$KIND" = secondmate ]; then
   case "${POS[1]:-}" in
-    ''|claude|codex|opencode|pi|pi-signed|grok|kimi|cursor|gemini|muse|rovo|omp)
+    ''|claude|codex|opencode|opencode-v2|pi|pi-signed|grok|kimi|cursor|gemini|muse|rovo|omp)
       ARG3=${POS[1]:-}
       ;;
     *' '*)
@@ -1445,6 +1445,13 @@ launch_template() {
       fi
       ;;
     opencode) printf '%s' 'OPENCODE_CONFIG_CONTENT='\''{"permission":{"*":"allow"}}'\'' opencode __MODELFLAG__--prompt "$(__OPINPUT__ encode launch-brief < __BRIEF__)"' ;;
+    opencode-v2)
+      if [ "$kind" = secondmate ]; then
+        echo "error: opencode-v2 secondmates are not qualified; refuse before creating a worker" >&2
+        return 1
+      fi
+      printf '%s' 'shuvcode --standalone --auto --prompt "$(__OPINPUT__ encode launch-brief < __BRIEF__)"'
+      ;;
     pi|pi-signed)
       printf '%s' '__PIBIN____PITUIMODE__'
       if [ "$kind" = secondmate ]; then
@@ -3026,6 +3033,55 @@ rovo_endpoint_cleanup() {
   fm_backend_kill "$BACKEND" "$T" "$tab_id" "fm-$ID" 2>/dev/null || true
 }
 
+# opencode-v2 (shuvcode): the root command's --prompt only PRE-FILLS the TUI
+# composer and never submits it (verified live on shuvcode v2.0.3-shuv.4: the
+# brief sat in the input box and the busy record stayed unchanged until a manual
+# Enter). So after launch the spawn waits for the pre-filled left-bar composer,
+# then submits it with Enter, retrying Enter only, until the shared classifier
+# reads the composer empty. The `╹▀` floor row was verified on shuvcode
+# v2.0.3-shuv.4 and is a launch-progress signal that the TUI (not the pane
+# shell) owns the screen; composer emptiness stays with the shared classifier,
+# like kimi and rovo.
+opencode_v2_composer_state() {
+  fm_backend_composer_state "$BACKEND" "$T" "$W" 2>/dev/null || true
+}
+
+opencode_v2_wait_for_prefill() {
+  local pane state i=0 max=${FM_OPENCODE_V2_READY_POLLS:-60} interval=${FM_OPENCODE_V2_POLL_INTERVAL:-0.5}
+  local ready_marker=${FM_OPENCODE_V2_READY_MARKER:-'╹▀'}
+  while [ "$i" -lt "$max" ]; do
+    pane=$(fm_backend_capture "$BACKEND" "$T" 120 "$W" 2>/dev/null || true)
+    if printf '%s\n' "$pane" | grep -Fq -- "$ready_marker"; then
+      state=$(opencode_v2_composer_state)
+      case "$state" in
+        pending|pending-unproven) return 0 ;;
+      esac
+    fi
+    i=$((i + 1))
+    [ "$i" -ge "$max" ] || sleep "$interval"
+  done
+  return 1
+}
+
+opencode_v2_submit_prefill() {
+  local i=0 max=${FM_OPENCODE_V2_SUBMIT_RETRIES:-3} interval=${FM_OPENCODE_V2_SUBMIT_SLEEP:-${FM_OPENCODE_V2_POLL_INTERVAL:-0.5}}
+  while [ "$i" -lt "$max" ]; do
+    spawn_send_key "$T" Enter || return 1
+    sleep "$interval"
+    [ "$(opencode_v2_composer_state)" != empty ] || return 0
+    i=$((i + 1))
+  done
+  return 1
+}
+
+# Same orphan hazard as rovo: a launched --auto worker with no published task
+# record must not outlive a failed spawn.
+opencode_v2_spawn_fail() {  # <detail>
+  printf 'failed: %s\n' "$1" >> "$STATE/$ID.status"
+  echo "error: $1; inspect window $T" >&2
+  rovo_endpoint_cleanup
+}
+
 if [ "$RELAUNCH" -eq 1 ]; then
   # No worktree is acquired: the recorded one is reused as-is. What must be
   # proven instead is that the adopted endpoint's shell is actually sitting in
@@ -3274,23 +3330,34 @@ EOF
       ;;
     opencode*)
       mkdir -p "$WT/.opencode/plugins"
+      if [ ! -e "$WT/.opencode/plugins/package.json" ]; then
+        cat > "$WT/.opencode/plugins/package.json" <<'PKG'
+{"private":true,"type":"module"}
+PKG
+        exclude_path '.opencode/plugins/package.json'
+      fi
       cat > "$WT/.opencode/plugins/fm-busy-state.js" <<EOF
 // Firstmate semantic busy-state events + turn-end notification; written by
 // fm-spawn under the contract owned by bin/fm-busy-lib.sh.
-// Semantic state comes from OpenCode's session.status events: busy and retry
-// are active, idle is inactive. Scoping latches the first session that
-// reports activity (the worker's main session - a subagent child session can
-// only start while the main session is already busy) and ignores other
-// sessions' status until the latched session settles, so a child's idle can
-// never clear the worker's busy state. The session.idle touch stays the
-// watcher's wake NOTIFICATION, never current-state truth.
+// The V1 factory uses OpenCode V1's session.status/session.idle events. Shuvcode
+// V2 instead publishes session.execution.started and one terminal execution
+// event per run. The V2 setup binds only a root session at this plugin instance
+// location, then latches that worker session so another session cannot own the
+// worker's busy state. Each owned terminal event touches the watcher's wake
+// NOTIFICATION; that marker is never current-state truth.
 import { execFile } from "node:child_process";
+import { realpathSync } from "node:fs";
+import { resolve } from "node:path";
 const busyEvent = (state, event) =>
   new Promise((resolve) => {
     execFile("$FM_ROOT/bin/fm-busy-event.sh", [
       "apply", "$STATE_REAL", "$ID", state,
       "--gen", "$BUSY_GEN", "--source", "opencode-plugin", "--event", event,
     ], () => resolve());
+  });
+const touchTurnend = () =>
+  new Promise((resolve) => {
+    execFile("touch", ["$TURNEND"], () => resolve());
   });
 export const FmBusyState = async () => {
   let activeSession = null;
@@ -3315,12 +3382,80 @@ export const FmBusyState = async () => {
           activeSession = null;
           await busyEvent("idle", "session-idle");
         }
-        await new Promise((resolve) => {
-          execFile("touch", ["$TURNEND"], () => resolve());
-        });
+        await touchTurnend();
       }
     },
   };
+};
+async function setupBusyStateV2(ctx) {
+  const abort = new AbortController();
+  const normalizeDir = (dir) => {
+    if (!dir) return "";
+    try {
+      return realpathSync(dir);
+    } catch {
+      return resolve(dir);
+    }
+  };
+  const ownDir = normalizeDir(ctx.location && ctx.location.directory);
+  const owned = new Set();
+  let latched = null;
+  const sessionData = (event) => event.data || event.properties || {};
+  async function owns(sessionID) {
+    if (!sessionID) return false;
+    if (owned.has(sessionID)) return true;
+    if (!ctx.session || typeof ctx.session.get !== "function") return false;
+    try {
+      const result = await ctx.session.get({ sessionID });
+      const info = result && result.data ? result.data : result;
+      if (!info || info.parentID) return false;
+      const dir = normalizeDir(info.location && info.location.directory);
+      if (!dir || !ownDir || dir !== ownDir) return false;
+      owned.add(sessionID);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  void (async () => {
+    if (!ctx.event || typeof ctx.event.subscribe !== "function") return;
+    try {
+      for await (const event of ctx.event.subscribe({ signal: abort.signal })) {
+        const data = sessionData(event);
+        const sessionID = data.sessionID;
+        if (event.type === "session.created") {
+          await owns(sessionID);
+          continue;
+        }
+        if (event.type === "session.execution.started") {
+          if (!(await owns(sessionID))) continue;
+          if (latched === null) latched = sessionID;
+          if (sessionID === latched) await busyEvent("busy", "session-execution-started");
+          continue;
+        }
+        if (event.type === "session.execution.succeeded" ||
+            event.type === "session.execution.failed" ||
+            event.type === "session.execution.interrupted") {
+          if (!(await owns(sessionID))) continue;
+          if (latched === null || sessionID === latched) {
+            latched = null;
+            await busyEvent("idle", event.type.replaceAll(".", "-"));
+          }
+          await touchTurnend();
+        }
+      }
+    } catch {
+      if (abort.signal.aborted) return;
+    }
+  })();
+  return () => abort.abort();
+}
+export default {
+  id: "fm-busy-state",
+  setup: setupBusyStateV2,
+  async server() {
+    return FmBusyState();
+  },
 };
 EOF
       exclude_path '.opencode/plugins/fm-busy-state.js'
@@ -3946,6 +4081,16 @@ if [ "$HARNESS" = rovo ]; then
   fi
   if ! rovo_wait_for_delivery; then
     rovo_spawn_fail "rovo brief pointer delivery was not confirmed in window $T"
+    exit 1
+  fi
+fi
+if [ "$HARNESS" = opencode-v2 ]; then
+  if ! opencode_v2_wait_for_prefill; then
+    opencode_v2_spawn_fail "shuvcode did not show its pre-filled launch brief in window $T"
+    exit 1
+  fi
+  if ! opencode_v2_submit_prefill; then
+    opencode_v2_spawn_fail "shuvcode pre-filled launch brief could not be submitted in window $T"
     exit 1
   fi
 fi

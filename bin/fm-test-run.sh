@@ -275,7 +275,7 @@ family_for_basename() {
     fm-test-run.test.sh|fm-test-isolation-proof.test.sh)
       printf '%s\n' pure-contract-unit
       ;;
-    fm-daemon.test.sh|fm-guard-stale-banner.test.sh|fm-pi-watch-extension.test.sh|\
+    fm-daemon.test.sh|fm-guard-stale-banner.test.sh|fm-opencode-v2-plugin.test.sh|fm-pi-watch-extension.test.sh|\
     fm-session-lock-ancestry.test.sh|fm-cursor-primary.test.sh|\
     fm-supervision-events.test.sh|fm-turnend-guard.test.sh|fm-wake-daemon-lifecycle-e2e.test.sh|\
     fm-wake-drain-unread-status.test.sh|\
@@ -367,7 +367,7 @@ family_for_basename() {
       ;;
     fm-branch-supervision.test.sh|fm-busy-adapter-wiring.test.sh|\
     fm-busy-state.test.sh|fm-classify-corr-token.test.sh|\
-    fm-claude-stop-autoarm.test.sh|fm-cursor-harness.test.sh|\
+    fm-claude-stop-autoarm.test.sh|fm-cursor-harness.test.sh|fm-harness-shuvcode.test.sh|\
     fm-extension-binding.test.sh|fm-gitignore-config.test.sh|\
     fm-no-mistakes-required.test.sh|fm-peek-remote.test.sh|\
     fm-pending-reply.test.sh|fm-pi-branch-extension.test.sh|\
@@ -637,6 +637,7 @@ tests/fm-guard-stale-banner.test.sh 32981
 tests/fm-harness-adapter-instructions-live-e2e.test.sh 20
 tests/fm-harness-adapter-references.test.sh 55
 tests/fm-harness-liveness-drift-live-e2e.test.sh 21
+tests/fm-harness-shuvcode.test.sh 2000
 tests/fm-herdr-session-cleanup.test.sh 6704
 tests/fm-herdr-submit-confirm-live-e2e.test.sh 23
 tests/fm-herdr-version-floor-live-e2e.test.sh 23
@@ -651,6 +652,7 @@ tests/fm-no-mistakes-required.test.sh 370
 tests/fm-omp-harness.test.sh 59969
 tests/fm-on.test.sh 34087
 tests/fm-opencode-primary-live-e2e.test.sh 21
+tests/fm-opencode-v2-plugin.test.sh 8000
 tests/fm-operational-input.test.sh 231
 tests/fm-peek-remote.test.sh 1018
 tests/fm-pending-reply.test.sh 86711
@@ -1295,6 +1297,15 @@ families_for_changed_path() {
     bin/fm-quota-choose.sh)
       printf '%s\n' "__script__:fm-quota-choose.test.sh"
       ;;
+    .opencode/plugins/*)
+      printf '%s\n' __script__:fm-opencode-v2-plugin.test.sh
+      printf '%s\n' __script__:fm-pi-watch-extension.test.sh
+      printf '%s\n' __script__:fm-turnend-guard.test.sh
+      printf '%s\n' __script__:fm-sessionstart-nudge.test.sh
+      printf '%s\n' __script__:fm-busy-adapter-wiring.test.sh
+      printf '%s\n' __script__:fm-arm-pretool-check.test.sh
+      printf '%s\n' __script__:fm-cd-pretool-check.test.sh
+      ;;
     .pi/extensions/fm-branch-supervision.ts|.pi/extensions/lib/fm-async-exec.ts|\
     .pi/extensions/lib/fm-branch-dispatch.ts|.pi/extensions/lib/fm-native-contract.ts)
       # The portable suites that actually load these files, named one by one.
@@ -1376,6 +1387,10 @@ families_for_changed_path() {
       printf '%s\n' backend-dispatch
       printf '%s\n' pure-contract-unit
       printf '%s\n' live-harness-optin
+      ;;
+    bin/fm-shuvcode-lib.sh)
+      printf '%s\n' "__script__:fm-harness-shuvcode.test.sh"
+      printf '%s\n' "__script__:fm-session-lock-ancestry.test.sh"
       ;;
     bin/fm-spawn.sh|bin/fm-send.sh|bin/fm-harness.sh|\
     bin/fm-peek.sh|bin/fm-composer*)

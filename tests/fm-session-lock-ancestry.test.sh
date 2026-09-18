@@ -220,6 +220,215 @@ SH
   pass "session-lock: a live version-named session holding the lock is not mistaken for a stale owner"
 }
 
+# --- shuvcode (OpenCode V2 fork) identity --------------------------------
+
+# The shuvcode binary reports comm `shuvcode` on Linux procps and the invoked
+# path on macOS, both of whose basenames are shuvcode; its locks must resolve
+# from a tool subprocess whose ancestry contains that binary.
+test_shuvcode_binary_session_is_identified_on_both_platforms() {
+  local dir fakebin shape got
+  dir="$TMP_ROOT/shuvcode-binary"
+  fakebin=$(fm_fakebin "$dir")
+  mkdir -p "$dir/state"
+  cat > "$fakebin/ps" <<'SH'
+#!/usr/bin/env bash
+set -u
+field= pid=
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -o) field=$2; shift 2 ;;
+    -p) pid=$2; shift 2 ;;
+    *) shift ;;
+  esac
+done
+case "$pid:$field:${FM_TEST_SHUVCODE_SHAPE:-linux}" in
+  700:comm=:linux) printf '%s\n' 'shuvcode' ;;
+  700:args=:linux) printf '%s\n' '/home/shuv/.npm-global/lib/node_modules/shuvcode/node_modules/shuvcode-linux-x64/bin/shuvcode --session ses_abc' ;;
+  700:comm=:macos) printf '%s\n' '/Users/u/.local/bin/shuvcode' ;;
+  700:args=:macos) printf '%s\n' '/Users/u/.local/bin/shuvcode --session ses_abc' ;;
+  700:ppid=:*) printf '%s\n' 1 ;;
+  *:comm=:*) printf '%s\n' bash ;;
+  *:args=:*) printf '%s\n' bash ;;
+  *:ppid=:*) printf '%s\n' 700 ;;
+esac
+SH
+  chmod +x "$fakebin/ps"
+  printf '700\n' > "$dir/state/.lock"
+
+  for shape in linux macos; do
+    got=$(FM_TEST_SHUVCODE_SHAPE="$shape" lib_eval "$fakebin" 'fm_harness_ancestry_pid') \
+      || fail "$shape: the shuvcode session was not found in the ancestry at all"
+    [ "$got" = 700 ] || fail "$shape: ancestry resolved '$got', expected the shuvcode session pid 700"
+    FM_TEST_SHUVCODE_SHAPE="$shape" lib_eval "$fakebin" 'fm_harness_pid_alive 700' \
+      || fail "$shape: a live shuvcode session was not recognized as a harness"
+    FM_TEST_SHUVCODE_SHAPE="$shape" lib_eval "$fakebin" "fm_session_lock_owned_by_self '$dir/state'" \
+      || fail "$shape: the shuvcode session holding the lock did not recognize itself as the owner"
+  done
+  pass "session-lock: a shuvcode binary session is identified on both platforms"
+}
+
+test_shuvcode_shared_service_cannot_hold_a_session_lock() {
+  if bash -c '. "$1"; fm_shuvcode_process_matches shuvcode "shuvcode serve --service"' _ "$LIB"; then
+    fail "the shared shuvcode service was accepted as a session-lock owner"
+  fi
+  if bash -c '. "$1"; fm_shuvcode_process_matches shuvcode "shuvcode serve --port 4096 --service"' _ "$LIB"; then
+    fail "a reordered shared-service flag was accepted as a session-lock owner"
+  fi
+  if bash -c '. "$1"; fm_shuvcode_process_matches shuvcode "shuvcode --service"' _ "$LIB"; then
+    fail "a top-level shared-service flag was accepted as a session-lock owner"
+  fi
+  bash -c '. "$1"; fm_shuvcode_process_matches shuvcode "shuvcode serve --stdio --port 0"' _ "$LIB" \
+    || fail "a standalone shuvcode server was not accepted as its session-lock owner"
+  pass "session-lock: shared shuvcode service is rejected while standalone server is accepted"
+}
+
+# A tool subprocess under the shuvcode launch chain: either the node-interpreter
+# launcher or the compiled binary it execs can be the shuvcode ancestor that
+# owns the lock. The walk must resolve through both, innermost first.
+test_shuvcode_launcher_chain_is_found() {
+  local dir fakebin shape got
+  dir="$TMP_ROOT/shuvcode-launcher"
+  fakebin=$(fm_fakebin "$dir")
+  mkdir -p "$dir/state"
+  cat > "$fakebin/ps" <<'SH'
+#!/usr/bin/env bash
+set -u
+field= pid=
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -o) field=$2; shift 2 ;;
+    -p) pid=$2; shift 2 ;;
+    *) shift ;;
+  esac
+done
+case "$pid:$field:${FM_TEST_SHUVCODE_TREE:-launcher}" in
+  700:comm=:launcher-macos) printf '%s\n' 'node' ;;
+  700:comm=:*) printf '%s\n' 'node-MainThread' ;;
+  700:args=:launcher) printf '%s\n' 'node /home/shuv/.local/bin/shuvcode --session ses_abc' ;;
+  700:args=:launcher-macos) printf '%s\n' 'node /Users/u/.local/bin/shuvcode --session ses_abc' ;;
+  700:args=:binary) printf '%s\n' 'node /home/shuv/.local/bin/shuvcode --session ses_abc' ;;
+  700:ppid=:*) printf '%s\n' 1 ;;
+  710:comm=:binary) printf '%s\n' 'shuvcode' ;;
+  710:args=:binary) printf '%s\n' '/home/shuv/.npm-global/lib/node_modules/shuvcode/node_modules/shuvcode-linux-x64/bin/shuvcode --session ses_abc' ;;
+  710:ppid=:binary) printf '%s\n' 700 ;;
+  *:comm=:*) printf '%s\n' bash ;;
+  *:args=:*) printf '%s\n' bash ;;
+  *:ppid=:launcher) printf '%s\n' 700 ;;
+  *:ppid=:launcher-macos) printf '%s\n' 700 ;;
+  *:ppid=:binary) printf '%s\n' 710 ;;
+esac
+SH
+  chmod +x "$fakebin/ps"
+  printf '700\n' > "$dir/state/.lock"
+
+  for shape in launcher launcher-macos; do
+    got=$(FM_TEST_SHUVCODE_TREE="$shape" lib_eval "$fakebin" 'fm_harness_ancestry_pid') \
+      || fail "$shape: the node launcher of shuvcode was not found in the ancestry"
+    [ "$got" = 700 ] || fail "$shape: ancestry resolved '$got', expected the shuvcode launcher pid 700"
+    FM_TEST_SHUVCODE_TREE="$shape" lib_eval "$fakebin" "fm_session_lock_owned_by_self '$dir/state'" \
+      || fail "$shape: a lock held by the shuvcode node launcher was not recognized as this session's own"
+  done
+  pass "session-lock: a tool child of the shuvcode node launcher is found on linux and macos"
+
+  # A tool subprocess that descends from the compiled binary finds that binary
+  # (the innermost shuvcode ancestor) even though its own parent is a launcher
+  # process above it.
+  printf '710\n' > "$dir/state/.lock"
+  got=$(FM_TEST_SHUVCODE_TREE=binary lib_eval "$fakebin" 'fm_harness_ancestry_pid') \
+    || fail "binary: the compiled shuvcode binary was not found in the ancestry"
+  [ "$got" = 710 ] || fail "binary: ancestry resolved '$got', expected the shuvcode binary pid 710"
+  FM_TEST_SHUVCODE_TREE=binary lib_eval "$fakebin" 'fm_harness_pid_alive 710' \
+    || fail "binary: the compiled shuvcode binary was not recognized as a harness"
+  FM_TEST_SHUVCODE_TREE=binary lib_eval "$fakebin" "fm_session_lock_owned_by_self '$dir/state'" \
+    || fail "binary: a lock held by the compiled shuvcode binary was not recognized as this session's own"
+  pass "session-lock: a tool child of the compiled shuvcode binary resolves to that binary"
+}
+
+# V1 opencode's exact process name historically matches the lock harness table;
+# that unchanged behavior must keep working while shuvcode gets its own owner.
+test_v1_opencode_still_matches_for_lock() {
+  local dir fakebin got
+  dir="$TMP_ROOT/v1-opencode"
+  fakebin=$(fm_fakebin "$dir")
+  mkdir -p "$dir/state"
+  cat > "$fakebin/ps" <<'SH'
+#!/usr/bin/env bash
+set -u
+field= pid=
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -o) field=$2; shift 2 ;;
+    -p) pid=$2; shift 2 ;;
+    *) shift ;;
+  esac
+done
+case "$pid:$field" in
+  700:comm=) printf '%s\n' opencode ;;
+  700:args=) printf '%s\n' 'opencode --prompt' ;;
+  700:ppid=) printf '%s\n' 1 ;;
+  *:comm=) printf '%s\n' bash ;;
+  *:args=) printf '%s\n' bash ;;
+  *:ppid=) printf '%s\n' 700 ;;
+esac
+SH
+  chmod +x "$fakebin/ps"
+  printf '700\n' > "$dir/state/.lock"
+  got=$(lib_eval "$fakebin" 'fm_harness_ancestry_pid') \
+    || fail "a V1 opencode session was not found in the ancestry"
+  [ "$got" = 700 ] || fail "ancestry resolved '$got', expected the V1 opencode session pid 700"
+  lib_eval "$fakebin" 'fm_harness_pid_alive 700' \
+    || fail "a live V1 opencode session was not recognized as a harness"
+  lib_eval "$fakebin" "fm_session_lock_owned_by_self '$dir/state'" \
+    || fail "the V1 opencode session holding the lock did not recognize itself as the owner"
+  pass "session-lock: a V1 opencode session still matches for lock purposes"
+}
+
+# An unrelated node process - even one whose command path merely CONTAINS
+# shuvcode as a substring - must never be claimed as the harness, so a random
+# tool cannot own the home's lock or keep a stale one alive.
+test_similar_named_node_process_is_never_claimed() {
+  local dir fakebin shape
+  dir="$TMP_ROOT/shuvcode-negatives"
+  fakebin=$(fm_fakebin "$dir")
+  mkdir -p "$dir/state"
+  cat > "$fakebin/ps" <<'SH'
+#!/usr/bin/env bash
+set -u
+field= pid=
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -o) field=$2; shift 2 ;;
+    -p) pid=$2; shift 2 ;;
+    *) shift ;;
+  esac
+done
+case "$pid:$field:${FM_TEST_UNRELATED_SHAPE:-plain}" in
+  700:comm=:*) printf '%s\n' 'node-MainThread' ;;
+  700:args=:plain) printf '%s\n' 'node /opt/shop/server.js --port 8080' ;;
+  700:args=:dashshuv) printf '%s\n' 'node /opt/not-shuvcode/server.js --port 8080' ;;
+  700:ppid=:*) printf '%s\n' 1 ;;
+  *:comm=:*) printf '%s\n' bash ;;
+  *:args=:*) printf '%s\n' bash ;;
+  *:ppid=:*) printf '%s\n' 700 ;;
+esac
+SH
+  chmod +x "$fakebin/ps"
+  printf '700\n' > "$dir/state/.lock"
+
+  for shape in plain dashshuv; do
+    if FM_TEST_UNRELATED_SHAPE="$shape" lib_eval "$fakebin" 'fm_harness_ancestry_pid'; then
+      fail "$shape: an unrelated node process was resolved as the harness"
+    fi
+    if FM_TEST_UNRELATED_SHAPE="$shape" lib_eval "$fakebin" 'fm_harness_pid_alive 700'; then
+      fail "$shape: an unrelated node process passed the harness-liveness predicate"
+    fi
+    if FM_TEST_UNRELATED_SHAPE="$shape" lib_eval "$fakebin" "fm_session_lock_owned_by_self '$dir/state'"; then
+      fail "$shape: an unrelated node process claimed the home's session lock"
+    fi
+  done
+  pass "session-lock: an unrelated node process is never claimed as the harness"
+}
+
 # --- end-to-end layer: the real Stop auto-arm in real process trees ----------
 
 install_autoarm_scripts() {
@@ -231,6 +440,7 @@ install_autoarm_scripts() {
   cp "$ROOT/bin/fm-wake-lib.sh" "$dir/bin/fm-wake-lib.sh"
   cp "$ROOT/bin/fm-session-lock-lib.sh" "$dir/bin/fm-session-lock-lib.sh"
   cp "$ROOT/bin/fm-cursor-lib.sh" "$dir/bin/fm-cursor-lib.sh"
+  cp "$ROOT/bin/fm-shuvcode-lib.sh" "$dir/bin/fm-shuvcode-lib.sh"
   cp "$ROOT/bin/fm-hook-host-lib.sh" "$dir/bin/fm-hook-host-lib.sh"
   cp "$ROOT/bin/fm-lock.sh" "$dir/bin/fm-lock.sh"
   chmod +x "$dir/bin/fm-claude-stop-autoarm.sh" "$dir/bin/fm-lock.sh"
@@ -360,6 +570,11 @@ test_version_named_session_is_identified_on_both_platforms
 test_ordinary_paths_are_never_harness_processes
 test_harness_beyond_a_gap_never_owns_the_lock
 test_competing_version_named_session_is_seen_as_live
+test_shuvcode_binary_session_is_identified_on_both_platforms
+test_shuvcode_shared_service_cannot_hold_a_session_lock
+test_shuvcode_launcher_chain_is_found
+test_v1_opencode_still_matches_for_lock
+test_similar_named_node_process_is_never_claimed
 test_e2e_version_named_session_claims_the_home
 test_e2e_daemon_parented_session_claims_the_home
 test_e2e_daemon_parented_version_named_session_keeps_its_lock

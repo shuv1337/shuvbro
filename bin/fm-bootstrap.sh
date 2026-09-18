@@ -60,6 +60,10 @@
 #          build below its floor reports MISSING like no-mistakes, so the operator
 #          is asked to upgrade rather than silently running an older tool.
 #          tasks-axi feature probes remain a separate defense-in-depth check.
+#          An opencode-v2 (shuvcode) primary whose checkout lacks the effect
+#          runtime pinned in .opencode/plugins/package.json reports
+#          "MISSING: opencode-v2-runtime" with its pinned npm ci command, which
+#          the `install` subcommand also runs for that tool id.
 #          tasks-axi and quota-axi are required bootstrap tools (same class as
 #          lavish-axi). A compatible tasks-axi default backend is silent.
 #          quota-axi is required for the agent-owned dispatch-profile array
@@ -862,6 +866,7 @@ install_cmd() {
     no-mistakes) echo "curl -fsSL https://raw.githubusercontent.com/kunchenguid/no-mistakes/main/docs/install.sh | sh" ;;
     gh-axi|chrome-devtools-axi|lavish-axi) echo "npm install -g $1 && $1 setup hooks" ;;
     tasks-axi|quota-axi) echo "npm install -g $1" ;;
+    opencode-v2-runtime) printf 'npm ci --prefix %q\n' "$FM_ROOT/.opencode/plugins" ;;
     *) return 1 ;;
   esac
 }
@@ -1437,6 +1442,7 @@ detect_local_tools() {
 }
 
 detect_local_config() {
+  local own_harness
   # Worktree-tangle check: the firstmate primary checkout (FM_ROOT) must sit on its
   # default branch, not a feature branch (see fm-tangle-lib.sh). Scoped to the
   # primary only; detached-HEAD worktrees and secondmate homes never trip it.
@@ -1461,6 +1467,11 @@ detect_local_config() {
   # instead of failing at the first spawn.
   if [ "$crew" = cursor ] && ! fm_cursor_resolve_binary >/dev/null 2>&1; then
     echo "MISSING_MANUAL: cursor-agent (instructions: $(manual_install_url cursor-agent))"
+  fi
+  own_harness=$("$SCRIPT_DIR/fm-harness.sh" 2>/dev/null || true)
+  if [ "$own_harness" = opencode-v2 ] \
+    && [ ! -f "$FM_ROOT/.opencode/plugins/node_modules/effect/package.json" ]; then
+    echo "MISSING: opencode-v2-runtime (install: $(install_cmd opencode-v2-runtime))"
   fi
   crew_dispatch_validate
   if [ "${FM_BOOTSTRAP_VERBOSE_FACTS:-0}" = 1 ] \

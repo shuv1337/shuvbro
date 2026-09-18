@@ -1,15 +1,17 @@
 import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { spawn } from "node:child_process";
+import { commandGuardEntrypoint } from "./lib/fm-command-guard-v2.js";
+import { definePlugin } from "./lib/fm-plugin-v2.js";
 
 // PreToolUse seatbelt for OpenCode: the arm mechanism itself lives entirely in
 // fm-primary-watch-arm.js (a plugin-owned child process, never a model tool
 // call), so the residual risk here is the AGENT shelling `bin/fm-watch-arm.sh`
 // wrong through its own bash tool - the anti-pattern bin/fm-arm-pretool-check.sh
 // guards against (see that script's header and docs/arm-pretool-check.md).
-// tool.execute.before can block by throwing (verified 2026-07-09 against
-// OpenCode 1.17.15: throwing here prevents the bash command from running and
-// surfaces the thrown message as the failed tool result).
+// The V1 tool.execute.before path blocks by throwing (verified 2026-07-09
+// against OpenCode 1.17.15). The V2 Effect entrypoint instead fails with a
+// typed Tool.Error so the rejection is a normal tool failure, not a defect.
 
 function runProcess(command, args) {
   return new Promise((resolvePromise) => {
@@ -62,3 +64,14 @@ export const FmPrimaryPretoolCheck = async ({ directory, worktree }) => {
     },
   };
 };
+
+export default definePlugin({
+  id: "fm-primary-pretool-check",
+  ...commandGuardEntrypoint({
+    helper: "fm-arm-pretool-check.sh",
+    fallbackReason: "denied by the watcher-arm PreToolUse seatbelt",
+  }),
+  async server(input) {
+    return FmPrimaryPretoolCheck(input);
+  },
+});

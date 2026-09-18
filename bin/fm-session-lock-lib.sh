@@ -16,6 +16,20 @@
 # shellcheck source=bin/fm-cursor-lib.sh
 . "$(dirname -- "${BASH_SOURCE[0]}")/fm-cursor-lib.sh"
 
+# Shuvcode (OpenCode V2 fork) is likewise delegated rather than added to the
+# tables: its binary name `shuvcode` is specific, but its launcher is a node
+# script and its session service parents tool subprocesses, so the whole
+# structural rule - exact name, node interpreter, whole path component - lives
+# in one owner (adapter id opencode-v2). It is sourced defensively so a stale
+# fixture tree that copied this lib before its owner existed still fails closed
+# with no shuvcode evidence instead of printing an error on every ancestry hop.
+# shellcheck source=bin/fm-shuvcode-lib.sh
+if [ -r "$(dirname -- "${BASH_SOURCE[0]}")/fm-shuvcode-lib.sh" ]; then
+  . "$(dirname -- "${BASH_SOURCE[0]}")/fm-shuvcode-lib.sh"
+else
+  fm_shuvcode_process_matches() { return 1; }
+fi
+
 # Known harness command names; extend when a new adapter is verified. omp is
 # anchored exactly like pi: its process name is the bare word `omp` (verified,
 # omp 18.1.11), and a substring match would claim ompd or comp.
@@ -87,6 +101,12 @@ fm_harness_process_matches() {  # <comm> <args>
   # locate its own harness in the ancestry, so every session start refuses the
   # fleet lock as read-only and the park can never arm.
   fm_cursor_process_matches "$comm" "$args" "$argv0" && return 0
+  # Shuvcode: the same delegation, from the exact `shuvcode` name or a node
+  # interpreter running the shuvcode launcher. Without this a shuvcode primary
+  # can never locate its own harness in the ancestry either, so every session
+  # start refuses the fleet lock as read-only - the failure this owner exists
+  # to fix. It matches only shuvcode evidence, never V1 opencode.
+  fm_shuvcode_process_matches "$comm" "$args" "$argv0" && return 0
   return 1
 }
 
