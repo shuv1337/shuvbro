@@ -42,4 +42,5 @@ The interactive root command's `--prompt` only pre-fills the TUI composer and ne
 Under `--auto` the composer footer reads `Build auto · <model> · <effort>` with the `auto` word and `·` separators in muted truecolor, so the classifier recognises that footer from the plain row rather than the ghost-stripped one.
 The worker wiring writes `.opencode/plugins/package.json` only when the project has none, so a project that tracks that file keeps its own copy.
 Secondmate launches are refused until that role is qualified.
-Busy state, exit command, interrupt, resume, model selection, and effort flags for this adapter have no verified facts yet; verify them before a control plan relies on them.
+Busy state comes from the Firstmate-owned worker plugin's `session.execution.started` (busy) and its `session.execution.succeeded`, `failed`, or `interrupted` terminal event (idle), latched to the worker's own root session; shuvcode publishes no `session.status` or `session.idle` event to plugins.
+Exit command, interrupt, resume, model selection, and effort flags for this adapter have no verified facts yet; verify them before a control plan relies on them.
