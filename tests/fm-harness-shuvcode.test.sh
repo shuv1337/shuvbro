@@ -187,9 +187,31 @@ test_bootstrap_reports_missing_v2_plugin_runtime() {
         FM_ROOT_OVERRIDE="$home" FM_HOME="$home" FM_BOOTSTRAP_NETWORK=skip \
         FM_BOOTSTRAP_DETECT_ONLY=1 "$home/bin/fm-bootstrap.sh" 2>/dev/null)
   assert_contains "$out" \
-    "MISSING: OpenCode V2 plugin runtime (install: npm ci --prefix $home/.opencode/plugins)" \
+    "MISSING: opencode-v2-runtime (install: npm ci --prefix $home/.opencode/plugins)" \
     "bootstrap did not report the missing OpenCode V2 plugin runtime"
   pass "fm-bootstrap.sh: a shuvcode primary reports its missing plugin runtime"
+}
+
+test_bootstrap_installs_v2_plugin_runtime_by_tool_id() {
+  local home fakebin out
+  home="$TMP_ROOT/bootstrap-runtime-install"
+  fakebin="$home/fakebin"
+  mkdir -p "$home" "$fakebin"
+  cp -R "$ROOT/bin" "$home/bin"
+  cat > "$fakebin/npm" <<SH
+#!/usr/bin/env bash
+printf '%s\\n' "\$*" > "$home/npm-args"
+SH
+  chmod +x "$fakebin/npm"
+  out=$(PATH="$fakebin:$PATH" FM_ROOT_OVERRIDE="$home" FM_HOME="$home" \
+        "$home/bin/fm-bootstrap.sh" install opencode-v2-runtime 2>&1) \
+    || fail "install opencode-v2-runtime must succeed, got: $out"
+  assert_contains "$out" \
+    "installing opencode-v2-runtime: npm ci --prefix $home/.opencode/plugins" \
+    "install did not announce the pinned npm ci command"
+  [ "$(cat "$home/npm-args" 2>/dev/null)" = "ci --prefix $home/.opencode/plugins" ] \
+    || fail "install must run the pinned npm ci command, got: $(cat "$home/npm-args" 2>/dev/null)"
+  pass "fm-bootstrap.sh: the reported runtime tool id installs through the install subcommand"
 }
 
 test_shuvcode_binary_prints_opencode_v2
@@ -201,3 +223,4 @@ test_ambient_opencode_markers_change_nothing
 test_claudecode_marker_keeps_existing_precedence
 test_shuvcode_ancestry_is_found_several_levels_up
 test_bootstrap_reports_missing_v2_plugin_runtime
+test_bootstrap_installs_v2_plugin_runtime_by_tool_id

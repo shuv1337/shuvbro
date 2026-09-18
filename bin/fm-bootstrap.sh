@@ -62,8 +62,8 @@
 #          tasks-axi feature probes remain a separate defense-in-depth check.
 #          An opencode-v2 (shuvcode) primary whose checkout lacks the effect
 #          runtime pinned in .opencode/plugins/package.json reports
-#          "MISSING: OpenCode V2 plugin runtime" with its npm ci command; that
-#          name is not an `install` subcommand tool, so run the printed command.
+#          "MISSING: opencode-v2-runtime" with its pinned npm ci command, which
+#          the `install` subcommand also runs for that tool id.
 #          tasks-axi and quota-axi are required bootstrap tools (same class as
 #          lavish-axi). A compatible tasks-axi default backend is silent.
 #          quota-axi is required for the agent-owned dispatch-profile array
@@ -866,6 +866,7 @@ install_cmd() {
     no-mistakes) echo "curl -fsSL https://raw.githubusercontent.com/kunchenguid/no-mistakes/main/docs/install.sh | sh" ;;
     gh-axi|chrome-devtools-axi|lavish-axi) echo "npm install -g $1 && $1 setup hooks" ;;
     tasks-axi|quota-axi) echo "npm install -g $1" ;;
+    opencode-v2-runtime) printf 'npm ci --prefix %q\n' "$FM_ROOT/.opencode/plugins" ;;
     *) return 1 ;;
   esac
 }
@@ -1470,7 +1471,7 @@ detect_local_config() {
   own_harness=$("$SCRIPT_DIR/fm-harness.sh" 2>/dev/null || true)
   if [ "$own_harness" = opencode-v2 ] \
     && [ ! -f "$FM_ROOT/.opencode/plugins/node_modules/effect/package.json" ]; then
-    echo "MISSING: OpenCode V2 plugin runtime (install: npm ci --prefix $FM_ROOT/.opencode/plugins)"
+    echo "MISSING: opencode-v2-runtime (install: $(install_cmd opencode-v2-runtime))"
   fi
   crew_dispatch_validate
   if [ "${FM_BOOTSTRAP_VERBOSE_FACTS:-0}" = 1 ] \
