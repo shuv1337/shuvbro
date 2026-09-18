@@ -30,7 +30,8 @@ Process detection is structural; it never executes a stranger binary during an a
 Verified on 2026-09-18 with shuvcode v2.0.3-shuv.4 on Linux.
 Shuvcode resolves a project plugin's bare imports natively and shares none of its own modules, so `import("effect")` from `.opencode/plugins/` fails until the dependency pinned in `.opencode/plugins/package.json` is installed.
 Run `npm ci --prefix .opencode/plugins` in the primary checkout before starting a shuvcode lead.
-Without it shuvcode marks `fm-primary-cd-check` and `fm-primary-pretool-check` as `failed` with the install command in the error, and the lead's shell commands run unguarded, so do not proceed with a lead whose guard plugins failed.
+Without it the guards cannot judge a command, so in the primary checkout both plugins instead deny every `shell` permission with that install command as the reason; a worker worktree stays unaffected.
+That blanket denial rides `permission.evaluate`, which shuvcode never raises for a command made only of `cd`, so it stops the lead's work but is not the cd-guard.
 A project plugin cannot import shuvcode's own `Tool.Error` class; shuvcode matches the rejection on the `Tool.Error` tag, so the guards fail `execute.before` with a locally tagged error and the model receives the helper's reason as an ordinary tool failure.
 
 ## Dispatch

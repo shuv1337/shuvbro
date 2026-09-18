@@ -1,15 +1,12 @@
-import { effectivePaths, pluginRoot, runProcess } from "./fm-plugin-common.js";
+import { effectivePaths, isPrimaryRoot, pluginRoot, runProcess } from "./fm-plugin-common.js";
 
 // Shuvcode resolves a project plugin's bare imports natively and shares none
 // of its own modules, so the Effect runtime is the pinned dependency of
 // .opencode/plugins/package.json (install: npm ci --prefix .opencode/plugins).
 // The import stays dynamic because V1 opencode and the Node unit harness load
-// this file without that install; the Effect entrypoint reports the retained
-// failure instead of registering nothing silently.
-const runtime = await import("effect").then(
-  (module) => ({ module }),
-  (error) => ({ error }),
-);
+// this file without that install. A shuvcode primary without it cannot judge
+// any command, so commandGuardEntrypoint denies every shell call there instead.
+const runtime = await import("effect").catch(() => undefined);
 
 export function commandFromTool(event) {
   if (!event || typeof event !== "object") return "";
@@ -43,13 +40,7 @@ function commandGuard(ctx, { helper, fallbackReason }) {
   };
 }
 
-export function setupCommandGuardEffectV2(ctx, options, effectModule = runtime.module) {
-  if (!effectModule) {
-    throw new Error(
-      "the shell guard cannot load the effect runtime; run: npm ci --prefix .opencode/plugins",
-      { cause: runtime.error },
-    );
-  }
+function setupCommandGuardEffectV2(ctx, options, effectModule) {
   const { Data, Effect } = effectModule;
   // Shuvcode matches a rejected tool call on the Tool.Error tag, not on its
   // own class, which a project plugin cannot import.
@@ -73,4 +64,23 @@ export function setupCommandGuardEffectV2(ctx, options, effectModule = runtime.m
       );
     });
   });
+}
+
+const RUNTIME_MISSING_REASON =
+  "every shell command is denied: the firstmate shell guards cannot load the effect runtime. "
+  + "Stop and ask the captain to run `npm ci --prefix .opencode/plugins` in the primary checkout, then restart this session.";
+
+async function denyShellWithoutRuntime(ctx) {
+  const root = await pluginRoot(ctx);
+  if (!(await isPrimaryRoot(root, effectivePaths(root).home))) return;
+  await ctx.permission.hook("evaluate", (event) => {
+    if (event?.action !== "shell" && event?.action !== "bash") return;
+    event.effect = "deny";
+    event.message = RUNTIME_MISSING_REASON;
+  });
+}
+
+export function commandGuardEntrypoint(options, effectModule = runtime) {
+  if (effectModule) return { effect: (ctx) => setupCommandGuardEffectV2(ctx, options, effectModule) };
+  return { setup: denyShellWithoutRuntime };
 }

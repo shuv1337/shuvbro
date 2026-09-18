@@ -1,7 +1,7 @@
 import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { spawn } from "node:child_process";
-import { setupCommandGuardEffectV2 } from "./lib/fm-command-guard-v2.js";
+import { commandGuardEntrypoint } from "./lib/fm-command-guard-v2.js";
 import { definePlugin } from "./lib/fm-plugin-v2.js";
 
 // PreToolUse seatbelt for OpenCode: the arm mechanism itself lives entirely in
@@ -67,11 +67,10 @@ export const FmPrimaryPretoolCheck = async ({ directory, worktree }) => {
 
 export default definePlugin({
   id: "fm-primary-pretool-check",
-  effect: (ctx) =>
-    setupCommandGuardEffectV2(ctx, {
-      helper: "fm-arm-pretool-check.sh",
-      fallbackReason: "denied by the watcher-arm PreToolUse seatbelt",
-    }),
+  ...commandGuardEntrypoint({
+    helper: "fm-arm-pretool-check.sh",
+    fallbackReason: "denied by the watcher-arm PreToolUse seatbelt",
+  }),
   async server(input) {
     return FmPrimaryPretoolCheck(input);
   },

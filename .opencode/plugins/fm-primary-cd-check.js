@@ -1,7 +1,7 @@
 import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { spawn } from "node:child_process";
-import { setupCommandGuardEffectV2 } from "./lib/fm-command-guard-v2.js";
+import { commandGuardEntrypoint } from "./lib/fm-command-guard-v2.js";
 import { definePlugin } from "./lib/fm-plugin-v2.js";
 
 // PreToolUse seatbelt for OpenCode: block a stray persistent top-level `cd` in
@@ -67,11 +67,10 @@ export const FmPrimaryCdCheck = async ({ directory, worktree }) => {
 
 export default definePlugin({
   id: "fm-primary-cd-check",
-  effect: (ctx) =>
-    setupCommandGuardEffectV2(ctx, {
-      helper: "fm-cd-pretool-check.sh",
-      fallbackReason: "denied by the cd-guard PreToolUse seatbelt",
-    }),
+  ...commandGuardEntrypoint({
+    helper: "fm-cd-pretool-check.sh",
+    fallbackReason: "denied by the cd-guard PreToolUse seatbelt",
+  }),
   async server(input) {
     return FmPrimaryCdCheck(input);
   },

@@ -432,8 +432,9 @@ const cd = await import(pathToFileURL("$ROOT/.opencode/plugins/fm-primary-cd-che
 for (const [name, mod] of Object.entries({ watch, turn, nudge })) {
   if (typeof mod.default?.setup !== "function") throw new Error(name + " missing setup");
 }
-if (typeof pre.default.effect !== "function") throw new Error("pretool Effect entrypoint missing");
-if (typeof cd.default.effect !== "function") throw new Error("cd Effect entrypoint missing");
+for (const [name, mod] of Object.entries({ pre, cd })) {
+  if (typeof (mod.default?.effect ?? mod.default?.setup) !== "function") throw new Error(name + " missing V2 entrypoint");
+}
 if (typeof watch.FmPrimaryWatchArm !== "function") throw new Error("V1 watch factory missing");
 if (typeof turn.FmPrimaryTurnendGuard !== "function") throw new Error("V1 turnend factory missing");
 if (typeof nudge.FmPrimarySessionstartNudge !== "function") throw new Error("V1 nudge factory missing");
@@ -520,26 +521,44 @@ test_v2_pretool_helper_error_is_not_approval() {
   pass "OpenCode V2 pretool rejects the call when the guard helper cannot be evaluated"
 }
 
-test_v2_guard_without_runtime_refuses_to_register() {
-  local out status
-  out=$(node --input-type=module 2>&1 <<EOF
+test_v2_guard_without_runtime_denies_every_primary_shell_call() {
+  local repo wt out status
+  repo="$TMP_ROOT/no-runtime-primary"
+  wt="$TMP_ROOT/no-runtime-worker"
+  make_primary "$repo"
+  git -C "$repo" -c user.name=t -c user.email=t@t commit -q --allow-empty -m init
+  git -C "$repo" worktree add -q "$wt" -b no-runtime-worker
+  mkdir -p "$wt/bin"
+  : > "$wt/AGENTS.md"
+  out=$(PRIMARY="$repo" WORKER="$wt" node --input-type=module 2>&1 <<EOF
 import { pathToFileURL } from "node:url";
 const mod = await import(pathToFileURL("$ROOT/.opencode/plugins/lib/fm-command-guard-v2.js").href);
-let registered = false;
-const ctx = { location: { directory: "$TMP_ROOT" }, tool: { hook() { registered = true; } } };
-try {
-  mod.setupCommandGuardEffectV2(ctx, { helper: "fm-cd-pretool-check.sh", fallbackReason: "x" }, null);
-} catch (error) {
-  if (!String(error.message).includes("npm ci --prefix .opencode/plugins")) throw error;
-  if (registered) throw new Error("a hook was registered without the runtime");
-  process.exit(0);
+const entry = mod.commandGuardEntrypoint({ helper: "fm-cd-pretool-check.sh", fallbackReason: "x" }, null);
+if (entry.effect || typeof entry.setup !== "function") throw new Error("missing runtime must not offer the Effect entrypoint");
+
+async function evaluate(directory, action) {
+  const hooks = [];
+  await entry.setup({
+    location: { directory },
+    permission: { async hook(name, callback) { hooks.push({ name, callback }); } },
+  });
+  const event = { sessionID: "ses_lead", action, resources: ["git status"], effect: "allow" };
+  for (const hook of hooks) if (hook.name === "evaluate") await hook.callback(event);
+  return event;
 }
-throw new Error("guard setup succeeded without the effect runtime");
+
+const shell = await evaluate(process.env.PRIMARY, "shell");
+if (shell.effect !== "deny") throw new Error("primary shell call was not denied: " + JSON.stringify(shell));
+if (!shell.message.includes("npm ci --prefix .opencode/plugins")) throw new Error("denial lacks the install command: " + shell.message);
+const read = await evaluate(process.env.PRIMARY, "read");
+if (read.effect !== "allow") throw new Error("non-shell permission was changed: " + JSON.stringify(read));
+const worker = await evaluate(process.env.WORKER, "shell");
+if (worker.effect !== "allow") throw new Error("worker worktree shell call was denied: " + JSON.stringify(worker));
 EOF
 )
   status=$?
   expect_code 0 "$status" "guard without runtime: $out"
-  pass "OpenCode V2 guard fails loudly with the install command when the effect runtime is missing"
+  pass "OpenCode V2 guards deny every primary shell call with the install command when the effect runtime is missing"
 }
 
 test_v2_worker_worktree_is_inert_when_canonical_is_primary() {
@@ -685,8 +704,7 @@ for (const file of files) {
   const def = mod.default;
   if (!def || typeof def !== "object" || typeof def === "function") throw new Error(file + ": default is not a plain struct");
   if (typeof def.id !== "string" || !def.id) throw new Error(file + ": default.id missing");
-  const entry = file.includes("pretool") || file.includes("cd-check") ? "effect" : "setup";
-  if (typeof def[entry] !== "function") throw new Error(file + ": default." + entry + " missing");
+  if (typeof (def.effect ?? def.setup) !== "function") throw new Error(file + ": default V2 entrypoint missing");
   if (typeof def.server !== "function") throw new Error(file + ": default.server missing");
   const factories = new Set();
   for (const [name, value] of Object.entries(mod)) {
@@ -717,6 +735,6 @@ test_v2_sessionstart_ignores_foreign_session
 test_v2_cd_guard_fails_bare_cd_with_typed_tool_error
 test_v2_pretool_fails_compound_backgrounded_arm_with_typed_tool_error
 test_v2_pretool_helper_error_is_not_approval
-test_v2_guard_without_runtime_refuses_to_register
+test_v2_guard_without_runtime_denies_every_primary_shell_call
 test_v2_command_guard_reads_complete_tool_input
 test_v2_named_v1_factory_still_exported
