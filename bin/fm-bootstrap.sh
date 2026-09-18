@@ -60,6 +60,10 @@
 #          build below its floor reports MISSING like no-mistakes, so the operator
 #          is asked to upgrade rather than silently running an older tool.
 #          tasks-axi feature probes remain a separate defense-in-depth check.
+#          An opencode-v2 (shuvcode) primary whose checkout lacks the effect
+#          runtime pinned in .opencode/plugins/package.json reports
+#          "MISSING: OpenCode V2 plugin runtime" with its npm ci command; that
+#          name is not an `install` subcommand tool, so run the printed command.
 #          tasks-axi and quota-axi are required bootstrap tools (same class as
 #          lavish-axi). A compatible tasks-axi default backend is silent.
 #          quota-axi is required for the agent-owned dispatch-profile array
