@@ -398,6 +398,8 @@ const cd = await import(pathToFileURL("$ROOT/.opencode/plugins/fm-primary-cd-che
 for (const [name, mod] of Object.entries({ watch, turn, nudge, pre, cd })) {
   if (typeof mod.default?.setup !== "function") throw new Error(name + " missing setup");
 }
+if (typeof pre.default.effect !== "function") throw new Error("pretool Effect entrypoint missing");
+if (typeof cd.default.effect !== "function") throw new Error("cd Effect entrypoint missing");
 if (typeof watch.FmPrimaryWatchArm !== "function") throw new Error("V1 watch factory missing");
 if (typeof turn.FmPrimaryTurnendGuard !== "function") throw new Error("V1 turnend factory missing");
 if (typeof nudge.FmPrimarySessionstartNudge !== "function") throw new Error("V1 nudge factory missing");
@@ -409,6 +411,25 @@ EOF
   expect_code 0 "$status" "dual export shape: $out"
   [ -z "$out" ] || fail "dual export check printed: $out"
   pass "OpenCode plugins keep V1 named factories beside V2 setup"
+}
+
+test_v2_command_guard_reads_complete_tool_input() {
+  local out status
+  out=$(node --input-type=module 2>&1 <<EOF
+import { pathToFileURL } from "node:url";
+const mod = await import(pathToFileURL("$ROOT/.opencode/plugins/lib/fm-command-guard-v2.js").href);
+const command = "cd /tmp && bin/fm-watch-arm.sh --restart &";
+if (mod.commandFromTool({ tool: "shell", input: { command } }) !== command) {
+  throw new Error("complete shell input was not preserved");
+}
+if (mod.commandFromTool({ tool: "read", input: { command } }) !== "") {
+  throw new Error("non-shell tool input was classified as a command");
+}
+EOF
+)
+  status=$?
+  expect_code 0 "$status" "V2 command extraction: $out"
+  pass "OpenCode V2 command guards read the complete shell tool input"
 }
 
 test_v2_watch_arm_same_location_binds_only_first_session() {
@@ -614,6 +635,9 @@ for (const file of files) {
   if (typeof def.id !== "string" || !def.id) throw new Error(file + ": default.id missing");
   if (typeof def.setup !== "function") throw new Error(file + ": default.setup missing");
   if (typeof def.server !== "function") throw new Error(file + ": default.server missing");
+  if ((file.includes("pretool") || file.includes("cd-check")) && typeof def.effect !== "function") {
+    throw new Error(file + ": default.effect missing");
+  }
   const factories = new Set();
   for (const [name, value] of Object.entries(mod)) {
     const factory = name === "default" ? value.server : value;
@@ -643,4 +667,5 @@ test_v2_sessionstart_ignores_foreign_session
 test_v2_pretool_registers_no_throwing_hooks
 test_v2_pretool_permission_deny
 test_v2_pretool_helper_error_is_not_approval
+test_v2_command_guard_reads_complete_tool_input
 test_v2_named_v1_factory_still_exported

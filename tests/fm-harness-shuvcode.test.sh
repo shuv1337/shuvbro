@@ -67,6 +67,15 @@ test_shuvcode_node_launcher_prints_opencode_v2() {
   pass "fm-harness.sh: the shuvcode node launcher prints opencode-v2 on linux and macos shapes"
 }
 
+test_shared_service_is_not_a_session() {
+  local out
+  out=$(run_detect shuvcode 'shuvcode serve --service')
+  [ "$out" = unknown ] || fail "the shared shuvcode service must not identify as a session, got '$out'"
+  out=$(run_detect shuvcode 'shuvcode serve --stdio --port 0')
+  [ "$out" = opencode-v2 ] || fail "a standalone shuvcode server must identify as its session, got '$out'"
+  pass "fm-harness.sh: shared service is rejected while standalone server is accepted"
+}
+
 test_v1_opencode_still_prints_opencode() {
   local out
   out=$(run_detect opencode 'opencode --prompt')
@@ -160,6 +169,7 @@ SH
 
 test_shuvcode_binary_prints_opencode_v2
 test_shuvcode_node_launcher_prints_opencode_v2
+test_shared_service_is_not_a_session
 test_v1_opencode_still_prints_opencode
 test_opencode2_beta_is_returned_unknown
 test_ambient_opencode_markers_change_nothing

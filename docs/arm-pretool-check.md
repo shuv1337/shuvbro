@@ -150,7 +150,8 @@ Prose may improve without changing adapter behavior.
 - Default deny mode also writes `{"decision":"deny","reason":"[code] reason"}` to stdout for Grok.
 - `--claude` suppresses stdout completely because Claude ignores a PreToolUse deny when stdout is nonempty.
 - Codex blocks on exit 2 and displays stderr.
-- OpenCode throws only when the checker exits 2.
+- OpenCode V1 throws only when the checker exits 2.
+- Shuvcode V2 fails the typed `execute.before` effect with `Tool.Error` when the checker exits 2.
 - Pi, pi-signed, and omp return `{block: true}` only when the checker exits 2.
 
 ## Harness wiring
@@ -161,7 +162,7 @@ Prose may improve without changing adapter behavior.
 | Claude | `.tool_input.command` | `.claude/settings.json` forwards stdin with `--claude`, leaving stdout empty and returning the stderr deny object. |
 | Grok | `.toolInput.command` | `.grok/hooks/fm-primary-pretool-check.json` forwards stdin and Grok consumes the stdout `decision=deny` object. |
 | OpenCode | `output.args.command` | `.opencode/plugins/fm-primary-pretool-check.js` passes one `--command` argument and throws only for exit 2. |
-| OpenCode V2 | The first `shell` resource on `permission.evaluate` | The same plugin's `setup` path passes one `--command` argument and sets the permission `effect` to `deny` with the helper's stderr as the message on exit 2 or when the helper cannot run; it registers no throwing tool or shell hook because a throw there becomes an Effect defect that ends the turn instead of a denial. |
+| OpenCode V2 | `execute.before` for tool `shell`, at `event.input.command` | The same plugin's Effect entrypoint passes the complete command as one `--command` argument. Exit 2 becomes a typed `Tool.Error`, so Shuvcode rejects the call before execution without turning the denial into an Effect defect; helper evaluation failure rejects the call as well. |
 | Pi / pi-signed | `event.input.command` | `.pi/extensions/fm-primary-turnend-guard.ts` passes one `--command` argument and returns `{block: true}` only for exit 2. |
 | omp | `event.input.command` | `.omp/extensions/fm-primary-turnend-guard.ts` passes one `--command` argument and returns `{block: true, reason}` only for exit 2; omp surfaces the reason verbatim to the model (verified 18.1.2). |
 | Cursor | `.tool_input.command` | `.cursor/hooks.json` matches `tool_name` `Shell` and forwards stdin with `--cursor`. Cursor reads the RETURNED object rather than the exit status, so `--cursor` prints `{"permission":"deny","user_message":"[code] reason"}` on stdout and exits 0; only that rendering is verified to block the command and surface the reason. |

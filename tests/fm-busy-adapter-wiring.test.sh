@@ -298,16 +298,17 @@ test_opencode_v2_plugin_scopes_to_this_location() {
       ses_other: { id: "ses_other", location: { directory: "/tmp/other-session" } }
     },
     events: [
-      {"type":"session.status","data":{"sessionID":"ses_other","status":{"type":"busy"}}},
-      {"type":"session.status","data":{"sessionID":"ses_other","status":{"type":"idle"}}},
-      {"type":"session.status","data":{"sessionID":"ses_worker","status":{"type":"busy"}}},
-      {"type":"session.status","data":{"sessionID":"ses_other","status":{"type":"idle"}}},
-      {"type":"session.status","data":{"sessionID":"ses_worker","status":{"type":"idle"}}}
+      {"type":"session.execution.started","data":{"sessionID":"ses_other"}},
+      {"type":"session.execution.succeeded","data":{"sessionID":"ses_other"}},
+      {"type":"session.execution.started","data":{"sessionID":"ses_worker"}},
+      {"type":"session.execution.succeeded","data":{"sessionID":"ses_other"}},
+      {"type":"session.execution.succeeded","data":{"sessionID":"ses_worker"}}
     ]
   }')") || fail "v2 busy drive failed: $out"
   out=$(classify opencode "$id" "$state")
   [ "$out" = "idle opencode-plugin" ] || fail "the worker session at this location must own busy/idle, got '$out'"
-  pass "opencode V2 plugin latches the worker session at this location, not a shared-server neighbor"
+  [ -f "$state/$id.turn-ended" ] || fail "a V2 terminal execution event did not touch the notification marker"
+  pass "opencode V2 plugin follows execution events for the worker session, not a shared-server neighbor"
 }
 
 run_claude_hook() {  # <settings.json> <hook-event>

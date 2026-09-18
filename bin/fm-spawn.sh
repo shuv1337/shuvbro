@@ -1450,7 +1450,7 @@ launch_template() {
         echo "error: opencode-v2 secondmates are not qualified; refuse before creating a worker" >&2
         return 1
       fi
-      printf '%s' 'shuvcode --auto --prompt "$(__OPINPUT__ encode launch-brief < __BRIEF__)"'
+      printf '%s' 'shuvcode --standalone --auto --prompt "$(__OPINPUT__ encode launch-brief < __BRIEF__)"'
       ;;
     pi|pi-signed)
       printf '%s' '__PIBIN____PITUIMODE__'
@@ -3290,12 +3290,12 @@ PKG
       cat > "$WT/.opencode/plugins/fm-busy-state.js" <<EOF
 // Firstmate semantic busy-state events + turn-end notification; written by
 // fm-spawn under the contract owned by bin/fm-busy-lib.sh.
-// Semantic state comes from OpenCode's session.status events: busy and retry
-// are active, idle is inactive. The V1 factory latches the first session that
-// reports activity. The V2 setup binds only sessions at this plugin instance
-// location that are not child sessions, then latches that worker session so a
-// shared-service neighbor cannot own the worker's busy state. The session.idle
-// touch stays the watcher's wake NOTIFICATION, never current-state truth.
+// The V1 factory uses OpenCode V1's session.status/session.idle events. Shuvcode
+// V2 instead publishes session.execution.started and one terminal execution
+// event per run. The V2 setup binds only a root session at this plugin instance
+// location, then latches that worker session so another session cannot own the
+// worker's busy state. Each owned terminal event touches the watcher's wake
+// NOTIFICATION; that marker is never current-state truth.
 import { execFile } from "node:child_process";
 const busyEvent = (state, event) =>
   new Promise((resolve) => {
@@ -3370,25 +3370,19 @@ async function setupBusyStateV2(ctx) {
           }
           continue;
         }
-        if (event.type === "session.status") {
+        if (event.type === "session.execution.started") {
           if (!(await owns(sessionID))) continue;
-          const statusType = data.status && data.status.type;
-          if (statusType === "busy" || statusType === "retry") {
-            if (latched === null) latched = sessionID;
-            if (sessionID === latched) await busyEvent("busy", "session-" + statusType);
-            continue;
-          }
-          if (statusType === "idle" && sessionID === latched) {
-            latched = null;
-            await busyEvent("idle", "session-status-idle");
-          }
+          if (latched === null) latched = sessionID;
+          if (sessionID === latched) await busyEvent("busy", "session-execution-started");
           continue;
         }
-        if (event.type === "session.idle") {
+        if (event.type === "session.execution.succeeded" ||
+            event.type === "session.execution.failed" ||
+            event.type === "session.execution.interrupted") {
           if (!(await owns(sessionID))) continue;
-          if (sessionID === latched) {
+          if (latched === null || sessionID === latched) {
             latched = null;
-            await busyEvent("idle", "session-idle");
+            await busyEvent("idle", event.type.replaceAll(".", "-"));
           }
           await touchTurnend();
         }

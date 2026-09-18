@@ -411,11 +411,11 @@ test_opencode_v2_launch_uses_auto_and_omits_model() {
   status=$?
   expect_code 0 "$status" "opencode-v2 ship spawn should succeed: $out"
   launch=$(cat "$LAUNCH_LOG")
-  assert_contains "$launch" "shuvcode --auto --prompt" \
-    "opencode-v2 launch must auto-approve permissions for an unattended worker"
+  assert_contains "$launch" "shuvcode --standalone --auto --prompt" \
+    "opencode-v2 launch must isolate the worker server and auto-approve permissions"
   assert_not_contains "$launch" "--model" \
     "opencode-v2 launch must not pass --model to the shuvcode root command"
-  pass "opencode-v2 launches shuvcode with --auto and without the unsupported --model flag"
+  pass "opencode-v2 launches standalone shuvcode with --auto and no unsupported --model flag"
 }
 
 test_opencode_worker_keeps_tracked_plugins_package_json() {

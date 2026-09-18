@@ -267,6 +267,15 @@ SH
   pass "session-lock: a shuvcode binary session is identified on both platforms"
 }
 
+test_shuvcode_shared_service_cannot_hold_a_session_lock() {
+  if bash -c '. "$1"; fm_shuvcode_process_matches shuvcode "shuvcode serve --service"' _ "$LIB"; then
+    fail "the shared shuvcode service was accepted as a session-lock owner"
+  fi
+  bash -c '. "$1"; fm_shuvcode_process_matches shuvcode "shuvcode serve --stdio --port 0"' _ "$LIB" \
+    || fail "a standalone shuvcode server was not accepted as its session-lock owner"
+  pass "session-lock: shared shuvcode service is rejected while standalone server is accepted"
+}
+
 # A tool subprocess under the shuvcode launch chain: either the node-interpreter
 # launcher or the compiled binary it execs can be the shuvcode ancestor that
 # owns the lock. The walk must resolve through both, innermost first.
@@ -556,6 +565,7 @@ test_ordinary_paths_are_never_harness_processes
 test_harness_beyond_a_gap_never_owns_the_lock
 test_competing_version_named_session_is_seen_as_live
 test_shuvcode_binary_session_is_identified_on_both_platforms
+test_shuvcode_shared_service_cannot_hold_a_session_lock
 test_shuvcode_launcher_chain_is_found
 test_v1_opencode_still_matches_for_lock
 test_similar_named_node_process_is_never_claimed

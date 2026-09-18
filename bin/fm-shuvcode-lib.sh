@@ -59,6 +59,13 @@ fm_shuvcode_args_are_shuvcode() {  # <args>
 fm_shuvcode_process_matches() {  # <comm> <args> [argv0]
   local comm=$1 args=${2:-} argv0=${3:-} base
   [ -n "$comm" ] || [ -n "$argv0" ] || return 1
+  # The shared background service outlives every individual session, so it can
+  # never identify a session or own one home's session lock. A standalone
+  # session's child server is distinguishable as `serve --stdio` and remains
+  # eligible, as do its launcher and TUI processes.
+  case " $args " in
+    *' serve --service '*) return 1 ;;
+  esac
   argv0=${argv0:-$comm}
   base=$(basename -- "$comm")
   base=${base#-}

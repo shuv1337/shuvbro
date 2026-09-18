@@ -16,7 +16,7 @@ Adapter id is `opencode-v2`.
 | Launcher | `~/.local/bin/shuvcode` is a node script (`#!/usr/bin/env node`) installed from the `shuvcode` npm package. |
 | Binary | The npm tree's `.../shuvcode-linux-x64/bin/shuvcode`, whose process name is `shuvcode`. |
 | Process tree | The launcher reports as node (comm `node-MainThread` on modern Node on Linux) with `node <launcher> ...` arguments; it runs the `shuvcode` binary. Tool subprocesses are children of the session service, not of a TUI named `opencode`. |
-| Session service | `shuvcode serve --service` runs from the systemd user unit `shuvcode.service` on this host and parents tool subprocesses. |
+| Session service | A qualified session uses `--standalone`; its leased child server runs as `shuvcode serve --stdio --port 0`, exits with the owning client, and parents tool subprocesses. The persistent `shuvcode serve --service` process is shared infrastructure and is never accepted as session or lock identity. |
 | Environment | Harness processes carry `OPENCODE_CONFIG_DIR=/home/shuv/.config/shuvcode`; tool subprocesses additionally carry `OPENCODE_TERMINAL=1`. |
 
 ## Detection evidence
@@ -27,7 +27,7 @@ Process detection is structural; it never executes a stranger binary during an a
 
 ## Dispatch
 
-Ship and scout launches use `shuvcode --auto --prompt`; `--auto` auto-approves permissions that are not explicitly denied so an unattended worker never parks on a permission dialog.
+Ship and scout launches use `shuvcode --standalone --auto --prompt`; `--standalone` gives each worker a leased server whose lifetime matches the session, while `--auto` auto-approves permissions that are not explicitly denied so an unattended worker never parks on a permission dialog.
 The root command accepts only `--standalone`, `--server`, `--auto`, `--continue`, `--session`, `--prompt`, and a directory; it rejects `--model` with usage text and exit 1, so a requested model is not passed and the worker runs on the host's configured model.
 The worker wiring writes `.opencode/plugins/package.json` only when the project has none, so a project that tracks that file keeps its own copy.
 Secondmate launches are refused until that role is qualified.
