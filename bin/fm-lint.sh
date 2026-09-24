@@ -43,8 +43,10 @@
 #
 # Canonical lint defaults to two bounded workers over two stable logical shards.
 # Each shard writes separate diagnostics, and the parent replays those outputs in
-# deterministic shard and root order after every worker finishes. FM_LINT_JOBS=1
-# runs the same shards serially with byte-identical diagnostics and exit selection.
+# deterministic shard and root order after every worker finishes. Each root is
+# its own ShellCheck process, including when that process follows sources.
+# FM_LINT_JOBS=1 runs the same shards serially with byte-identical diagnostics
+# and exit selection.
 #
 # Optional quiet telemetry writes one bounded TSV snapshot of content and source
 # graph identity, wall/CPU/RSS, shard load, and competing ShellCheck processes.
@@ -103,23 +105,20 @@ fm_lint_worker() {  # <manifest> <output-dir> <shard-index>
       shellcheck_args+=(--extended-analysis=false)
     fi
     : > "$output.out"
-    if [ "${FM_LINT_INTERNAL_FOLLOW_SOURCES:-1}" -eq 1 ]; then
-      "$FM_LINT_SHELLCHECK" "${shellcheck_args[@]}" -- "${roots[@]}" >> "$output.out" 2>&1 &
+    # One ShellCheck process per root. A single process over a whole shard
+    # follows every sourced file for every root at once and exhausts memory
+    # (the full canonical set was OOM-killed around 8GB RSS). External sources
+    # still apply to each root on its own.
+    for path in "${roots[@]}"; do
+      invocation_rc=0
+      "$FM_LINT_SHELLCHECK" "${shellcheck_args[@]}" -- "$path" >> "$output.out" 2>&1 &
       FM_LINT_WORKER_SHELLCHECK_PID=$!
-      wait "$FM_LINT_WORKER_SHELLCHECK_PID" || rc=$?
+      wait "$FM_LINT_WORKER_SHELLCHECK_PID" || invocation_rc=$?
       FM_LINT_WORKER_SHELLCHECK_PID=
-    else
-      for path in "${roots[@]}"; do
-        invocation_rc=0
-        "$FM_LINT_SHELLCHECK" "${shellcheck_args[@]}" -- "$path" >> "$output.out" 2>&1 &
-        FM_LINT_WORKER_SHELLCHECK_PID=$!
-        wait "$FM_LINT_WORKER_SHELLCHECK_PID" || invocation_rc=$?
-        FM_LINT_WORKER_SHELLCHECK_PID=
-        if [ "$rc" -eq 0 ] && [ "$invocation_rc" -ne 0 ]; then
-          rc=$invocation_rc
-        fi
-      done
-    fi
+      if [ "$rc" -eq 0 ] && [ "$invocation_rc" -ne 0 ]; then
+        rc=$invocation_rc
+      fi
+    done
     trap - HUP INT TERM
   else
     : > "$output.out"

@@ -564,10 +564,11 @@ test_changed_mode_invokes_shellcheck_once_per_root() {
 }
 
 test_ci_keeps_external_sources_without_local_exclusions() {
-  local tmp fakebin log flag_log mode_log fixture out
+  local tmp fakebin log flag_log mode_log fixture other out invocation_count
   tmp=$(fm_test_tmproot fm-lint-ci-follow)
   fakebin=$(fm_fakebin "$tmp")
   fixture="$tmp/fixture.sh"
+  other="$tmp/other.sh"
   log="$tmp/shellcheck.log"
   flag_log="$tmp/flags.log"
   mode_log="$tmp/mode.log"
@@ -575,14 +576,20 @@ test_ci_keeps_external_sources_without_local_exclusions() {
 #!/usr/bin/env bash
 printf '%s\n' "${1:-ok}"
 SH
+  cp "$fixture" "$other"
   fm_lint_stub_shellcheck "$fakebin" "$log"
 
   out=$(PATH="$fakebin:$PATH" CI=true GITHUB_ACTIONS=true FM_LINT_JOBS=1 \
     FM_TEST_FLAG_LOG="$flag_log" FM_TEST_MODE_LOG="$mode_log" \
-    "$LINT" "$fixture" 2>&1) \
+    "$LINT" "$fixture" "$other" 2>&1) \
     || fail "CI lint with explicit path failed"$'\n'"$out"
-  [ "$(cat "$mode_log")" = on ] \
+  [ "$(LC_ALL=C sort "$mode_log")" = $'on\non' ] \
     || fail "CI lint disabled dataflow analysis"
+  invocation_count=$(grep -c '^external-sources=' "$flag_log" || true)
+  [ "$invocation_count" -eq 2 ] \
+    || fail "CI lint used $invocation_count ShellCheck calls for two roots"
+  [ "$(LC_ALL=C sort "$log")" = "$fixture"$'\n'"$other" ] \
+    || fail "CI lint did not analyze each root on its own"$'\n'"logged: $(cat "$log")"
   fm_lint_assert_flag_log "$flag_log" yes none
   pass "fm-lint.sh CI keeps source following without the local exclusion list"
 }

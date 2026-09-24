@@ -285,6 +285,10 @@ reset_fixture; : > "$FIXTURE_DIR/focus-refuse"; assert_preserved "focus refusal"
 INTEGRATION_ROOT="$TMP_ROOT/bootstrap-integration"
 mkdir -p "$INTEGRATION_ROOT/home/state" "$INTEGRATION_ROOT/home/data" "$INTEGRATION_ROOT/home/config"
 cp -R "$ROOT/bin" "$INTEGRATION_ROOT/bin"
+# Session start renders the harness protocol from beside the copied bin.
+# The fixture copies bin only, so give it the protocol pages that render needs.
+mkdir -p "$INTEGRATION_ROOT/docs/supervision-protocols"
+cp -R "$ROOT/docs/supervision-protocols/." "$INTEGRATION_ROOT/docs/supervision-protocols/"
 TRACE="$INTEGRATION_ROOT/cleanup.trace"
 cat > "$INTEGRATION_ROOT/bin/fm-herdr-session-cleanup.sh" <<'SH'
 #!/usr/bin/env bash

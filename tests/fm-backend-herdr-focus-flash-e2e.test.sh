@@ -340,9 +340,16 @@ if [ "$STEAL_LIVE" = 1 ]; then
   # explicitly accepted here, but only as a BOUNDED one: the restore backstop
   # must have put the anchor back exactly, and the whole exposure must end with
   # the operation rather than parking the captain somewhere else.
-  [ "$C_WRONG" -ge 1 ] \
-    || fail 'Part C reached the fallback on a defective release but observed no wrong-focus sample at all, so the sampler proved nothing'
-  pass "fallback on a defective release: a bounded wrong-focus window of $C_WRONG samples was fully restored to the anchor"
+  # Herdr serves one command at a time, so an external sampler often observes
+  # only the restored anchor. The production backstop calls tab focus only
+  # after its own snapshot sees the steal, which is the proof in that case.
+  if [ "$C_WRONG" -ge 1 ]; then
+    pass "fallback on a defective release: a bounded wrong-focus window of $C_WRONG samples was fully restored to the anchor"
+  elif grep -q '^tab focus' "$C_CALL_LOG"; then
+    pass 'fallback on a defective release: the exact-tab restore corrected the stolen focus before the sampler observed a stable wrong sample'
+  else
+    fail 'Part C reached the fallback on a defective release but neither the sampler nor the exact-tab restore observed the stolen focus'
+  fi
 else
   [ "$C_WRONG" -eq 0 ] \
     || fail "a focus-preserving release exposed $C_WRONG wrong-focus samples on the fallback path"

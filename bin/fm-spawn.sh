@@ -1034,8 +1034,10 @@ spawn_herdr_presentation_order_lock_acquire() {
   [ -n "$session" ] || session=$(fm_backend_herdr_session)
   lock_path=$(fm_backend_herdr_presentation_session_lock_path "$session") || return 1
   HERDR_PRESENTATION_ORDER_LOCK="$lock_path"
+  # A peer resume waits out one reclaim. Five seconds was shorter than a
+  # loaded reclaim, so the waiter refused the resume this lock serializes.
   attempt=0
-  while [ "$attempt" -lt 50 ]; do
+  while [ "$attempt" -lt 300 ]; do
     if fm_lock_try_acquire "$HERDR_PRESENTATION_ORDER_LOCK"; then
       HERDR_PRESENTATION_ORDER_LOCK_HELD=1
       return 0
@@ -1844,7 +1846,7 @@ muse_credential_present() {
 # default OpenCode model. An effort with no provider/model cannot be expressed
 # as a flag, so it stays in task metadata and the root launch is unchanged.
 opencode_v2_model_flag() {
-  local model=$1 effort=$2 ref variant
+  local model=$1 effort=$2 ref='' variant=''
   [ -n "$model" ] && [ "$model" != default ] && ref=$model
   case "$effort" in
     low|medium|high|xhigh|max) variant=$effort ;;
