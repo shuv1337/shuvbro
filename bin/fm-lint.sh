@@ -41,12 +41,17 @@
 # invocations in the core bin/ and bin/backends/ scripts so every configured
 # backlog backend follows the same tasks-axi lifecycle path.
 #
-# Canonical lint defaults to two bounded workers over two stable logical shards.
+# Canonical lint keeps two stable logical shards. Local changed-file mode, which
+# does not follow sources, runs those shards on two workers. Full source-following
+# analysis uses one worker unless --jobs or FM_LINT_JOBS selects two. One
+# ShellCheck process follows every sourced file for its root, and a second
+# concurrent process exhausts a hosted runner: the CI lint step is signaled and
+# exits 143 before any finding is printed.
 # Each shard writes separate diagnostics, and the parent replays those outputs in
 # deterministic shard and root order after every worker finishes. Each root is
 # its own ShellCheck process, including when that process follows sources.
 # FM_LINT_JOBS=1 runs the same shards serially with byte-identical diagnostics
-# and exit selection.
+# and exit selection. FM_LINT_JOBS=2 keeps that output and runs both shards at once.
 #
 # Optional quiet telemetry writes one bounded TSV snapshot of content and source
 # graph identity, wall/CPU/RSS, shard load, and competing ShellCheck processes.
@@ -391,7 +396,13 @@ fm_lint_run_backend_purity() {
   }
 }
 
-JOBS=${FM_LINT_JOBS:-2}
+JOBS_EXPLICIT=0
+if [ -n "${FM_LINT_JOBS:-}" ]; then
+  JOBS=$FM_LINT_JOBS
+  JOBS_EXPLICIT=1
+else
+  JOBS=2
+fi
 TELEMETRY=${FM_LINT_TELEMETRY:-}
 FAST=0
 ANALYSIS_MODE=full
@@ -401,10 +412,12 @@ while [ "$#" -gt 0 ]; do
     --jobs)
       [ "$#" -ge 2 ] || { printf 'fm-lint.sh: --jobs requires 1 or 2.\n' >&2; exit 2; }
       JOBS=$2
+      JOBS_EXPLICIT=1
       shift 2
       ;;
     --jobs=*)
       JOBS=${1#*=}
+      JOBS_EXPLICIT=1
       shift
       ;;
     --telemetry)
@@ -517,6 +530,11 @@ if [ "$CHANGED_MODE" -eq 1 ] && [ "$FAST" -eq 0 ]; then
   FOLLOW_SOURCES=0
   EXCLUDE_CODES=$LOCAL_NOX_EXCLUDE
   ANALYSIS_MODE=local
+fi
+# Two concurrent source-following processes exhaust a hosted runner. The
+# explicit job selectors above still choose 1 or 2.
+if [ "$JOBS_EXPLICIT" -eq 0 ] && [ "$FOLLOW_SOURCES" -eq 1 ]; then
+  JOBS=1
 fi
 ROOT_COUNT=${#ROOTS[@]}
 

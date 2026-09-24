@@ -594,6 +594,30 @@ SH
   pass "fm-lint.sh CI keeps source following without the local exclusion list"
 }
 
+test_source_following_defaults_to_one_worker() {
+  local tmp fakebin log telemetry fixture other out
+  tmp=$(fm_test_tmproot fm-lint-one-worker)
+  fakebin=$(fm_fakebin "$tmp")
+  fixture="$tmp/fixture.sh"
+  other="$tmp/other.sh"
+  log="$tmp/shellcheck.log"
+  telemetry="$tmp/telemetry.tsv"
+  cat > "$fixture" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "${1:-ok}"
+SH
+  cp "$fixture" "$other"
+  fm_lint_stub_shellcheck "$fakebin" "$log"
+
+  out=$(env -u FM_LINT_JOBS PATH="$fakebin:$PATH" CI=true GITHUB_ACTIONS=true \
+    "$LINT" --telemetry "$telemetry" "$fixture" "$other" 2>&1) \
+    || fail "source-following lint failed"$'\n'"$out"
+  assert_grep $'jobs\t1' "$telemetry" "source-following lint started two ShellCheck workers"
+  [ "$(wc -l < "$log" | tr -d '[:space:]')" -eq 2 ] \
+    || fail "source-following lint did not analyze both roots"
+  pass "fm-lint.sh source following defaults to one worker"
+}
+
 test_main_branch_keeps_external_sources() {
   local tmp fakebin log flag_log out
   tmp=$(fm_test_tmproot fm-lint-main-follow)
@@ -1401,6 +1425,7 @@ test_list_files_respects_changed_mode
 test_changed_mode_drops_external_sources_and_excludes_cross_file_codes
 test_changed_mode_invokes_shellcheck_once_per_root
 test_ci_keeps_external_sources_without_local_exclusions
+test_source_following_defaults_to_one_worker
 test_main_branch_keeps_external_sources
 test_merge_base_less_keeps_external_sources
 test_explicit_path_keeps_external_sources
