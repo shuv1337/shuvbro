@@ -498,22 +498,78 @@ run_opencode_v2_spawn() {  # <id> [fm-spawn args...]
     run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" "$@"
 }
 
-test_opencode_v2_launch_uses_auto_and_omits_model() {
-  local rec id out status launch
-  id=profile-opencode-v2-z9
-  rec=$(make_spawn_case profile-opencode-v2 opencode-v2 "$id")
+opencode_v2_launch_case() {  # <name> <id>
+  local rec
+  rec=$(make_spawn_case "$1" opencode-v2 "$2")
   read_case_record "$rec"
   make_opencode_v2_tmux "$FAKEBIN_DIR"
+}
 
-  out=$(run_opencode_v2_spawn "$id" --model some-model)
+test_opencode_v2_launch_uses_auto_and_omits_model() {
+  local id out status launch
+  id=profile-opencode-v2-z9
+  opencode_v2_launch_case profile-opencode-v2 "$id"
+
+  out=$(run_opencode_v2_spawn "$id")
   status=$?
-  expect_code 0 "$status" "opencode-v2 ship spawn should succeed: $out"
+  expect_code 0 "$status" "opencode-v2 ship spawn without a model should succeed: $out"
   launch=$(cat "$LAUNCH_LOG")
   assert_contains "$launch" "shuvcode --standalone --auto --prompt" \
     "opencode-v2 launch must isolate the worker server and auto-approve permissions"
   assert_not_contains "$launch" "--model" \
-    "opencode-v2 launch must not pass --model to the shuvcode root command"
-  pass "opencode-v2 launches standalone shuvcode with --auto and no unsupported --model flag"
+    "opencode-v2 launch without a model must not pass --model"
+  assert_not_contains "$launch" "--effort" \
+    "opencode-v2 launch must not pass --effort"
+  assert_not_contains "$launch" "shuvcode mini" \
+    "opencode-v2 launch without a model must stay on the root command"
+
+  id=profile-opencode-v2-effort-z9b
+  opencode_v2_launch_case profile-opencode-v2-effort "$id"
+  out=$(run_opencode_v2_spawn "$id" --effort low)
+  status=$?
+  expect_code 0 "$status" "opencode-v2 effort without a model should still launch: $out"
+  launch=$(cat "$LAUNCH_LOG")
+  assert_contains "$launch" "shuvcode --standalone --auto --prompt" \
+    "effort without a provider/model must stay on the root command"
+  assert_not_contains "$launch" "--effort" \
+    "opencode-v2 must not pass an --effort flag"
+  assert_not_contains "$launch" "--model" \
+    "effort without a provider/model has no model reference to attach a variant to"
+
+  id=profile-opencode-v2-model-z9c
+  opencode_v2_launch_case profile-opencode-v2-model "$id"
+  out=$(run_opencode_v2_spawn "$id" --model opencode/space-bunny-free)
+  status=$?
+  expect_code 0 "$status" "opencode-v2 model spawn should succeed: $out"
+  launch=$(cat "$LAUNCH_LOG")
+  assert_contains "$launch" "shuvcode mini --standalone --model 'opencode/space-bunny-free' --prompt" \
+    "opencode-v2 model must use mini --model provider/model"
+  assert_not_contains "$launch" "--effort" \
+    "opencode-v2 model launch must not pass --effort"
+  assert_not_contains "$launch" "#" \
+    "a model without effort must not invent a variant suffix"
+
+  id=profile-opencode-v2-variant-z9d
+  opencode_v2_launch_case profile-opencode-v2-variant "$id"
+  out=$(run_opencode_v2_spawn "$id" --model opencode/space-bunny-free --effort low)
+  status=$?
+  expect_code 0 "$status" "opencode-v2 model and effort spawn should succeed: $out"
+  launch=$(cat "$LAUNCH_LOG")
+  assert_contains "$launch" "shuvcode mini --standalone --model 'opencode/space-bunny-free#low' --prompt" \
+    "opencode-v2 effort must be the #variant suffix of --model"
+  assert_not_contains "$launch" "--effort" \
+    "opencode-v2 must not pass --effort beside the variant"
+  assert_not_contains "$launch" "--auto" \
+    "shuvcode mini has no --auto flag"
+
+  id=profile-opencode-v2-bare-z9e
+  opencode_v2_launch_case profile-opencode-v2-bare "$id"
+  out=$(run_opencode_v2_spawn "$id" --model some-model 2>&1)
+  status=$?
+  [ "$status" -ne 0 ] || fail "a bare opencode-v2 model must be refused: $out"
+  assert_contains "$out" "provider/model" \
+    "a bare opencode-v2 model lacked the provider/model refusal"
+  pass "opencode-v2 keeps the root launch without a model and encodes effort as provider/model#variant"
 }
 
 # shuvcode's --prompt only pre-fills the composer, so a worker whose brief is

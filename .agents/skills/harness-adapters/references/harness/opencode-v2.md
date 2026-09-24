@@ -37,11 +37,20 @@ A project plugin cannot import shuvcode's own `Tool.Error` class; shuvcode match
 
 ## Dispatch
 
-Ship and scout launches use `shuvcode --standalone --auto --prompt`; `--standalone` gives each worker a leased server whose lifetime matches the session, while `--auto` auto-approves permissions that are not explicitly denied so an unattended worker never parks on a permission dialog.
-The root command accepts only `--standalone`, `--server`, `--auto`, `--continue`, `--session`, `--prompt`, and a directory; it rejects `--model` with usage text and exit 1, so a requested model is not passed and the worker runs on the host's configured model.
+Ship and scout launches with no model use `shuvcode --standalone --auto --prompt`.
+`--standalone` gives each worker a leased server whose lifetime matches the session, while `--auto` auto-approves permissions that are not explicitly denied so an unattended worker never parks on a permission dialog.
+The root command accepts only `--standalone`, `--server`, `--auto`, `--continue`, `--session`, `--prompt`, and a directory.
+It rejects `--model` and `--effort` with usage text and exit 1.
+A requested model is launched with `shuvcode mini --standalone --model <provider/model[#variant]> --prompt` instead.
+Verified on shuvcode v2.0.15-shuv.1, `mini` and `run` accept `--model provider/model#variant`.
+That variant is the effort.
+The default OpenCode model's variant ids are `low`, `medium`, `high`, `xhigh`, and `max`.
+Firstmate maps those effort levels onto the `#variant` suffix and never passes `--effort`.
+An effort with no `provider/model` stays in task metadata and the launch stays on the root command, because a variant cannot be selected without a model reference.
+`shuvcode mini --prompt` submits the brief itself, so that launch does not wait for the root composer's Enter.
 The interactive root command's `--prompt` only pre-fills the TUI composer and never submits it (verified live on shuvcode v2.0.3-shuv.4), so `bin/fm-spawn.sh` waits for the pre-filled left-bar composer and then submits it with Enter, retrying Enter only, until the shared composer classifier reads empty; a brief that never shows or never submits fails the spawn and closes the endpoint.
 Under `--auto` the composer footer reads `Build auto · <model> · <effort>` with the `auto` word and `·` separators in muted truecolor, so the classifier recognises that footer from the plain row rather than the ghost-stripped one.
 The worker wiring writes `.opencode/plugins/package.json` only when the project has none, so a project that tracks that file keeps its own copy.
 Secondmate launches are refused until that role is qualified.
 Busy state comes from the Firstmate-owned worker plugin's `session.execution.started` (busy) and its `session.execution.succeeded`, `failed`, or `interrupted` terminal event (idle), latched to the worker's own root session; shuvcode publishes no `session.status` or `session.idle` event to plugins.
-Exit command, interrupt, resume, model selection, and effort flags for this adapter have no verified facts yet; verify them before a control plan relies on them.
+Exit command, interrupt, and resume for this adapter have no verified facts in this file yet; verify them before a control plan relies on them.

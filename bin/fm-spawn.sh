@@ -1838,8 +1838,43 @@ muse_credential_present() {
   [ -s "$auth" ] || muse_worker_meta_api_key_present
 }
 
+# shuvcode v2.0.15-shuv.1 accepts a model on `mini` and `run` as
+# provider/model#variant. The variant is the effort. The root command rejects
+# both --model and --effort. low|medium|high|xhigh|max are variant ids on the
+# default OpenCode model. An effort with no provider/model cannot be expressed
+# as a flag, so it stays in task metadata and the root launch is unchanged.
+opencode_v2_model_flag() {
+  local model=$1 effort=$2 ref variant
+  [ -n "$model" ] && [ "$model" != default ] && ref=$model
+  case "$effort" in
+    low|medium|high|xhigh|max) variant=$effort ;;
+  esac
+  [ -n "$ref" ] || return 0
+  case "$ref" in
+    *'#'*)
+      echo "error: opencode-v2 model '$ref' must be provider/model; pass the variant with --effort" >&2
+      return 1
+      ;;
+    */*) ;;
+    *)
+      echo "error: opencode-v2 model '$ref' must be provider/model so shuvcode can take provider/model#variant" >&2
+      return 1
+      ;;
+  esac
+  if [ -n "$variant" ]; then
+    ref="${ref}#${variant}"
+  fi
+  printf -- '--model %s ' "$(shell_quote "$ref")"
+}
+
 model_flag_for_harness() {
   local harness=$1 model=$2
+  case "$harness" in
+    opencode-v2)
+      opencode_v2_model_flag "$model" "$EFFORT" || return 1
+      return 0
+      ;;
+  esac
   [ -n "$model" ] && [ "$model" != default ] || return 0
   case "$harness" in
     claude|codex|opencode|pi|pi-signed|grok|kimi|cursor|gemini|muse|rovo|omp)
@@ -1913,6 +1948,8 @@ effort_flag_for_harness() {
     # opencode's interactive `opencode --prompt` launch has a verified --model
     # flag but no verified effort flag. Its `opencode run --variant` flag belongs
     # to a different, non-interactive launch mode, so fm-spawn does not pass it.
+    # opencode-v2 effort is the #variant suffix of --model, built by
+    # opencode_v2_model_flag. This function emits no --effort flag for it.
     # kimi likewise has no reasoning-effort flag; the requested axis stays in
     # task metadata but never reaches the launch command. Cursor encodes effort
     # in model ids such as cursor-grok-4.5-high, so it also receives no separate
@@ -3885,8 +3922,23 @@ sq_ompext=$(shell_quote "$STATE/$ID.omp-ext.ts")
 sq_ompcfg=$(shell_quote "${OMP_WORKER_CFG:-$FM_ROOT/.omp/fm-worker-overlay.yml}")
 sq_opinput=$(shell_quote "$FM_ROOT/bin/fm-operational-input.sh")
 sq_worktree=$(shell_quote "$WT")
-MODELFLAG=$(model_flag_for_harness "$HARNESS" "$MODEL")
+MODELFLAG=$(model_flag_for_harness "$HARNESS" "$MODEL") || exit 1
 EFFORTFLAG=$(effort_flag_for_harness "$HARNESS" "$EFFORT" "$MODEL") || exit 1
+# The root shuvcode command rejects --model. mini accepts
+# --model provider/model#variant and submits --prompt itself.
+OPENCODE_V2_MINI=0
+if [ "$HARNESS" = opencode-v2 ] && [ -n "$MODELFLAG" ]; then
+  OPENCODE_V2_MINI=1
+  case "$LAUNCH" in
+    'shuvcode --standalone --auto --prompt '*)
+      LAUNCH="shuvcode mini --standalone ${MODELFLAG}${LAUNCH#shuvcode --standalone --auto }"
+      ;;
+    *)
+      echo "error: opencode-v2 model launch could not be rewritten onto shuvcode mini" >&2
+      exit 1
+      ;;
+  esac
+fi
 LAUNCH=${LAUNCH//__MODELFLAG__/$MODELFLAG}
 LAUNCH=${LAUNCH//__EFFORTFLAG__/$EFFORTFLAG}
 if [ "$HARNESS" = rovo ]; then
@@ -4084,7 +4136,9 @@ if [ "$HARNESS" = rovo ]; then
     exit 1
   fi
 fi
-if [ "$HARNESS" = opencode-v2 ]; then
+# mini --prompt submits the brief. The root TUI only pre-fills it, so only
+# that launch waits for the composer and sends Enter.
+if [ "$HARNESS" = opencode-v2 ] && [ "$OPENCODE_V2_MINI" != 1 ]; then
   if ! opencode_v2_wait_for_prefill; then
     opencode_v2_spawn_fail "shuvcode did not show its pre-filled launch brief in window $T"
     exit 1
