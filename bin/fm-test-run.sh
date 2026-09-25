@@ -658,7 +658,16 @@ tests/fm-opencode-primary-live-e2e.test.sh 21
 tests/fm-opencode-v2-plugin.test.sh 8000
 tests/fm-operational-input.test.sh 231
 tests/fm-peek-remote.test.sh 1018
-tests/fm-pending-reply.test.sh 86711
+tests/fm-pending-reply-10.test.sh 4350
+tests/fm-pending-reply-2.test.sh 8700
+tests/fm-pending-reply-3.test.sh 4350
+tests/fm-pending-reply-4.test.sh 17400
+tests/fm-pending-reply-5.test.sh 17111
+tests/fm-pending-reply-6.test.sh 2900
+tests/fm-pending-reply-7.test.sh 8700
+tests/fm-pending-reply-8.test.sh 2900
+tests/fm-pending-reply-9.test.sh 2900
+tests/fm-pending-reply.test.sh 17400
 tests/fm-persona-lib.test.sh 925
 tests/fm-pi-branch-extension.test.sh 22239
 tests/fm-pi-branch-live-e2e.test.sh 56
