@@ -3,7 +3,8 @@ name: Stock macOS Bash label
 # Adding the macos label must run the stock-Bash job without starting CI.
 # A labeled event on ci.yml would rerun that suite, and skipping CI's other
 # jobs would report them as success and could clear a real failure.
-# The shell script matches macos-stock-bash in ci.yml. Keep the two copies identical.
+# The Node install, jq pin, and shell script match macos-stock-bash in ci.yml.
+# Keep the two copies identical.
 on:
   pull_request:
     types: [labeled]
@@ -17,21 +18,46 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # TODO(FM-GH-CI-3): switch runs-on to self-hosted labels once runners are installed; private repo only
-
   macos-stock-bash:
     name: Stock macOS Bash snapshot compatibility
-    runs-on: macos-latest
-    if: github.event.label.name == 'macos'
+    runs-on: [self-hosted, macOS, ARM64, shuv-ci, shuvbro-ci, shuvbot]
+    # Same stock-Bash steps as macos-stock-bash in ci.yml. Keep Node install,
+    # the jq pin, and the shell script identical. A non-macos label skips
+    # this job. A fork pull request skips it too, so it is not assigned to
+    # the mac runner.
+    if: >-
+      github.event.label.name == 'macos' &&
+      github.event.pull_request.head.repo.full_name == github.repository
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
-      - name: Run snapshot consumers with stock Bash
+        with:
+          persist-credentials: false
+      - name: Install Node without Homebrew
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - name: Install pinned jq
         shell: /bin/bash {0}
-        env:
-          PATH: /bin:/usr/bin:/usr/sbin:/sbin:/usr/local/bin:/opt/homebrew/bin
         run: |
           set -eu
+          mkdir -p "$RUNNER_TEMP/bin"
+          curl -fsSL -o "$RUNNER_TEMP/bin/jq" "https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-macos-arm64"
+          actual=$(shasum -a 256 "$RUNNER_TEMP/bin/jq" | awk '{print $1}')
+          expected=0bbe619e663e0de2c550be2fe0d240d076799d6f8a652b70fa04aea8a8362e8a
+          [ "$actual" = "$expected" ] || { echo "::error::jq checksum mismatch (got ${actual})"; exit 1; }
+          chmod +x "$RUNNER_TEMP/bin/jq"
+          command -v node >/dev/null || { echo "::error::node is required"; exit 1; }
+          dirname "$(command -v node)" > "$RUNNER_TEMP/node-bin"
+      - name: Run snapshot consumers with stock Bash
+        shell: /bin/bash {0}
+        run: |
+          set -eu
+          # /bin/bash is selected by this step's shell. Reset PATH before any
+          # lookup so Homebrew cannot satisfy jq, npm, or bash.
+          node_bin=$(PATH="/bin:/usr/bin" cat "$RUNNER_TEMP/node-bin")
+          PATH="$RUNNER_TEMP/bin:${node_bin}:/bin:/usr/bin:/usr/sbin:/sbin"
+          export PATH
           case "$BASH_VERSION" in
             3.2.57*) ;;
             *) echo "::error::expected stock macOS Bash 3.2.57, got $BASH_VERSION"; exit 1 ;;
@@ -48,8 +74,8 @@ jobs:
           [ "$parse_fail" -eq 0 ] || { echo "::error::stock macOS Bash 3.2 parse sweep failed"; exit 1; }
 
           command -v npm >/dev/null || { echo "::error::npm is required to install tasks-axi"; exit 1; }
-          npm install -g tasks-axi@0.2.5 >/dev/null
-          PATH="$(npm prefix -g)/bin:$PATH"
+          npm install --prefix "$RUNNER_TEMP/npm" tasks-axi@0.2.5 >/dev/null
+          PATH="$RUNNER_TEMP/npm/node_modules/.bin:$PATH"
           export PATH
           command -v tasks-axi >/dev/null || { echo "::error::tasks-axi is required for the stock Bash regressions"; exit 1; }
 

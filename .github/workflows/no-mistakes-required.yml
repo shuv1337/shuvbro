@@ -21,11 +21,13 @@ concurrency:
 jobs:
   check:
     name: PR must be raised via no-mistakes
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, shuv-ci, shuvbro-ci]
     # The check itself is about a minute. This cap stops a hung action short
-    # of the 6-hour default.
+    # of the 6-hour default. A fork pull request is skipped so it is not
+    # assigned to a self-hosted runner. There is no checkout in this job.
     timeout-minutes: 10
     if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
       github.event.pull_request.user.login != 'github-actions[bot]' &&
       github.event.pull_request.user.login != 'dependabot[bot]'
     steps:
