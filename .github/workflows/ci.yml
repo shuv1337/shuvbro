@@ -1,18 +1,39 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
+  # One run per PR. The merge commit is the same tree the pull_request run
+  # already tested, so a second push-to-main run only doubled the minutes.
+  # `labeled` is not listed here. A label event would rerun this suite, and
+  # skipping these jobs would report them as success and could clear a real
+  # failure on the same SHA. Adding the macos label runs the stock-Bash job
+  # from macos-label.yml. This workflow still runs that job when the label is
+  # already on the PR, and on workflow_dispatch.
   pull_request:
+    types: [opened, synchronize, reopened]
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+# Cancel a superseded run for the same PR (or the same ref, for a dispatch).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  # TODO(FM-GH-CI-3): switch runs-on to self-hosted labels once runners are installed; private repo only
+
   lint:
     name: Lint
     runs-on: ubuntu-latest
+    # Full-corpus ShellCheck via bin/fm-lint.sh. Pinned tool installs are about
+    # a second; the ~19 minute average is that analysis, so caching the
+    # downloads would not shorten the check and narrowing it would drop
+    # source-aware rules CI is required to keep. 40 minutes is above the slow
+    # green runs (~23 min) and stops a wedged analysis short of the 6-hour
+    # default.
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v6
       - name: Install pinned ShellCheck
@@ -37,6 +58,7 @@ jobs:
   test-coverage:
     name: Test coverage guard
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
       - name: Prove complete regression partition
@@ -47,9 +69,13 @@ jobs:
   tests-portable-parallel-1:
     name: Behavior portable parallel 1
     runs-on: ubuntu-latest
-    # Measured shard wall is ~1 min of serial sum on proven scripts; this cap is
-    # a hang tripwire with margin, not the expected healthy end of the lane.
-    timeout-minutes: 10
+    # Hang tripwire, not the expected end of the lane. The old 10-minute cap
+    # was sized for the 2026-08 proof (~2 min) and cancelled every slower run
+    # while tests were still passing: shard 1 carried captain-hold (~3-5 min),
+    # fm-lint (~2 min), and fm-test-run (~1-2 min) together. Membership is
+    # rebalanced from the 2026-09-18 green run (about 5 min per shard, about
+    # 9 min on a slow runner). 15 minutes still fails a stuck script.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
         with:
@@ -92,7 +118,9 @@ jobs:
   tests-portable-parallel-2:
     name: Behavior portable parallel 2
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # Same hang tripwire as shard 1. After the rebalance this shard's healthy
+    # wall matches shard 1 (about 5 min, about 9 min on a slow runner).
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
         with:
@@ -341,7 +369,9 @@ jobs:
       - tests-portable-parallel-2
       - tests-portable-serial
       - tests-herdr
+    # always() so a failed lane still publishes timings.
     if: always()
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
       - name: Download lane timing artifacts
@@ -374,6 +404,13 @@ jobs:
   macos-stock-bash:
     name: Stock macOS Bash snapshot compatibility
     runs-on: macos-latest
+    # macOS minutes are weighted 10x. Run this only on demand or when the PR
+    # already carries the macos label. Adding that label later is macos-label.yml,
+    # not a second copy of this suite. Keep the shell script identical there.
+    # Do not require this check: a skipped conditional job counts as success.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'macos'))
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
@@ -434,6 +471,7 @@ jobs:
   invariants:
     name: Repo invariants
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
       - name: Compatibility pointers must stay intact
