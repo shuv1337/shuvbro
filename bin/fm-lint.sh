@@ -45,6 +45,10 @@
 # Each shard writes separate diagnostics, and the parent replays those outputs in
 # deterministic shard and root order after every worker finishes. FM_LINT_JOBS=1
 # runs the same shards serially with byte-identical diagnostics and exit selection.
+# FM_LINT_ONE_FILE=1 keeps those flags and roots and invokes ShellCheck once per
+# root when source following is on, so one shard's combined source graph does
+# not have to fit in one process.
+# Unset stays one invocation per shard.
 #
 # Optional quiet telemetry writes one bounded TSV snapshot of content and source
 # graph identity, wall/CPU/RSS, shard load, and competing ShellCheck processes.
@@ -103,7 +107,10 @@ fm_lint_worker() {  # <manifest> <output-dir> <shard-index>
       shellcheck_args+=(--extended-analysis=false)
     fi
     : > "$output.out"
-    if [ "${FM_LINT_INTERNAL_FOLLOW_SOURCES:-1}" -eq 1 ]; then
+    # Source following defaults to one invocation for the shard. One-file mode
+    # uses the per-root loop below so peak RSS is one root's graph.
+    if [ "${FM_LINT_INTERNAL_FOLLOW_SOURCES:-1}" -eq 1 ] \
+      && [ "${FM_LINT_INTERNAL_ONE_FILE:-0}" -eq 0 ]; then
       "$FM_LINT_SHELLCHECK" "${shellcheck_args[@]}" -- "${roots[@]}" >> "$output.out" 2>&1 &
       FM_LINT_WORKER_SHELLCHECK_PID=$!
       wait "$FM_LINT_WORKER_SHELLCHECK_PID" || rc=$?
@@ -443,6 +450,16 @@ case "$JOBS" in
   *) printf 'fm-lint.sh: jobs must be 1 or 2, got %s.\n' "$JOBS" >&2; exit 2 ;;
 esac
 
+if [ -n "${FM_LINT_ONE_FILE+x}" ]; then
+  ONE_FILE=$FM_LINT_ONE_FILE
+else
+  ONE_FILE=0
+fi
+case "$ONE_FILE" in
+  0|1) ;;
+  *) printf 'fm-lint.sh: FM_LINT_ONE_FILE must be 0 or 1, got %s.\n' "$ONE_FILE" >&2; exit 2 ;;
+esac
+
 if [ "$FAST" -eq 1 ] && { [ "${GITHUB_ACTIONS:-}" = true ] || [ "${CI:-}" = true ]; }; then
   printf 'fm-lint.sh: --fast is local-only; CI uses full ShellCheck analysis.\n' >&2
   exit 2
@@ -552,6 +569,8 @@ if [ "$FAST" -eq 1 ]; then
   printf 'fm-lint.sh: fast local mode; ShellCheck extended analysis disabled\n' >&2
 elif [ "$FOLLOW_SOURCES" -eq 0 ]; then
   printf 'fm-lint.sh: local changed-file mode; ShellCheck source following disabled\n' >&2
+elif [ "$ONE_FILE" -eq 1 ]; then
+  printf 'fm-lint.sh: full ShellCheck extended analysis enabled, one root per process\n' >&2
 else
   printf 'fm-lint.sh: full ShellCheck extended analysis enabled\n' >&2
 fi
@@ -690,6 +709,7 @@ fm_lint_run_worker() {  # <worker-index>
         /usr/bin/time -lp -o "$timing" \
         env FM_LINT_INTERNAL=1 FM_LINT_INTERNAL_FAST="$FAST" \
         FM_LINT_INTERNAL_FOLLOW_SOURCES="$FOLLOW_SOURCES" FM_LINT_INTERNAL_EXCLUDE="$EXCLUDE_CODES" \
+        FM_LINT_INTERNAL_ONE_FILE="$ONE_FILE" \
         FM_LINT_SHELLCHECK="$SHELLCHECK_BIN" \
         "${BASH:-bash}" "$SELF" --internal-worker "$manifest" "$OUTPUT_DIR" "$worker_index"
     else
@@ -697,6 +717,7 @@ fm_lint_run_worker() {  # <worker-index>
         /usr/bin/time -f 'wall_seconds=%e\nuser_seconds=%U\nsystem_seconds=%S\nmax_rss_kib=%M' -o "$timing" \
         env FM_LINT_INTERNAL=1 FM_LINT_INTERNAL_FAST="$FAST" \
         FM_LINT_INTERNAL_FOLLOW_SOURCES="$FOLLOW_SOURCES" FM_LINT_INTERNAL_EXCLUDE="$EXCLUDE_CODES" \
+        FM_LINT_INTERNAL_ONE_FILE="$ONE_FILE" \
         FM_LINT_SHELLCHECK="$SHELLCHECK_BIN" \
         "${BASH:-bash}" "$SELF" --internal-worker "$manifest" "$OUTPUT_DIR" "$worker_index"
     fi
@@ -705,6 +726,7 @@ fm_lint_run_worker() {  # <worker-index>
     exec "$PERL_BIN" -e 'setpgrp(0, 0) or die "setpgrp: $!"; exec @ARGV or die "exec: $!"' \
       env FM_LINT_INTERNAL=1 FM_LINT_INTERNAL_FAST="$FAST" \
       FM_LINT_INTERNAL_FOLLOW_SOURCES="$FOLLOW_SOURCES" FM_LINT_INTERNAL_EXCLUDE="$EXCLUDE_CODES" \
+      FM_LINT_INTERNAL_ONE_FILE="$ONE_FILE" \
       FM_LINT_SHELLCHECK="$SHELLCHECK_BIN" \
       "${BASH:-bash}" "$SELF" --internal-worker "$manifest" "$OUTPUT_DIR" "$worker_index"
   fi

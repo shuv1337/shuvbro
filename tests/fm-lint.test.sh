@@ -587,6 +587,66 @@ SH
   pass "fm-lint.sh CI keeps source following without the local exclusion list"
 }
 
+test_ci_one_file_invokes_shellcheck_once_per_root_with_external_sources() {
+  local tmp fakebin log flag_log heavy light extra out invocation_count batched expected
+  tmp=$(fm_test_tmproot fm-lint-ci-one-file)
+  fakebin=$(fm_fakebin "$tmp")
+  heavy="$tmp/heavy.sh"
+  light="$tmp/light.sh"
+  extra="$tmp/extra.sh"
+  log="$tmp/shellcheck.log"
+  flag_log="$tmp/flags.log"
+  # Equal byte weights assign the first and third roots to shard 0 and the
+  # second to shard 1, so the default is one ShellCheck invocation per shard.
+  for fixture in "$heavy" "$light" "$extra"; do
+    cat > "$fixture" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' ok
+SH
+  done
+  fm_lint_stub_shellcheck "$fakebin" "$log"
+  # Shard replay order with jobs=1: heavy, extra, then light.
+  expected="$heavy"$'\n'"$extra"$'\n'"$light"
+
+  out=$(PATH="$fakebin:$PATH" CI=true GITHUB_ACTIONS=true FM_LINT_JOBS=1 \
+    FM_TEST_FLAG_LOG="$flag_log" "$LINT" "$heavy" "$light" "$extra" 2>&1) \
+    || fail "CI batched lint failed"$'\n'"$out"
+  [ "$(cat "$log")" = "$expected" ] \
+    || fail "CI default did not analyze the three roots in shard order"$'\n'"logged: $(cat "$log")"
+  batched=$(grep -c '^external-sources=' "$flag_log" || true)
+  [ "$batched" -eq 2 ] \
+    || fail "CI default used $batched ShellCheck calls for two shards"
+  fm_lint_assert_flag_log "$flag_log" yes none
+
+  : > "$log"
+  : > "$flag_log"
+  out=$(PATH="$fakebin:$PATH" CI=true GITHUB_ACTIONS=true FM_LINT_JOBS=1 FM_LINT_ONE_FILE=1 \
+    FM_TEST_FLAG_LOG="$flag_log" "$LINT" "$heavy" "$light" "$extra" 2>&1) \
+    || fail "CI one-file lint failed"$'\n'"$out"
+  assert_contains "$out" "one root per process" \
+    "CI one-file lint did not disclose per-root ShellCheck"
+  [ "$(cat "$log")" = "$expected" ] \
+    || fail "CI one-file lint did not analyze the three roots in shard order"$'\n'"logged: $(cat "$log")"
+  invocation_count=$(grep -c '^external-sources=' "$flag_log" || true)
+  [ "$invocation_count" -eq 3 ] \
+    || fail "CI one-file lint used $invocation_count ShellCheck calls for three roots"
+  fm_lint_assert_flag_log "$flag_log" yes none
+  pass "fm-lint.sh CI one-file mode invokes ShellCheck once per root with source following"
+}
+
+test_one_file_rejects_a_value_other_than_zero_or_one() {
+  local out rc
+  rc=0
+  out=$(FM_LINT_ONE_FILE=2 "$LINT" --list-files 2>&1) || rc=$?
+  [ "$rc" -eq 2 ] || fail "FM_LINT_ONE_FILE=2 exited $rc"$'\n'"$out"
+  assert_contains "$out" "FM_LINT_ONE_FILE must be 0 or 1" \
+    "FM_LINT_ONE_FILE rejection did not name the allowed values"
+  rc=0
+  out=$(env FM_LINT_ONE_FILE='' "$LINT" --list-files 2>&1) || rc=$?
+  [ "$rc" -eq 2 ] || fail "empty FM_LINT_ONE_FILE exited $rc"$'\n'"$out"
+  pass "fm-lint.sh rejects an FM_LINT_ONE_FILE value other than 0 or 1"
+}
+
 test_main_branch_keeps_external_sources() {
   local tmp fakebin log flag_log out
   tmp=$(fm_test_tmproot fm-lint-main-follow)
@@ -1394,6 +1454,8 @@ test_list_files_respects_changed_mode
 test_changed_mode_drops_external_sources_and_excludes_cross_file_codes
 test_changed_mode_invokes_shellcheck_once_per_root
 test_ci_keeps_external_sources_without_local_exclusions
+test_ci_one_file_invokes_shellcheck_once_per_root_with_external_sources
+test_one_file_rejects_a_value_other_than_zero_or_one
 test_main_branch_keeps_external_sources
 test_merge_base_less_keeps_external_sources
 test_explicit_path_keeps_external_sources

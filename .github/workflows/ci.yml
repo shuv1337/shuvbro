@@ -58,11 +58,14 @@ jobs:
       # and GitHub workflow lint). Do not re-spell the checks here; keep CI
       # and the pre-push gate on this script so a self-broken ci.yml still
       # fails locally before merge. FM_LINT_JOBS=1 runs the same two
-      # ShellCheck shards one at a time: together they were SIGKILL'd
-      # (exit 137) in the 8g self-hosted container.
+      # ShellCheck shards one at a time. FM_LINT_ONE_FILE=1 invokes
+      # ShellCheck once per root with the same --external-sources flags:
+      # one shard's combined graph was SIGKILL'd (exit 137) in the 8g
+      # self-hosted container even with the shards serialized.
       - name: Run full lint
         env:
           FM_LINT_JOBS: "1"
+          FM_LINT_ONE_FILE: "1"
         run: bin/fm-lint.sh
 
   # Deterministic proof that portable parallel shards + portable serial + Herdr
