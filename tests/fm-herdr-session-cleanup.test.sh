@@ -285,6 +285,10 @@ reset_fixture; : > "$FIXTURE_DIR/focus-refuse"; assert_preserved "focus refusal"
 INTEGRATION_ROOT="$TMP_ROOT/bootstrap-integration"
 mkdir -p "$INTEGRATION_ROOT/home/state" "$INTEGRATION_ROOT/home/data" "$INTEGRATION_ROOT/home/config"
 cp -R "$ROOT/bin" "$INTEGRATION_ROOT/bin"
+# The copied scripts are this fixture's repo root. Session start renders the
+# supervision block from docs/supervision-protocols next to those scripts.
+mkdir -p "$INTEGRATION_ROOT/docs"
+cp -R "$ROOT/docs/supervision-protocols" "$INTEGRATION_ROOT/docs/supervision-protocols"
 TRACE="$INTEGRATION_ROOT/cleanup.trace"
 cat > "$INTEGRATION_ROOT/bin/fm-herdr-session-cleanup.sh" <<'SH'
 #!/usr/bin/env bash

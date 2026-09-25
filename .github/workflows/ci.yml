@@ -57,8 +57,13 @@ jobs:
       # Single owner of the lint definition (shell file set, config, version,
       # and GitHub workflow lint). Do not re-spell the checks here; keep CI
       # and the pre-push gate on this script so a self-broken ci.yml still
-      # fails locally before merge.
-      - run: bin/fm-lint.sh
+      # fails locally before merge. FM_LINT_JOBS=1 runs the same two
+      # ShellCheck shards one at a time: together they were SIGKILL'd
+      # (exit 137) in the 8g self-hosted container.
+      - name: Run full lint
+        env:
+          FM_LINT_JOBS: "1"
+        run: bin/fm-lint.sh
 
   # Deterministic proof that portable parallel shards + portable serial + Herdr
   # equal the complete tests/*.test.sh inventory with no missing or duplicates,
@@ -106,20 +111,28 @@ jobs:
       - name: Install tasks-axi
         run: |
           set -eu
-          # No sudo. Install into the job temp dir so a system npm prefix
-          # does not have to be writable.
-          npm install --prefix "$RUNNER_TEMP/npm" tasks-axi
-          echo "$RUNNER_TEMP/npm/node_modules/.bin" >> "$GITHUB_PATH"
-          PATH="$RUNNER_TEMP/npm/node_modules/.bin:$PATH"
+          # No sudo. A global prefix install keeps bins and nested package
+          # dependencies under the job temp dir when the system prefix is
+          # not writable. Tests resolve Pi through FM_PI_PACKAGE_DIR below.
+          npm install -g --prefix "$RUNNER_TEMP/npm" tasks-axi
+          echo "$RUNNER_TEMP/npm/bin" >> "$GITHUB_PATH"
+          PATH="$RUNNER_TEMP/npm/bin:$PATH"
           tasks-axi --version
       - name: Install the Pi package for the Pi extension tests
         run: |
           set -eu
-          npm install --prefix "$RUNNER_TEMP/npm" @earendil-works/pi-coding-agent
-          echo "$RUNNER_TEMP/npm/node_modules/.bin" >> "$GITHUB_PATH"
-          PATH="$RUNNER_TEMP/npm/node_modules/.bin:$PATH"
-          npm ls --prefix "$RUNNER_TEMP/npm" --depth 0 @earendil-works/pi-coding-agent
+          npm install -g --prefix "$RUNNER_TEMP/npm" @earendil-works/pi-coding-agent
+          echo "$RUNNER_TEMP/npm/bin" >> "$GITHUB_PATH"
+          PATH="$RUNNER_TEMP/npm/bin:$PATH"
+          npm ls -g --prefix "$RUNNER_TEMP/npm" --depth 0 @earendil-works/pi-coding-agent
+      - name: Install pinned Ruby
+        run: |
+          set -eu
+          bin/fm-install-runner-tools.sh "$RUNNER_TEMP/runner-tools" ruby
+          echo "$RUNNER_TEMP/runner-tools/bin" >> "$GITHUB_PATH"
       - name: Run portable parallel shard 1
+        env:
+          FM_PI_PACKAGE_DIR: ${{ runner.temp }}/npm/lib/node_modules/@earendil-works/pi-coding-agent
         run: |
           set -eu
           mkdir -p "$RUNNER_TEMP/fm-test"
@@ -226,11 +239,12 @@ jobs:
       - name: Install tasks-axi for backlog-handoff delegation
         run: |
           set -eu
-          # No sudo. Install into the job temp dir so a system npm prefix
-          # does not have to be writable.
-          npm install --prefix "$RUNNER_TEMP/npm" tasks-axi
-          echo "$RUNNER_TEMP/npm/node_modules/.bin" >> "$GITHUB_PATH"
-          PATH="$RUNNER_TEMP/npm/node_modules/.bin:$PATH"
+          # No sudo. A global prefix install keeps bins and nested package
+          # dependencies under the job temp dir when the system prefix is
+          # not writable.
+          npm install -g --prefix "$RUNNER_TEMP/npm" tasks-axi
+          echo "$RUNNER_TEMP/npm/bin" >> "$GITHUB_PATH"
+          PATH="$RUNNER_TEMP/npm/bin:$PATH"
           tasks-axi --version
       # The Pi extension tests read the installed Pi package's own types and
       # runtime, so without it they gate-skip and pass silently. It is a public
@@ -238,10 +252,10 @@ jobs:
       - name: Install the Pi package for the Pi extension tests
         run: |
           set -eu
-          npm install --prefix "$RUNNER_TEMP/npm" @earendil-works/pi-coding-agent
-          echo "$RUNNER_TEMP/npm/node_modules/.bin" >> "$GITHUB_PATH"
-          PATH="$RUNNER_TEMP/npm/node_modules/.bin:$PATH"
-          npm ls --prefix "$RUNNER_TEMP/npm" --depth 0 @earendil-works/pi-coding-agent
+          npm install -g --prefix "$RUNNER_TEMP/npm" @earendil-works/pi-coding-agent
+          echo "$RUNNER_TEMP/npm/bin" >> "$GITHUB_PATH"
+          PATH="$RUNNER_TEMP/npm/bin:$PATH"
+          npm ls -g --prefix "$RUNNER_TEMP/npm" --depth 0 @earendil-works/pi-coding-agent
       # The OpenCode V2 guard plugins reject tool calls through the effect
       # runtime pinned in .opencode/plugins, the same install a shuvcode lead
       # needs; tests/fm-opencode-v2-plugin.test.sh fails in CI without it.
@@ -249,6 +263,13 @@ jobs:
         run: |
           set -eu
           npm ci --prefix .opencode/plugins --ignore-scripts
+      - name: Install pinned Ruby, ps, lsof, and Chrome
+        run: |
+          set -eu
+          # Hosted images ship these. The rootless runner does not, and the
+          # portable lane calls them directly. No apt and no sudo.
+          bin/fm-install-runner-tools.sh "$RUNNER_TEMP/runner-tools" ruby ps lsof chrome
+          echo "$RUNNER_TEMP/runner-tools/bin" >> "$GITHUB_PATH"
       - name: Run portable serial shard ${{ matrix.shard }}
         env:
           # job-total rather than a literal, so shrinking or growing the matrix
@@ -256,6 +277,8 @@ jobs:
           # leaving a shard of the required lane unrun.
           FM_SERIAL_LANE: portable-serial-${{ matrix.shard }}of${{ strategy.job-total }}
           FM_SERIAL_SHARD: ${{ matrix.shard }}
+          FM_PI_PACKAGE_DIR: ${{ runner.temp }}/npm/lib/node_modules/@earendil-works/pi-coding-agent
+          FM_CHROME_BIN: ${{ runner.temp }}/runner-tools/bin/google-chrome
         run: |
           set -eu
           mkdir -p "$RUNNER_TEMP/fm-test"
