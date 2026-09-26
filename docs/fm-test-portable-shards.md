@@ -5,7 +5,7 @@
 
 ## Verification inputs
 
-The current candidate timings came from the 2026-08-20 concurrent proof recorded in [fm-test-isolation-proof.md](fm-test-isolation-proof.md).
+The original candidate timings came from the 2026-08-20 concurrent proof recorded in [fm-test-isolation-proof.md](fm-test-isolation-proof.md).
 The proof ran 24 candidates with four workers and no failures.
 
 | duration_ms | script |
@@ -37,13 +37,45 @@ The proof ran 24 candidates with four workers and no failures.
 
 ## Parallel lanes
 
-The two parallel lanes use longest-processing-time assignment from those measured durations.
+The 2026-08-20 proof table above is the original candidate measurement.
+It is not the current lane balance.
+On CI run [35393983258](https://github.com/shuv1337/shuvbro/actions/runs/35393983258) (2026-09-18) shard 1 took about 7.4 minutes and still passed.
+Slower runners hit the 10-minute job cap while `tests/fm-lint.test.sh` was still passing.
+`tests/fm-captain-hold-lifecycle.test.sh` alone was 184710 ms on that green run and 318156 ms on a later run that the cap cancelled.
+The lanes below are longest-processing-time assignment from that green run's per-script `duration_ms` values, which is what `list_portable_parallel_1` and `list_portable_parallel_2` now execute.
+
+| duration_ms | script |
+|---:|---|
+| 184710 | `tests/fm-captain-hold-lifecycle.test.sh` |
+| 127226 | `tests/fm-lint.test.sh` |
+| 101373 | `tests/fm-pr-merge.test.sh` |
+| 74627 | `tests/fm-test-run.test.sh` |
+| 25076 | `tests/fm-arm-pretool-check.test.sh` |
+| 19341 | `tests/fm-x-mode.test.sh` |
+| 18798 | `tests/fm-backend-herdr.test.sh` |
+| 10291 | `tests/fm-crew-state.test.sh` |
+| 10222 | `tests/fm-cd-pretool-check.test.sh` |
+| 6675 | `tests/fm-herdr-lab.test.sh` |
+| 5182 | `tests/fm-grok-harness.test.sh` |
+| 4983 | `tests/fm-send-popup-settle.test.sh` |
+| 4178 | `tests/fm-composer-lib.test.sh` |
+| 3874 | `tests/fm-send-strict.test.sh` |
+| 3744 | `tests/fm-pi-primary-types.test.sh` |
+| 2320 | `tests/fm-spawn-batch.test.sh` |
+| 2284 | `tests/fm-tmux-submit-busy.test.sh` |
+| 2031 | `tests/fm-send-settle.test.sh` |
+| 1732 | `tests/fm-review-diff.test.sh` |
+| 1413 | `tests/fm-composer-ghost.test.sh` |
+| 1151 | `tests/fm-brief.test.sh` |
+| 741 | `tests/fm-ensure-agents-md.test.sh` |
+| 351 | `tests/fm-supervision-instructions.test.sh` |
+| 58 | `tests/fm-transition-lib.test.sh` |
 
 | Lane | Script count | Estimated duration |
 |---|---:|---:|
-| `portable-parallel-1` | 11 | 134295 ms (~134.3 s) |
-| `portable-parallel-2` | 13 | 126020 ms (~126.0 s) |
-| imbalance | | 8275 ms |
+| `portable-parallel-1` | 11 | 306114 ms (~5.10 min) |
+| `portable-parallel-2` | 13 | 306267 ms (~5.10 min) |
+| imbalance | | 153 ms |
 
 `bin/fm-test-run.sh` contains the exact ordered memberships in `list_portable_parallel_1` and `list_portable_parallel_2`.
 
@@ -57,8 +89,10 @@ Membership is derived rather than enumerated, so a newly added test lands here b
 
 On green CI run [30725985757](https://github.com/kunchenguid/firstmate/actions/runs/30725985757), that remainder accumulated 19m04s of script time against a 20-minute job timeout.
 On [PR 1495](https://github.com/kunchenguid/firstmate/pull/1495), its main step ran about 19m51s before the job was cancelled at that boundary.
-`portable-serial-<k>of<n>` splits it across `n` separate CI runners.
-Each shard is still strictly serial in itself, and separate runners mean no two of these stateful scripts ever share a machine, so the split needs no concurrency isolation proof.
+`portable-serial-<k>of<n>` splits it across `n` separate CI jobs.
+Each shard is still strictly serial in itself.
+Jobs do not run two of these stateful scripts at once, and each Linux job starts in a fresh container, so a later job on the same host does not reuse the previous workspace.
+The split needs no concurrency isolation proof.
 
 `bin/fm-test-run.sh` owns `n` and refuses any lane whose `of<n>` disagrees with it.
 `.github/workflows/ci.yml` derives the same `n` from `strategy.job-total` rather than a literal, so changing the shard count in either file without the other fails the lane loudly instead of leaving part of the required suite unrun.

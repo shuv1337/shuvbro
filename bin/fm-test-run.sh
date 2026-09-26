@@ -462,41 +462,44 @@ tests/fm-x-mode.test.sh
 EOF
 }
 
-# Portable parallel shard 1: LPT balance of the proven-isolated set using the
-# current concurrent-proof durations in docs/fm-test-isolation-proof.json.
-# Execution order is longest first so wall-clock stays near the balanced sum.
+# Portable parallel shard 1: LPT balance of the proven-isolated set.
+# Weights are the 2026-09-18 green CI durations in docs/fm-test-portable-shards.md,
+# not the 2026-08 proof. The proof weights left this shard carrying
+# captain-hold, fm-lint, and fm-test-run together, which cancelled the 10-minute
+# CI cap while the scripts were still passing. Execution order is longest first.
 list_portable_parallel_1() {
   cat <<'EOF'
-tests/fm-x-mode.test.sh
-tests/fm-cd-pretool-check.test.sh
 tests/fm-captain-hold-lifecycle.test.sh
 tests/fm-test-run.test.sh
-tests/fm-composer-ghost.test.sh
+tests/fm-backend-herdr.test.sh
+tests/fm-cd-pretool-check.test.sh
 tests/fm-grok-harness.test.sh
-tests/fm-lint.test.sh
+tests/fm-composer-lib.test.sh
 tests/fm-pi-primary-types.test.sh
-tests/fm-review-diff.test.sh
+tests/fm-send-settle.test.sh
+tests/fm-composer-ghost.test.sh
 tests/fm-brief.test.sh
 tests/fm-transition-lib.test.sh
 EOF
 }
 
 # Portable parallel shard 2: the complementary LPT half of the proven set.
+# Same 2026-09-18 weights as shard 1. See docs/fm-test-portable-shards.md.
 list_portable_parallel_2() {
   cat <<'EOF'
-tests/fm-backend-herdr.test.sh
+tests/fm-lint.test.sh
+tests/fm-pr-merge.test.sh
 tests/fm-arm-pretool-check.test.sh
+tests/fm-x-mode.test.sh
 tests/fm-crew-state.test.sh
 tests/fm-herdr-lab.test.sh
-tests/fm-pr-merge.test.sh
 tests/fm-send-popup-settle.test.sh
-tests/fm-tmux-submit-busy.test.sh
-tests/fm-send-settle.test.sh
 tests/fm-send-strict.test.sh
 tests/fm-spawn-batch.test.sh
-tests/fm-supervision-instructions.test.sh
+tests/fm-tmux-submit-busy.test.sh
+tests/fm-review-diff.test.sh
 tests/fm-ensure-agents-md.test.sh
-tests/fm-composer-lib.test.sh
+tests/fm-supervision-instructions.test.sh
 EOF
 }
 
@@ -655,7 +658,16 @@ tests/fm-opencode-primary-live-e2e.test.sh 21
 tests/fm-opencode-v2-plugin.test.sh 8000
 tests/fm-operational-input.test.sh 231
 tests/fm-peek-remote.test.sh 1018
-tests/fm-pending-reply.test.sh 86711
+tests/fm-pending-reply-10.test.sh 4350
+tests/fm-pending-reply-2.test.sh 8700
+tests/fm-pending-reply-3.test.sh 4350
+tests/fm-pending-reply-4.test.sh 17400
+tests/fm-pending-reply-5.test.sh 17111
+tests/fm-pending-reply-6.test.sh 2900
+tests/fm-pending-reply-7.test.sh 8700
+tests/fm-pending-reply-8.test.sh 2900
+tests/fm-pending-reply-9.test.sh 2900
+tests/fm-pending-reply.test.sh 17400
 tests/fm-persona-lib.test.sh 925
 tests/fm-pi-branch-extension.test.sh 22239
 tests/fm-pi-branch-live-e2e.test.sh 56
