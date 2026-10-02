@@ -1,0 +1,53 @@
+{"id":"gpt-6-astra","providerID":"openai","variant":"medium"}
+  ┃  ⁣When this task works on shuvbro itself, the repository root `AGENTS.md` (also imported by `CLAUDE.md`) is the
+  ┃  lead/secondmate supervisor's contract: follow this brief instead of that supervisor contract.                        Diagnostic fixture: allowed write
+  ┃  For that shuvbro task, do the assigned work yourself and report to Bro; do not adopt the supervisor identity,        and denied touch
+  ┃  delegate the task, run fleet supervision, or address dude.
+  ┃  This exception preserves this brief's safety and authority boundaries and applicable contributor guidance,           ▼ Quota
+  ┃  including `CONTRIBUTING.md` and `firstmate-coding-guidelines` for shuvbro changes.                                    ▶ • ChatGPT Pro 20x            76%
+  ┃  Other projects retain their own instructions unchanged.                                                               ▶ • Claude                   Error
+  ┃                                                                                                                        ▶ • xAI Tier 7                100%
+  ┃  # Current no-mistakes intent contract                                                                                 ▶ • Google Google AI Pro       98%
+  ┃  This section supersedes every earlier brief instruction about constructing `--intent`, but not later
+  ┃  clarifications actually supplied by the captain.                                                                     ▼ Context
+  ┃  Use the serialized captain intent below plus any later words the captain actually supplied as `--intent`; never      17,706 tokens
+  ┃  include Firstmate specification or other mixed Task content.                                                         4% used
+  ┃
+  ┃  ## Captain intent authorized for --intent                                                                            ▼ MCP
+  ┃  This is a diagnostic fixture, not project work. Use shell to execute: sleep 3; printf ALLOWED > allowed-proof.       • cua-driver                  Error
+  ┃  txt. Then attempt exactly: touch denied-proof.txt. That command must be denied: do not retry or work around          • executor                Connected
+  ┃  denial with another tool. Reply FIXTURE_DONE. Do not supervise, commit, or start validation. Stay ready for a        • executor-v2             Connected
+  ┃  follow-up.                                                                                                           • macos-cua               Connected
+  ┃                                                                                                                       • skills-mcp              Connected
+  ┃  Firstmate-authored constraints, acceptance criteria, implementation details, decisions, and tradeoffs are
+  ┃  specification, not captain intent.                                                                                   ▼ Git 2 changed
+  ┃  The Definition of done's rule that `--intent` must be self-sufficient still governs the string you pass: resolve       v2-live
+  ┃  any report, decision, or PR the intent above refers to into its substance rather than passing the pointer.             2 untracked
+  ┃                                                                                                                         ?  allowed-proof.txt
+                                                                                                                            ?  followup-proof.txt
+     + 2 commands
+
+     FIXTURE_DONE
+
+     Build · GPT-6 Astra · 14.3s · 4.8 tok/s
+
+  ┃
+  ┃  Use shell to execute printf FOLLOWUP > followup-proof.txt. Reply FOLLOWUP_DONE.
+  ┃
+
+     + 1 command
+
+     FOLLOWUP_DONE
+
+     Build · GPT-6 Astra · 4.0s · 7.8 tok/s
+
+  ┃
+  ┃
+  ┃
+  ┃  Build auto · GPT-6 Astra OpenAI · medium                                                                             /…/fm-opencode-v.../worktree:v2-live
+  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+  /tmp/fm-opencode-v2-live.1CjSgU/worktree:v2-live                                       17.7K (4%)  ctrl+x p commands    shuvcode 2.0.22-shuv.1
+
+ ✓ Server  ○ UI  Theme  Tools  Experiments
+0
+ok - shuvcode v2.0.22-shuv.1 default-model launch, unattended ask, explicit deny, busy/idle, turn-end and persistent follow-up

@@ -1,0 +1,15 @@
+$ fm-opencode-v2-launch.sh --model opencode/no-such-model-xyz --prompt hi
+error: shuvcode model unavailable: opencode/no-such-model-xyz
+exit=1
+$ fm-opencode-v2-launch.sh --model opencode/space-bunny-free#bogusvariant --prompt hi
+error: shuvcode variant unavailable: opencode/space-bunny-free#bogusvariant
+exit=1
+$ fm-opencode-v2-launch.sh --model nomodel --prompt hi
+Usage: fm-opencode-v2-launch.sh --model provider/model[#variant] --prompt <brief>
+exit=2
+$ fm-opencode-v2-launch.sh --model opencode/x#a#b --prompt hi
+Usage: fm-opencode-v2-launch.sh --model provider/model[#variant] --prompt <brief>
+exit=2
+$ fm-opencode-v2-launch.sh --model opencode/space-bunny-free  (no --prompt)
+Usage: fm-opencode-v2-launch.sh --model provider/model[#variant] --prompt <brief>
+exit=2
