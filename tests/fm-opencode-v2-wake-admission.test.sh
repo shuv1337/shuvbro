@@ -111,8 +111,9 @@ make_primary_copy() {  # <dir>
   git init -q "$root"
   cp -R "$ROOT/bin" "$root/bin"
   cp "$ROOT/AGENTS.md" "$root/AGENTS.md"
-  cp -R "$ROOT/.opencode/plugins" "$root/.opencode/plugins"
-  rm -rf "$root/.opencode/plugins/node_modules"
+  mkdir -p "$root/.opencode/plugins"
+  tar -C "$ROOT/.opencode/plugins" --exclude=./node_modules -cf - . | tar -C "$root/.opencode/plugins" -xf -
+  cp -R "$root/.opencode/plugins" "$root/.opencode/plugins-reload"
   : > "$root/config/x-mode.env"
 }
 
@@ -192,11 +193,26 @@ if (!watcher) throw new Error("plugin-owned watcher never started");
 if (spec.outageMs) outageUntil = Date.now() + spec.outageMs;
 const changedAt = Date.now();
 writeFileSync(`${state}/alpha.status`, "done: alpha finished\n");
+let active = cleanup;
+let reloadAt = 0;
+if (spec.reloadAfterMs) {
+  // Same-owner reload: retire this coordinator, then load a fresh module graph
+  // of the same entry (shuvcode re-evaluates the local graph on reload).
+  await sleep(spec.reloadAfterMs);
+  attempts.push({ marker: "reload", at: Date.now() });
+  if (typeof active === "function") await active();
+  reloadAt = Date.now();
+  const fresh = await import(pathToFileURL(`${root}/.opencode/plugins-reload/fm-primary-watch-arm.js`).href);
+  active = await fresh.default.setup(ctx);
+  await sleep(50);
+  push({ type: "session.execution.succeeded", data: { sessionID: "ses_lead" } });
+}
 await sleep(spec.settleMs || 6000);
 
 const watcherPid = read(`${state}/.watch.lock/pid`).trim();
 const result = {
   changedAt,
+  reloadAt,
   outageEnd: outageUntil,
   attempts,
   admitted,
@@ -204,7 +220,7 @@ const result = {
   queue: read(`${state}/.wake-queue`),
   watcherLive: Boolean(watcherPid) && alive(watcherPid),
 };
-if (typeof cleanup === "function") await cleanup();
+if (typeof active === "function") await active();
 result.markerAfterCleanup = read(`${state}/.watcher-down`).trim();
 const lockAfter = read(`${state}/.watch.lock/pid`).trim();
 result.watcherLiveAfterCleanup = Boolean(lockAfter) && alive(lockAfter);
@@ -312,8 +328,25 @@ test_owner_retirement_with_unadmitted_wake_is_recoverable() {
   pass "V2 adapter + real helpers: owner retirement with an unadmitted wake leaves it recoverable by the next arm"
 }
 
+# A same-owner reload while a wake is still unadmitted must reconcile the same
+# durable pending admission: after admission recovers the lead receives exactly
+# one prompt, under the message id the first coordinator already used.
+test_reload_reconciles_pending_admission_without_new_id() {
+  admission_case admission-reload '{"outageMs": 9000, "reloadAfterMs": 4000, "settleMs": 16000}'
+  local before after
+  before=$(jq -c '.reloadAt as $r | [.attempts[] | select(.sessionID == "ses_lead" and .at < $r) | .id] | unique' "$RESULT_FILE")
+  after=$(jq -c '.outageEnd as $e | [.admitted[] | select(.sessionID == "ses_lead" and .at >= $e)]' "$RESULT_FILE")
+  [ "$(printf '%s' "$before" | jq length)" -ge 1 ] || fail "fixture vacuous: no admission attempt before the reload: $(cat "$RESULT_FILE")"
+  [ "$(printf '%s' "$after" | jq length)" = 1 ] \
+    || fail "reload: expected exactly one admitted prompt after admission recovered, got: $after"
+  printf '%s' "$before" | jq -e --argjson a "$after" 'length == 1 and (.[0] | type == "string" and startswith("msg_")) and .[0] == $a[0].id' >/dev/null \
+    || fail "reload: the recovered admission did not reuse the pending message id (before=$before after=$(printf '%s' "$after" | jq -c 'map(.id)'))"
+  pass "V2 adapter + real helpers: a same-owner reload reconciles the pending admission under its original id"
+}
+
 FAILED=0
 for t in \
+  test_reload_reconciles_pending_admission_without_new_id \
   test_owner_retirement_with_unadmitted_wake_is_recoverable \
   test_handoff_before_lead_ack_is_accepted \
   test_handoff_after_lead_ack_is_rejected \

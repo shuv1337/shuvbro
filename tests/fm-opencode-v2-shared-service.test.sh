@@ -17,8 +17,8 @@
 # reimplement shuvbro policy.
 set -u
 
-# shellcheck source=tests/lib.sh
-. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+# shellcheck source=tests/fm-opencode-v2-acceptance-lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/fm-opencode-v2-acceptance-lib.sh"
 
 TMP_ROOT=$(fm_test_tmproot fm-opencode-v2-shared-service)
 export NODE_NO_WARNINGS=1
@@ -36,7 +36,7 @@ make_primary() {
 plugin_copy() {
   local dest=$1
   mkdir -p "$dest"
-  cp -R "$ROOT/.opencode/plugins/." "$dest/"
+  tar -C "$ROOT/.opencode/plugins" --exclude=./node_modules -cf - . | tar -C "$dest" -xf -
   printf '%s\n' "$dest"
 }
 
@@ -252,130 +252,26 @@ test_turnend_defers_to_armed_watcher_across_plugin_module_graphs() {
   pass "turn-end defers to the armed plugin watcher across shuvcode's per-plugin module graphs"
 }
 
-# An actionable watcher close whose wake admission fails transiently must not
-# lose the wake; every retry must reuse one schema-valid message id so the
-# target's first-admission-wins idempotency prevents duplicate execution.
-actionable_wake_fixture() {  # <name>
-  local name=$1 repo
-  repo="$TMP_ROOT/$name/primary"
-  make_primary "$repo"
-  cat > "$repo/bin/fm-watch-arm.sh" <<SH
-#!/usr/bin/env bash
-if [ "\${1:-}" = --handling-delivered ]; then exit 0; fi
-count_file="$TMP_ROOT/$name/arms"
-n=\$(( \$(cat "\$count_file" 2>/dev/null || echo 0) + 1 ))
-printf '%s' "\$n" > "\$count_file"
-if [ "\$n" = 1 ]; then
-  printf 'signal: task-alpha\n'
-  exit 0
-fi
-trap 'exit 0' TERM
-printf 'watcher: started pid=%s recovery-generation=gen-%s\n' "\$\$" "\$n"
-sleep 5 &
-wait
-SH
-  chmod +x "$repo/bin/fm-watch-arm.sh"
-  passthrough_encoder "$repo"
-  plugin_copy "$repo/.opencode/plugins" >/dev/null
-  printf '%s\n' "$repo"
-}
-
-run_actionable_wake() {  # <name> <spec-extra-json>
-  local name=$1 extra=$2 repo out status
-  repo=$(actionable_wake_fixture "$name")
-  out="$TMP_ROOT/$name/out.json"
-  status=0
-  drive_shared "$(jq -nc --arg dir "$repo" --arg out "$out" --argjson extra "$extra" '{
-      out: $out,
-      settleMs: 2500,
-      instances: [ { plugin: ($dir + "/.opencode/plugins/fm-primary-watch-arm.js"), directory: $dir } ],
-      sessions: { ses_lead: { id: "ses_lead", location: { directory: $dir } } },
-      events: [ { event: { type: "session.execution.succeeded", data: { sessionID: "ses_lead" } } } ]
-    } + $extra')" &
-  local driver=$!
-  printf '%s' "$driver" > "$repo/state/.lock"
-  wait "$driver" || status=$?
-  expect_code 0 "$status" "$name driver"
-  RESULT=$(cat "$out")
-  printf '%s' "$RESULT" | jq -e '[.attempts[] | select(.sessionID == "ses_lead")] | length >= 1' >/dev/null \
-    || fail "fixture vacuous: the actionable close never reached prompt admission: $RESULT"
-}
-
-test_transient_admission_failure_does_not_lose_the_wake() {
-  run_actionable_wake wake-retry '{"rejectPrompts": 1}'
-  printf '%s' "$RESULT" | jq -e '[.admitted[] | select(.text | test("signal: task-alpha"))] | length == 1' >/dev/null \
-    || fail "a transiently rejected wake admission lost the actionable reason (want exactly one admitted copy): $RESULT"
-  printf '%s' "$RESULT" | jq -e '
-      [.attempts[] | select(.text | test("signal: task-alpha")) | .id] as $ids
-      | ($ids | length) >= 2 and ($ids | all(type == "string" and length > 0)) and ($ids | unique | length) == 1' >/dev/null \
-    || fail "wake admission retries must reuse one non-empty message id: $RESULT"
-  pass "a transient wake admission failure retries with one stable message id and admits the wake once"
-}
-
-test_lost_admission_acknowledgement_admits_one_copy() {
-  run_actionable_wake wake-lost-ack '{"lostAckPrompts": 1}'
-  printf '%s' "$RESULT" | jq -e '[.admitted[] | select(.text | test("signal: task-alpha"))] | length == 1' >/dev/null \
-    || fail "a lost admission acknowledgement must leave exactly one admitted copy of the wake: $RESULT"
-  printf '%s' "$RESULT" | jq -e '[.admitted[] | select(.text | test("could not deliver an actionable wake"))] | length == 0' >/dev/null \
-    || fail "an admitted wake whose acknowledgement was lost was reported to the lead as undelivered: $RESULT"
-  pass "a lost admission acknowledgement admits exactly one wake and is not reported as a delivery failure"
-}
-
-# Lock ownership from a lead tool subprocess on the standard shared service.
-# The ancestry ends at the shared `serve --service` process, which is correctly
-# never a session identity. A lead there must still be able to hold its own
-# home's lock through exact session binding, and a second session on the same
-# service must never take it. Binding evidence assumed by this fixture:
-# OPENCODE_SESSION_ID, which the server sets on every shell tool invocation.
-shared_service_ps() {  # <fakebin>
-  cat > "$1/ps" <<'SH'
-#!/usr/bin/env bash
-set -u
-field= pid=
-while [ "$#" -gt 0 ]; do
-  case "$1" in
-    -o) field=$2; shift 2 ;;
-    -p) pid=$2; shift 2 ;;
-    *) shift ;;
-  esac
-done
-case "$pid:$field" in
-  "${FM_TEST_SERVICE_PID}:comm=") printf '%s\n' shuvcode ;;
-  "${FM_TEST_SERVICE_PID}:args=") printf '%s\n' '/opt/shuvcode/bin/shuvcode serve --service' ;;
-  "${FM_TEST_SERVICE_PID}:ppid=") printf '%s\n' 1 ;;
-  *:comm=) printf '%s\n' bash ;;
-  *:args=) printf '%s\n' bash ;;
-  *:ppid=) printf '%s\n' "$FM_TEST_SERVICE_PID" ;;
-esac
-SH
-  chmod +x "$1/ps"
-}
-
-lock_as_session() {  # <home> <fakebin> <service-pid> <session-id>
-  env -u FM_ROOT_OVERRIDE FM_HOME="$1" PATH="$2:$PATH" FM_TEST_SERVICE_PID="$3" OPENCODE_SESSION_ID="$4" \
-    bash "$ROOT/bin/fm-lock.sh" 2>&1
-}
-
-test_shared_service_lead_holds_its_home_lock() {
+# A model shell on the shared service names its session through the
+# server-set OPENCODE_SESSION_ID, but that alone is not lead identity: without
+# an exact registration published by the activated owner, lock acquisition is
+# refused. The registered acquisition path lives in
+# tests/fm-opencode-v2-ownership-acceptance.test.sh.
+test_shared_service_unregistered_session_never_locks() {
   local dir home fakebin service out status
-  dir="$TMP_ROOT/shared-lock"
+  dir="$TMP_ROOT/shared-lock-unregistered"
   home="$dir/home"
   mkdir -p "$home/state"
   fakebin=$(fm_fakebin "$dir")
-  shared_service_ps "$fakebin"
+  v2_shared_service_ps "$fakebin"
   sleep 30 &
   service=$!
   status=0
-  out=$(lock_as_session "$home" "$fakebin" "$service" ses_lead) || status=$?
-  if [ "$status" -ne 0 ]; then
-    kill "$service" 2>/dev/null
-    fail "a lead on the standard shared service could not acquire its own home lock: $out"
-  fi
-  status=0
-  out=$(lock_as_session "$home" "$fakebin" "$service" ses_other) || status=$?
+  out=$(v2_lock_as_session "$home" "$fakebin" "$service" ses_unregistered) || status=$?
   kill "$service" 2>/dev/null
-  [ "$status" -ne 0 ] || fail "a second session on the same shared service took a live lead's home lock: $out"
-  pass "shared service: the lead session holds its home lock and another session on the service cannot take it"
+  [ "$status" -ne 0 ] || fail "an unregistered shared-service session acquired a home lock: $out"
+  [ ! -s "$home/state/.lock" ] || fail "an unregistered shared-service session wrote the home lock: $(cat "$home/state/.lock")"
+  pass "shared service: a session with only a server-set session id never acquires a home lock"
 }
 
 test_shared_service_without_session_identity_never_locks() {
@@ -384,7 +280,7 @@ test_shared_service_without_session_identity_never_locks() {
   home="$dir/home"
   mkdir -p "$home/state"
   fakebin=$(fm_fakebin "$dir")
-  shared_service_ps "$fakebin"
+  v2_shared_service_ps "$fakebin"
   sleep 30 &
   service=$!
   status=0
@@ -490,9 +386,7 @@ for t in \
   test_two_primaries_on_one_service_never_arm_one_home \
   test_turnend_defers_to_armed_watcher_in_one_module_graph \
   test_turnend_defers_to_armed_watcher_across_plugin_module_graphs \
-  test_transient_admission_failure_does_not_lose_the_wake \
-  test_lost_admission_acknowledgement_admits_one_copy \
-  test_shared_service_lead_holds_its_home_lock \
+  test_shared_service_unregistered_session_never_locks \
   test_shared_service_without_session_identity_never_locks; do
   ( "$t" ) || FAILED=$((FAILED + 1))
 done
