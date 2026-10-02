@@ -252,47 +252,6 @@ test_turnend_defers_to_armed_watcher_across_plugin_module_graphs() {
   pass "turn-end defers to the armed plugin watcher across shuvcode's per-plugin module graphs"
 }
 
-# A model shell on the shared service names its session through the
-# server-set OPENCODE_SESSION_ID, but that alone is not lead identity: without
-# an exact registration published by the activated owner, lock acquisition is
-# refused. The registered acquisition path lives in
-# tests/fm-opencode-v2-ownership-acceptance.test.sh.
-test_shared_service_unregistered_session_never_locks() {
-  local dir home fakebin service out status
-  dir="$TMP_ROOT/shared-lock-unregistered"
-  home="$dir/home"
-  mkdir -p "$home/state"
-  fakebin=$(fm_fakebin "$dir")
-  v2_shared_service_ps "$fakebin"
-  sleep 30 &
-  service=$!
-  status=0
-  out=$(v2_lock_as_session "$home" "$fakebin" "$service" ses_unregistered) || status=$?
-  kill "$service" 2>/dev/null
-  [ "$status" -ne 0 ] || fail "an unregistered shared-service session acquired a home lock: $out"
-  [ ! -s "$home/state/.lock" ] || fail "an unregistered shared-service session wrote the home lock: $(cat "$home/state/.lock")"
-  pass "shared service: a session with only a server-set session id never acquires a home lock"
-}
-
-test_shared_service_without_session_identity_never_locks() {
-  local dir home fakebin service out status
-  dir="$TMP_ROOT/shared-lock-anon"
-  home="$dir/home"
-  mkdir -p "$home/state"
-  fakebin=$(fm_fakebin "$dir")
-  v2_shared_service_ps "$fakebin"
-  sleep 30 &
-  service=$!
-  status=0
-  out=$(env -u OPENCODE_SESSION_ID -u FM_ROOT_OVERRIDE FM_HOME="$home" PATH="$fakebin:$PATH" FM_TEST_SERVICE_PID="$service" \
-    bash "$ROOT/bin/fm-lock.sh" 2>&1) || status=$?
-  kill "$service" 2>/dev/null
-  [ "$status" -ne 0 ] || fail "a shared-service process with no session identity acquired a home lock: $out"
-  [ ! -s "$home/state/.lock" ] || [ "$(cat "$home/state/.lock")" != "$service" ] \
-    || fail "the shared service pid was recorded as the home lock holder"
-  pass "shared service: a process with no session identity never acquires a home lock or records the service pid"
-}
-
 # The shared server loads the primary's plugin again for every subdirectory
 # location under it. An idle root session in a subdirectory of the primary is
 # not the lead, so one home must still get at most one watcher arm.
@@ -379,15 +338,25 @@ SH
   pass "an explicitly interrupted lead turn gets no self-generated prompt that resumes execution"
 }
 
+# The plugin cases above drive the pre-native server entries. Once the native
+# V2 package exists in this tree those entries are no longer the lead's
+# lifecycle owner; the same invariants run against the native TUI entry, with
+# positive controls, in tests/fm-opencode-v2-tui-acceptance.test.sh.
+legacy_case() {  # <case-function>
+  if [ -f "$ROOT/.opencode/plugins/fm-native-v2/tui.js" ]; then
+    printf 'skip - %s: superseded by tests/fm-opencode-v2-tui-acceptance.test.sh (native V2 entry present)\n' "$1"
+    return 0
+  fi
+  "$1"
+}
+
 FAILED=0
 for t in \
   test_subdirectory_location_never_adds_a_second_arm \
   test_interrupted_turn_gets_no_self_generated_resuming_prompt \
   test_two_primaries_on_one_service_never_arm_one_home \
   test_turnend_defers_to_armed_watcher_in_one_module_graph \
-  test_turnend_defers_to_armed_watcher_across_plugin_module_graphs \
-  test_shared_service_unregistered_session_never_locks \
-  test_shared_service_without_session_identity_never_locks; do
-  ( "$t" ) || FAILED=$((FAILED + 1))
+  test_turnend_defers_to_armed_watcher_across_plugin_module_graphs; do
+  ( legacy_case "$t" ) || FAILED=$((FAILED + 1))
 done
 [ "$FAILED" -eq 0 ] || { printf 'not ok - %s shared-service acceptance case(s) failed\n' "$FAILED" >&2; exit 1; }

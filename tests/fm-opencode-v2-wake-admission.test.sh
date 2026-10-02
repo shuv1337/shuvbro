@@ -286,10 +286,14 @@ test_lost_ack_after_admission_is_not_a_failure() {
 
 test_admission_outage_never_strands_the_wake() {
   admission_case admission-outage '{"outageMs": 8000, "settleMs": 16000}'
-  local after
-  after=$(jq '[.admitted[] | select(.sessionID == "ses_lead" and .at >= $end)] | length' --argjson end "$(jq .outageEnd "$RESULT_FILE")" "$RESULT_FILE")
-  [ "$after" = 1 ] \
-    || fail "admission outage: after admission recovered the lead must receive exactly one prompt leading to the durable wake, got $after: $(jq -c '.admitted' "$RESULT_FILE")"
+  local admitted
+  # Count admissions overall (a retry may start before the outage boundary and
+  # succeed after it); the outage must have refused at least one attempt.
+  jq -e '.outageEnd as $e | [.attempts[] | select(.sessionID == "ses_lead" and .at < $e)] | length >= 1' "$RESULT_FILE" >/dev/null \
+    || fail "admission outage: fixture vacuous, no attempt was refused during the outage: $(jq -c '.attempts' "$RESULT_FILE")"
+  admitted=$(jq '[.admitted[] | select(.sessionID == "ses_lead")] | length' "$RESULT_FILE")
+  [ "$admitted" = 1 ] \
+    || fail "admission outage: the lead must receive exactly one prompt leading to the durable wake, got $admitted: $(jq -c '.admitted' "$RESULT_FILE")"
   jq -e '.queue | test("alpha")' "$RESULT_FILE" >/dev/null \
     || fail "admission outage: the durable wake row was lost"
   jq -e '.watcherLive' "$RESULT_FILE" >/dev/null || fail "admission outage: no live watcher at the end"
@@ -344,6 +348,18 @@ test_reload_reconciles_pending_admission_without_new_id() {
   pass "V2 adapter + real helpers: a same-owner reload reconciles the pending admission under its original id"
 }
 
+# Part 2 drives the pre-native watch entry. Once the native V2 package exists
+# in this tree, the same admission invariants run against the native TUI
+# entry in tests/fm-opencode-v2-tui-acceptance.test.sh; Part 1's helper
+# contract cases keep running here.
+part2() {  # <case-function>
+  if [ -f "$ROOT/.opencode/plugins/fm-native-v2/tui.js" ]; then
+    printf 'skip - %s: superseded by tests/fm-opencode-v2-tui-acceptance.test.sh (native V2 entry present)\n' "$1"
+    return 0
+  fi
+  "$1"
+}
+
 FAILED=0
 for t in \
   test_reload_reconciles_pending_admission_without_new_id \
@@ -354,6 +370,9 @@ for t in \
   test_rejected_admissions_retry_with_one_id \
   test_lost_ack_after_admission_is_not_a_failure \
   test_admission_outage_never_strands_the_wake; do
-  ( "$t" ) || FAILED=$((FAILED + 1))
+  case "$t" in
+    test_handoff_*) ( "$t" ) || FAILED=$((FAILED + 1)) ;;
+    *) ( part2 "$t" ) || FAILED=$((FAILED + 1)) ;;
+  esac
 done
 [ "$FAILED" -eq 0 ] || { printf 'not ok - %s wake admission case(s) failed\n' "$FAILED" >&2; exit 1; }

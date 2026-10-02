@@ -60,6 +60,7 @@ cleanup() {
     fi
   fi
   [ -z "$MOCK_PID" ] || kill "$MOCK_PID" 2>/dev/null
+  v2_teardown
   if [ "$status" -eq 0 ] && [ "$LIVE_FAILED" -eq 0 ]; then
     rm -rf "$LAB"
   else
@@ -222,9 +223,12 @@ if [ "$failed" = 0 ] && [ "$dupes" = 0 ]; then
 else
   live_fail "plugin inventory: $failed failed, $dupes duplicate ids ($(printf '%s' "$inventory" | jq -c '[.data[] | select(.source.type != "builtin") | {id, state: .state.status}]'))"
 fi
+# The native package's plugin id, read from its published entry when present.
+[ -n "${FM_V2_TEST_LEAD_PLUGIN_ID:-}" ] || [ ! -f "$ROOT/.opencode/plugins/fm-native-v2/server.js" ] || FM_V2_TEST_LEAD_PLUGIN_ID=firstmate.native.v2
 if [ -n "${FM_V2_TEST_LEAD_PLUGIN_ID:-}" ]; then
   count=$(printf '%s' "$inventory" | jq --arg id "$FM_V2_TEST_LEAD_PLUGIN_ID" '[.data[] | select(.id == $id and .state.status == "active")] | length')
-  [ "$count" = 1 ] || live_fail "expected exactly one active V2 lead implementation $FM_V2_TEST_LEAD_PLUGIN_ID, found $count"
+  if [ "$count" = 1 ]; then pass "live phase 2: exactly one active V2 lead implementation ($FM_V2_TEST_LEAD_PLUGIN_ID)"
+  else live_fail "expected exactly one active V2 lead implementation $FM_V2_TEST_LEAD_PLUGIN_ID, found $count"; fi
 else
   printf 'pending - live single-lead-implementation inventory: integration pending (set FM_V2_TEST_LEAD_PLUGIN_ID)\n'
 fi
@@ -252,22 +256,24 @@ else live_fail "live guard scope: a child with an inherited marker was refused l
 if [ ! -e "$LAB/marker-lead" ]; then pass "live phase 3: the exact-marked lead's protected command was blocked before execution"
 else live_fail "live guard scope: the exact-marked lead's protected command executed"; fi
 
-# --- phase 4: lead model-shell identity on the shared service ----------------
+# --- phase 4: model-shell identity on the shared service ---------------------
+# Probed in the unrelated root session: an exact-marked lead without a valid
+# registration is (correctly) refused every shell command.
 turns=$((turns + 1))
-run_in_session "$LEAD" "printf '%s %s %s\\n' \"\$OPENCODE_SESSION_ID\" \"\$(ps -o ppid= -p \$\$ | tr -d ' ')\" \"\${FM_LIVE_FIRST_CLIENT:-none}\" > $LAB/lead-identity; bash bin/fm-lock.sh > $LAB/lead-lock 2>&1; echo \"rc=\$?\" >> $LAB/lead-lock" "$turns" || true
+run_in_session "$UNRELATED" "printf '%s %s %s\\n' \"\$OPENCODE_SESSION_ID\" \"\$(ps -o ppid= -p \$\$ | tr -d ' ')\" \"\${FM_LIVE_FIRST_CLIENT:-none}\" > $LAB/lead-identity; bash bin/fm-lock.sh > $LAB/lead-lock 2>&1; echo \"rc=\$?\" >> $LAB/lead-lock" "$turns" || true
 if read -r id_session id_parent id_env < "$LAB/lead-identity" 2>/dev/null; then
   # Host fact the credential-free suites model: with no client-pushed session
   # environment, a model shell inherits the environment of whichever client
   # started the shared service, so ambient FM_* there can never be authority.
   [ "$id_env" = first-client ] \
     || live_fail "host fact changed: an API-created session's shell no longer inherits the service starter's environment (got '$id_env')"
-  [ "$id_session" = "$LEAD" ] || live_fail "lead shell OPENCODE_SESSION_ID was '$id_session', expected $LEAD"
+  [ "$id_session" = "$UNRELATED" ] || live_fail "model shell OPENCODE_SESSION_ID was '$id_session', expected $UNRELATED"
   case "$(ps -o args= -p "$id_parent" 2>/dev/null)" in
     *serve*--service*) ;;
     *) live_fail "lead shell parent $id_parent is not the shared service" ;;
   esac
-  grep -q '^rc=0$' "$LAB/lead-lock" && live_fail "an unregistered marked lead acquired the home lock: $(cat "$LAB/lead-lock")"
-  pass "live phase 4: the lead shell carries its exact session id under the shared service and cannot lock unregistered"
+  grep -q '^rc=0$' "$LAB/lead-lock" && live_fail "an unregistered session acquired the home lock: $(cat "$LAB/lead-lock")"
+  pass "live phase 4: a model shell carries its exact session id under the shared service and cannot lock unregistered"
 else
   live_fail "lead identity probe did not run"
 fi
