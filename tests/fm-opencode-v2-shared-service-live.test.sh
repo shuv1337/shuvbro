@@ -149,7 +149,8 @@ jq -n --arg url "http://127.0.0.1:$MOCK_PORT/v1" '{
   model: "mock/echo"
 }' > "$LAB/xdg/config/shuvcode/opencode.json"
 (cd "$LAB" && isolated "$SC" service set port "$SERVICE_PORT" >/dev/null) || fail "could not configure the isolated service port"
-(cd "$LAB" && isolated FM_LIVE_MOCK_KEY=mock "$SC" service start >/dev/null 2>&1) || fail "isolated service did not start"
+(cd "$LAB" && isolated FM_LIVE_MOCK_KEY=mock FM_LIVE_FIRST_CLIENT=first-client "$SC" service start >/dev/null 2>&1) \
+  || fail "isolated service did not start"
 SERVICE_STARTED=1
 SERVICE_PID=$(jq -r '.pid' "$LAB/xdg/state/shuvcode/service.json")
 case "$(ps -o args= -p "$SERVICE_PID" 2>/dev/null)" in
@@ -253,8 +254,13 @@ else live_fail "live guard scope: the exact-marked lead's protected command exec
 
 # --- phase 4: lead model-shell identity on the shared service ----------------
 turns=$((turns + 1))
-run_in_session "$LEAD" "printf '%s %s\\n' \"\$OPENCODE_SESSION_ID\" \"\$(ps -o ppid= -p \$\$ | tr -d ' ')\" > $LAB/lead-identity; bash bin/fm-lock.sh > $LAB/lead-lock 2>&1; echo \"rc=\$?\" >> $LAB/lead-lock" "$turns" || true
-if read -r id_session id_parent < "$LAB/lead-identity" 2>/dev/null; then
+run_in_session "$LEAD" "printf '%s %s %s\\n' \"\$OPENCODE_SESSION_ID\" \"\$(ps -o ppid= -p \$\$ | tr -d ' ')\" \"\${FM_LIVE_FIRST_CLIENT:-none}\" > $LAB/lead-identity; bash bin/fm-lock.sh > $LAB/lead-lock 2>&1; echo \"rc=\$?\" >> $LAB/lead-lock" "$turns" || true
+if read -r id_session id_parent id_env < "$LAB/lead-identity" 2>/dev/null; then
+  # Host fact the credential-free suites model: with no client-pushed session
+  # environment, a model shell inherits the environment of whichever client
+  # started the shared service, so ambient FM_* there can never be authority.
+  [ "$id_env" = first-client ] \
+    || live_fail "host fact changed: an API-created session's shell no longer inherits the service starter's environment (got '$id_env')"
   [ "$id_session" = "$LEAD" ] || live_fail "lead shell OPENCODE_SESSION_ID was '$id_session', expected $LEAD"
   case "$(ps -o args= -p "$id_parent" 2>/dev/null)" in
     *serve*--service*) ;;
