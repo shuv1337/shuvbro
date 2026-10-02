@@ -397,8 +397,96 @@ test_shared_service_without_session_identity_never_locks() {
   pass "shared service: a process with no session identity never acquires a home lock or records the service pid"
 }
 
+# The shared server loads the primary's plugin again for every subdirectory
+# location under it. An idle root session in a subdirectory of the primary is
+# not the lead, so one home must still get at most one watcher arm.
+test_subdirectory_location_never_adds_a_second_arm() {
+  local repo sub log out status
+  repo="$TMP_ROOT/subdir/primary"
+  sub="$repo/sub"
+  make_primary "$repo"
+  mkdir -p "$sub"
+  log="$TMP_ROOT/subdir/arm.log"
+  cat > "$repo/bin/fm-watch-arm.sh" <<SH
+#!/usr/bin/env bash
+printf 'arm %s\n' "\${FM_STATE_OVERRIDE:-unset}" >> "$log"
+trap 'exit 0' TERM
+printf 'watcher: started pid=%s\n' "\$\$"
+sleep 5 &
+wait
+SH
+  chmod +x "$repo/bin/fm-watch-arm.sh"
+  passthrough_encoder "$repo"
+  plugin_copy "$repo/.opencode/plugins" >/dev/null
+  plugin_copy "$TMP_ROOT/subdir/sub-graph" >/dev/null
+  out="$TMP_ROOT/subdir/out.json"
+  status=0
+  drive_shared "$(jq -nc --arg dir "$repo" --arg sub "$sub" --arg out "$out" --arg g "$TMP_ROOT/subdir/sub-graph" '{
+      out: $out,
+      settleMs: 900,
+      instances: [
+        { plugin: ($dir + "/.opencode/plugins/fm-primary-watch-arm.js"), directory: $dir },
+        { plugin: ($g + "/fm-primary-watch-arm.js"), directory: $sub }
+      ],
+      sessions: {
+        ses_lead: { id: "ses_lead", location: { directory: $dir } },
+        ses_adhoc: { id: "ses_adhoc", location: { directory: $sub } }
+      },
+      events: [
+        { event: { type: "session.execution.succeeded", data: { sessionID: "ses_lead" } } },
+        { event: { type: "session.execution.succeeded", data: { sessionID: "ses_adhoc" } } }
+      ]
+    }')" &
+  local driver=$!
+  printf '%s' "$driver" > "$repo/state/.lock"
+  wait "$driver" || status=$?
+  expect_code 0 "$status" "subdirectory driver"
+  [ -f "$log" ] || fail "fixture vacuous: no instance armed at all"
+  [ "$(wc -l < "$log" | tr -d ' ')" -le 1 ] \
+    || fail "a root session in a subdirectory of the primary added a second watcher arm for one home: $(cat "$log")"
+  pass "shared service: a subdirectory location of the primary never adds a second watcher arm"
+}
+
+# An explicitly interrupted lead turn must not be resurrected by a
+# self-generated follow-up: any prompt the adapter admits for that interruption
+# must not schedule execution (resume:false), and the default is no prompt.
+test_interrupted_turn_gets_no_self_generated_resuming_prompt() {
+  local repo out status
+  repo="$TMP_ROOT/interrupted/primary"
+  make_primary "$repo"
+  cat > "$repo/bin/fm-turnend-guard.sh" <<'SH'
+#!/usr/bin/env bash
+printf 'supervision is off\n' >&2
+exit 2
+SH
+  chmod +x "$repo/bin/fm-turnend-guard.sh"
+  passthrough_encoder "$repo"
+  plugin_copy "$repo/.opencode/plugins" >/dev/null
+  out="$TMP_ROOT/interrupted/out.json"
+  status=0
+  drive_shared "$(jq -nc --arg dir "$repo" --arg out "$out" '{
+      out: $out,
+      settleMs: 700,
+      instances: [ { plugin: ($dir + "/.opencode/plugins/fm-primary-turnend-guard.js"), directory: $dir } ],
+      sessions: { ses_lead: { id: "ses_lead", location: { directory: $dir } } },
+      events: [
+        { event: { type: "session.execution.started", data: { sessionID: "ses_lead" } } },
+        { event: { type: "session.execution.interrupted", data: { sessionID: "ses_lead" } } }
+      ]
+    }')" &
+  local driver=$!
+  printf '%s' "$driver" > "$repo/state/.lock"
+  wait "$driver" || status=$?
+  expect_code 0 "$status" "interrupted driver"
+  jq -e '[.admitted[] | select(.sessionID == "ses_lead" and .resume != false)] | length == 0' "$out" >/dev/null \
+    || fail "an explicitly interrupted lead turn received a self-generated prompt that schedules execution: $(cat "$out")"
+  pass "an explicitly interrupted lead turn gets no self-generated prompt that resumes execution"
+}
+
 FAILED=0
 for t in \
+  test_subdirectory_location_never_adds_a_second_arm \
+  test_interrupted_turn_gets_no_self_generated_resuming_prompt \
   test_two_primaries_on_one_service_never_arm_one_home \
   test_turnend_defers_to_armed_watcher_in_one_module_graph \
   test_turnend_defers_to_armed_watcher_across_plugin_module_graphs \
