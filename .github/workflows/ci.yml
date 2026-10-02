@@ -1,20 +1,49 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
+  # One run per PR. The merge commit is the same tree the pull_request run
+  # already tested, so a second push-to-main run only doubled the minutes.
+  # `labeled` is not listed here. A label event would rerun this suite, and
+  # skipping these jobs would report them as success and could clear a real
+  # failure on the same SHA. Adding the macos label runs the stock-Bash job
+  # from macos-label.yml. This workflow still runs that job when the label is
+  # already on the PR, and on workflow_dispatch.
   pull_request:
+    types: [opened, synchronize, reopened]
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+# Cancel a superseded run for the same PR (or the same ref, for a dispatch).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  # Private self-hosted runners. Linux must include Linux: the mac runner
+  # also carries shuvbro-ci. Five Linux runners and one mac. The five serial
+  # shards stay five jobs; other Linux jobs queue instead of adding fan-out.
+  # Each Linux job is a fresh container, so a queued shard does not reuse
+  # the previous job's workspace. Fork pull requests never take a runner:
+  # the repo already refuses their workflows, and this if skips the job
+  # before assignment if one is started.
   lint:
     name: Lint
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, shuv-ci, shuvbro-ci]
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    # Full-corpus ShellCheck via bin/fm-lint.sh. Pinned tool installs are about
+    # a second; the ~19 minute average is that analysis, so caching the
+    # downloads would not shorten the check and narrowing it would drop
+    # source-aware rules CI is required to keep. 40 minutes is above the slow
+    # green runs (~23 min) and stops a wedged analysis short of the 6-hour
+    # default.
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
       - name: Install pinned ShellCheck
         run: |
           set -eu
@@ -28,17 +57,29 @@ jobs:
       # Single owner of the lint definition (shell file set, config, version,
       # and GitHub workflow lint). Do not re-spell the checks here; keep CI
       # and the pre-push gate on this script so a self-broken ci.yml still
-      # fails locally before merge.
-      - run: bin/fm-lint.sh
+      # fails locally before merge. FM_LINT_JOBS=1 runs the same two
+      # ShellCheck shards one at a time. FM_LINT_ONE_FILE=1 invokes
+      # ShellCheck once per root with the same --external-sources flags:
+      # one shard's combined graph was SIGKILL'd (exit 137) in the 8g
+      # self-hosted container even with the shards serialized.
+      - name: Run full lint
+        env:
+          FM_LINT_JOBS: "1"
+          FM_LINT_ONE_FILE: "1"
+        run: bin/fm-lint.sh
 
   # Deterministic proof that portable parallel shards + portable serial + Herdr
   # equal the complete tests/*.test.sh inventory with no missing or duplicates,
   # and that the portable serial CI shards partition that serial lane exactly.
   test-coverage:
     name: Test coverage guard
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, shuv-ci, shuvbro-ci]
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
       - name: Prove complete regression partition
         run: bin/fm-test-run.sh --check-coverage
 
@@ -46,14 +87,20 @@ jobs:
   # set only. Composition owner: bin/fm-test-run.sh (docs/fm-test-portable-shards.md).
   tests-portable-parallel-1:
     name: Behavior portable parallel 1
-    runs-on: ubuntu-latest
-    # Measured shard wall is ~1 min of serial sum on proven scripts; this cap is
-    # a hang tripwire with margin, not the expected healthy end of the lane.
-    timeout-minutes: 10
+    runs-on: [self-hosted, Linux, X64, shuv-ci, shuvbro-ci]
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    # Hang tripwire, not the expected end of the lane. The old 10-minute cap
+    # was sized for the 2026-08 proof (~2 min) and cancelled every slower run
+    # while tests were still passing: shard 1 carried captain-hold (~3-5 min),
+    # fm-lint (~2 min), and fm-test-run (~1-2 min) together. Membership is
+    # rebalanced from the 2026-09-18 green run (about 5 min per shard, about
+    # 9 min on a slow runner). 15 minutes still fails a stuck script.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          persist-credentials: false
       - name: Install pinned ShellCheck
         run: |
           set -eu
@@ -67,14 +114,28 @@ jobs:
       - name: Install tasks-axi
         run: |
           set -eu
-          npm install -g tasks-axi
+          # No sudo. A global prefix install keeps bins and nested package
+          # dependencies under the job temp dir when the system prefix is
+          # not writable. Tests resolve Pi through FM_PI_PACKAGE_DIR below.
+          npm install -g --prefix "$RUNNER_TEMP/npm" tasks-axi
+          echo "$RUNNER_TEMP/npm/bin" >> "$GITHUB_PATH"
+          PATH="$RUNNER_TEMP/npm/bin:$PATH"
           tasks-axi --version
       - name: Install the Pi package for the Pi extension tests
         run: |
           set -eu
-          npm install -g @earendil-works/pi-coding-agent
-          npm ls -g --depth 0 @earendil-works/pi-coding-agent
+          npm install -g --prefix "$RUNNER_TEMP/npm" @earendil-works/pi-coding-agent
+          echo "$RUNNER_TEMP/npm/bin" >> "$GITHUB_PATH"
+          PATH="$RUNNER_TEMP/npm/bin:$PATH"
+          npm ls -g --prefix "$RUNNER_TEMP/npm" --depth 0 @earendil-works/pi-coding-agent
+      - name: Install pinned Ruby
+        run: |
+          set -eu
+          bin/fm-install-runner-tools.sh "$RUNNER_TEMP/runner-tools" ruby
+          echo "$RUNNER_TEMP/runner-tools/bin" >> "$GITHUB_PATH"
       - name: Run portable parallel shard 1
+        env:
+          FM_PI_PACKAGE_DIR: ${{ runner.temp }}/npm/lib/node_modules/@earendil-works/pi-coding-agent
         run: |
           set -eu
           mkdir -p "$RUNNER_TEMP/fm-test"
@@ -91,12 +152,16 @@ jobs:
 
   tests-portable-parallel-2:
     name: Behavior portable parallel 2
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+    runs-on: [self-hosted, Linux, X64, shuv-ci, shuvbro-ci]
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    # Same hang tripwire as shard 1. After the rebalance this shard's healthy
+    # wall matches shard 1 (about 5 min, about 9 min on a slow runner).
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          persist-credentials: false
       - name: Install pinned ShellCheck
         run: |
           set -eu
@@ -110,7 +175,11 @@ jobs:
       - name: Install tasks-axi
         run: |
           set -eu
-          npm install -g tasks-axi
+          # No sudo. Install into the job temp dir so a system npm prefix
+          # does not have to be writable.
+          npm install --prefix "$RUNNER_TEMP/npm" tasks-axi
+          echo "$RUNNER_TEMP/npm/node_modules/.bin" >> "$GITHUB_PATH"
+          PATH="$RUNNER_TEMP/npm/node_modules/.bin:$PATH"
           tasks-axi --version
       - name: Run portable parallel shard 2
         run: |
@@ -128,13 +197,16 @@ jobs:
 
   # Required portable serial remainder: watcher, lock, AFK, tmux, daemon,
   # ambiguous, and other stateful tests. Real Herdr stays in tests-herdr.
-  # Split across separate runners so no two of these stateful scripts ever share
-  # a machine: each shard is still strictly serial in itself. Shard membership
-  # and the shard count both belong to bin/fm-test-run.sh, which refuses a lane
+  # Each shard is its own job and stays strictly serial in itself. The runner
+  # gives every job a fresh container, so stateful scripts do not share a
+  # workspace when jobs queue on the same host. Do not grow this matrix:
+  # five shards already match the five Linux runners. Shard membership and
+  # the shard count both belong to bin/fm-test-run.sh, which refuses a lane
   # whose "ofN" disagrees with it (docs/fm-test-portable-shards.md).
   tests-portable-serial:
     name: Behavior portable serial ${{ matrix.shard }}
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, shuv-ci, shuvbro-ci]
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     # Current runners can take ~20 min for a balanced shard. This 30-minute cap
     # preserves the timeout as a hang tripwire while allowing runner-speed and
     # job-setup margin; it is not the expected healthy end of the lane.
@@ -148,6 +220,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          persist-credentials: false
       - name: Install pinned ShellCheck
         run: |
           set -eu
@@ -169,7 +242,12 @@ jobs:
       - name: Install tasks-axi for backlog-handoff delegation
         run: |
           set -eu
-          npm install -g tasks-axi
+          # No sudo. A global prefix install keeps bins and nested package
+          # dependencies under the job temp dir when the system prefix is
+          # not writable.
+          npm install -g --prefix "$RUNNER_TEMP/npm" tasks-axi
+          echo "$RUNNER_TEMP/npm/bin" >> "$GITHUB_PATH"
+          PATH="$RUNNER_TEMP/npm/bin:$PATH"
           tasks-axi --version
       # The Pi extension tests read the installed Pi package's own types and
       # runtime, so without it they gate-skip and pass silently. It is a public
@@ -177,8 +255,10 @@ jobs:
       - name: Install the Pi package for the Pi extension tests
         run: |
           set -eu
-          npm install -g @earendil-works/pi-coding-agent
-          npm ls -g --depth 0 @earendil-works/pi-coding-agent
+          npm install -g --prefix "$RUNNER_TEMP/npm" @earendil-works/pi-coding-agent
+          echo "$RUNNER_TEMP/npm/bin" >> "$GITHUB_PATH"
+          PATH="$RUNNER_TEMP/npm/bin:$PATH"
+          npm ls -g --prefix "$RUNNER_TEMP/npm" --depth 0 @earendil-works/pi-coding-agent
       # The OpenCode V2 guard plugins reject tool calls through the effect
       # runtime pinned in .opencode/plugins, the same install a shuvcode lead
       # needs; tests/fm-opencode-v2-plugin.test.sh fails in CI without it.
@@ -186,6 +266,13 @@ jobs:
         run: |
           set -eu
           npm ci --prefix .opencode/plugins --ignore-scripts
+      - name: Install pinned Ruby, ps, lsof, and Chrome
+        run: |
+          set -eu
+          # Hosted images ship these. The rootless runner does not, and the
+          # portable lane calls them directly. No apt and no sudo.
+          bin/fm-install-runner-tools.sh "$RUNNER_TEMP/runner-tools" ruby ps lsof chrome
+          echo "$RUNNER_TEMP/runner-tools/bin" >> "$GITHUB_PATH"
       - name: Run portable serial shard ${{ matrix.shard }}
         env:
           # job-total rather than a literal, so shrinking or growing the matrix
@@ -193,6 +280,8 @@ jobs:
           # leaving a shard of the required lane unrun.
           FM_SERIAL_LANE: portable-serial-${{ matrix.shard }}of${{ strategy.job-total }}
           FM_SERIAL_SHARD: ${{ matrix.shard }}
+          FM_PI_PACKAGE_DIR: ${{ runner.temp }}/npm/lib/node_modules/@earendil-works/pi-coding-agent
+          FM_CHROME_BIN: ${{ runner.temp }}/runner-tools/bin/google-chrome
         run: |
           set -eu
           mkdir -p "$RUNNER_TEMP/fm-test"
@@ -215,7 +304,8 @@ jobs:
   # the failure evidence and move the job to macOS rather than skip assertions.
   tests-herdr:
     name: Behavior tests (Herdr)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, shuv-ci, shuvbro-ci]
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     # Healthy runs finish around 7 minutes. This job cap is a last-resort hang
     # tripwire, not the expected end of the lane. The family-run step owns the
     # tighter bound so a wedged suite fails fast with always() cleanup and
@@ -225,6 +315,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          persist-credentials: false
       - name: Require tools for real Herdr
         run: |
           set -eu
@@ -335,15 +426,22 @@ jobs:
   # Aggregate per-lane timing into one summary artifact for critical-path review.
   tests-timing-aggregate:
     name: Behavior timing aggregate
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, shuv-ci, shuvbro-ci]
     needs:
       - tests-portable-parallel-1
       - tests-portable-parallel-2
       - tests-portable-serial
       - tests-herdr
-    if: always()
+    # always() so a failed lane still publishes timings. The fork clause
+    # still keeps a fork pull request off the runner.
+    if: >-
+      always() &&
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
       - name: Download lane timing artifacts
         uses: actions/download-artifact@v4
         with:
@@ -373,16 +471,51 @@ jobs:
 
   macos-stock-bash:
     name: Stock macOS Bash snapshot compatibility
-    runs-on: macos-latest
+    runs-on: [self-hosted, macOS, ARM64, shuv-ci, shuvbro-ci, shuvbot]
+    # macOS minutes are weighted 10x on hosted runners. Run this only on
+    # demand or when the pull request already carries the macos label.
+    # Adding that label later is macos-label.yml, not a second copy of this
+    # suite. Keep the Node install, jq pin, and shell script identical there.
+    # A fork pull request never matches, so it is not assigned to the mac
+    # runner. Do not require
+    # this check: a skipped conditional job counts as success.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event_name == 'pull_request' &&
+        github.event.pull_request.head.repo.full_name == github.repository &&
+        contains(github.event.pull_request.labels.*.name, 'macos')
+      )
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
-      - name: Run snapshot consumers with stock Bash
+        with:
+          persist-credentials: false
+      - name: Install Node without Homebrew
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - name: Install pinned jq
         shell: /bin/bash {0}
-        env:
-          PATH: /bin:/usr/bin:/usr/sbin:/sbin:/usr/local/bin:/opt/homebrew/bin
         run: |
           set -eu
+          mkdir -p "$RUNNER_TEMP/bin"
+          curl -fsSL -o "$RUNNER_TEMP/bin/jq" "https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-macos-arm64"
+          actual=$(shasum -a 256 "$RUNNER_TEMP/bin/jq" | awk '{print $1}')
+          expected=0bbe619e663e0de2c550be2fe0d240d076799d6f8a652b70fa04aea8a8362e8a
+          [ "$actual" = "$expected" ] || { echo "::error::jq checksum mismatch (got ${actual})"; exit 1; }
+          chmod +x "$RUNNER_TEMP/bin/jq"
+          command -v node >/dev/null || { echo "::error::node is required"; exit 1; }
+          dirname "$(command -v node)" > "$RUNNER_TEMP/node-bin"
+      - name: Run snapshot consumers with stock Bash
+        shell: /bin/bash {0}
+        run: |
+          set -eu
+          # /bin/bash is selected by this step's shell. Reset PATH before any
+          # lookup so Homebrew cannot satisfy jq, npm, or bash.
+          node_bin=$(PATH="/bin:/usr/bin" cat "$RUNNER_TEMP/node-bin")
+          PATH="$RUNNER_TEMP/bin:${node_bin}:/bin:/usr/bin:/usr/sbin:/sbin"
+          export PATH
           case "$BASH_VERSION" in
             3.2.57*) ;;
             *) echo "::error::expected stock macOS Bash 3.2.57, got $BASH_VERSION"; exit 1 ;;
@@ -399,8 +532,8 @@ jobs:
           [ "$parse_fail" -eq 0 ] || { echo "::error::stock macOS Bash 3.2 parse sweep failed"; exit 1; }
 
           command -v npm >/dev/null || { echo "::error::npm is required to install tasks-axi"; exit 1; }
-          npm install -g tasks-axi@0.2.5 >/dev/null
-          PATH="$(npm prefix -g)/bin:$PATH"
+          npm install --prefix "$RUNNER_TEMP/npm" tasks-axi@0.2.5 >/dev/null
+          PATH="$RUNNER_TEMP/npm/node_modules/.bin:$PATH"
           export PATH
           command -v tasks-axi >/dev/null || { echo "::error::tasks-axi is required for the stock Bash regressions"; exit 1; }
 
@@ -433,9 +566,13 @@ jobs:
 
   invariants:
     name: Repo invariants
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, shuv-ci, shuvbro-ci]
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
       - name: Compatibility pointers must stay intact
         run: |
           set -eu

@@ -1840,11 +1840,10 @@ muse_credential_present() {
   [ -s "$auth" ] || muse_worker_meta_api_key_present
 }
 
-# shuvcode v2.0.15-shuv.1 accepts a model on `mini` and `run` as
-# provider/model#variant. The variant is the effort. The root command rejects
-# both --model and --effort. low|medium|high|xhigh|max are variant ids on the
-# default OpenCode model. An effort with no provider/model cannot be expressed
-# as a flag, so it stays in task metadata and the root launch is unchanged.
+# The explicit-model launch helper accepts provider/model#variant and attaches
+# the root --auto TUI to a model-bound session. The variant is the effort.
+# An effort without a provider/model stays in task metadata; the root launch is
+# unchanged. bin/fm-opencode-v2-launch.sh owns the supported launch mechanics.
 opencode_v2_model_flag() {
   local model=$1 effort=$2 ref='' variant=''
   [ -n "$model" ] && [ "$model" != default ] && ref=$model
@@ -1855,6 +1854,10 @@ opencode_v2_model_flag() {
   case "$ref" in
     *'#'*)
       echo "error: opencode-v2 model '$ref' must be provider/model; pass the variant with --effort" >&2
+      return 1
+      ;;
+    /*|*/)
+      echo "error: opencode-v2 model '$ref' must have a nonempty provider and model" >&2
       return 1
       ;;
     */*) ;;
@@ -3072,15 +3075,22 @@ rovo_endpoint_cleanup() {
   fm_backend_kill "$BACKEND" "$T" "$tab_id" "fm-$ID" 2>/dev/null || true
 }
 
-# opencode-v2 (shuvcode): the root command's --prompt only PRE-FILLS the TUI
-# composer and never submits it (verified live on shuvcode v2.0.3-shuv.4: the
-# brief sat in the input box and the busy record stayed unchanged until a manual
-# Enter). So after launch the spawn waits for the pre-filled left-bar composer,
-# then submits it with Enter, retrying Enter only, until the shared classifier
-# reads the composer empty. The `╹▀` floor row was verified on shuvcode
-# v2.0.3-shuv.4 and is a launch-progress signal that the TUI (not the pane
-# shell) owns the screen; composer emptiness stays with the shared classifier,
-# like kimi and rovo.
+# Older shuvcode roots only prefill --prompt; newer releases submit it once
+# the model catalog is ready. A current-generation worker execution event is
+# authoritative submission proof, even when the turn finishes before the first
+# capture. Otherwise retain the prefill/Enter handshake for older releases.
+opencode_v2_turn_started() {
+  local record
+  record=$(fm_busy_record_read "$STATE_REAL" "$ID") || return 1
+  case "$record" in
+    'busy opencode-plugin session-execution-started '*|\
+    'idle opencode-plugin session-execution-succeeded '*|\
+    'idle opencode-plugin session-execution-failed '*|\
+    'idle opencode-plugin session-execution-interrupted '*) return 0 ;;
+  esac
+  return 1
+}
+
 opencode_v2_composer_state() {
   fm_backend_composer_state "$BACKEND" "$T" "$W" 2>/dev/null || true
 }
@@ -3089,6 +3099,7 @@ opencode_v2_wait_for_prefill() {
   local pane state i=0 max=${FM_OPENCODE_V2_READY_POLLS:-60} interval=${FM_OPENCODE_V2_POLL_INTERVAL:-0.5}
   local ready_marker=${FM_OPENCODE_V2_READY_MARKER:-'╹▀'}
   while [ "$i" -lt "$max" ]; do
+    opencode_v2_turn_started && return 0
     pane=$(fm_backend_capture "$BACKEND" "$T" 120 "$W" 2>/dev/null || true)
     if printf '%s\n' "$pane" | grep -Fq -- "$ready_marker"; then
       state=$(opencode_v2_composer_state)
@@ -3926,17 +3937,15 @@ sq_opinput=$(shell_quote "$FM_ROOT/bin/fm-operational-input.sh")
 sq_worktree=$(shell_quote "$WT")
 MODELFLAG=$(model_flag_for_harness "$HARNESS" "$MODEL") || exit 1
 EFFORTFLAG=$(effort_flag_for_harness "$HARNESS" "$EFFORT" "$MODEL") || exit 1
-# The root shuvcode command rejects --model. mini accepts
-# --model provider/model#variant and submits --prompt itself.
-OPENCODE_V2_MINI=0
+# Preserve the root TUI's unattended permissions and composer handshake while
+# binding an explicitly requested model before its first prompt.
 if [ "$HARNESS" = opencode-v2 ] && [ -n "$MODELFLAG" ]; then
-  OPENCODE_V2_MINI=1
   case "$LAUNCH" in
     'shuvcode --standalone --auto --prompt '*)
-      LAUNCH="shuvcode mini --standalone ${MODELFLAG}${LAUNCH#shuvcode --standalone --auto }"
+      LAUNCH="$(shell_quote "$FM_ROOT/bin/fm-opencode-v2-launch.sh") ${MODELFLAG}${LAUNCH#shuvcode --standalone --auto }"
       ;;
     *)
-      echo "error: opencode-v2 model launch could not be rewritten onto shuvcode mini" >&2
+      echo "error: opencode-v2 model launch could not use the model-bound root session helper" >&2
       exit 1
       ;;
   esac
@@ -4138,14 +4147,13 @@ if [ "$HARNESS" = rovo ]; then
     exit 1
   fi
 fi
-# mini --prompt submits the brief. The root TUI only pre-fills it, so only
-# that launch waits for the composer and sends Enter.
-if [ "$HARNESS" = opencode-v2 ] && [ "$OPENCODE_V2_MINI" != 1 ]; then
+# Both model-bound and default launches retain the root submission contract.
+if [ "$HARNESS" = opencode-v2 ]; then
   if ! opencode_v2_wait_for_prefill; then
     opencode_v2_spawn_fail "shuvcode did not show its pre-filled launch brief in window $T"
     exit 1
   fi
-  if ! opencode_v2_submit_prefill; then
+  if ! opencode_v2_turn_started && ! opencode_v2_submit_prefill; then
     opencode_v2_spawn_fail "shuvcode pre-filled launch brief could not be submitted in window $T"
     exit 1
   fi

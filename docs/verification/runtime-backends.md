@@ -1590,3 +1590,33 @@ A throwaway scout was spawned through `bin/fm-spawn.sh --scout --harness omp --m
 6. `bin/fm-control.sh <id> exit` stopped the agent and `bin/fm-teardown.sh` returned the worktree and closed the item.
 
 `FM_OMP_LIVE_E2E=1 tests/fm-omp-primary-live-e2e.test.sh` refreshes the primary evidence; the worker path above is refreshed by repeating the scout dispatch after any omp upgrade.
+
+## Shuvcode explicit-model worker
+
+Verified on 2026-10-02 at 01:55 PDT on Linux with shuvcode v2.0.22-shuv.1,
+using `opencode/space-bunny-free#low`:
+
+```sh
+FM_OPENCODE_V2_WORKER_LIVE=1 bash tests/fm-opencode-v2-worker-live-e2e.test.sh
+```
+
+Observed result: `ok - shuvcode v2.0.22-shuv.1 explicit model/variant, unattended ask, explicit deny, busy/idle, turn-end and persistent follow-up`.
+The guard uses real `fm-spawn`, a private tmux socket, a disposable worktree,
+and real shuvcode tools and worker plugins. It verifies the persisted root
+session and every assistant message's requested model and variant, execution of an ask-policy shell tool
+under `--auto`, a recorded `permission.rejected` result for an explicitly denied
+command, current-generation semantic busy and idle, turn-end notification, and
+a second tool-using turn through the same persistent composer.
+Only Treehouse allocation is replaced with entry into the disposable worktree.
+The guard requires configured model credentials and is opt-in, outside portable CI.
+
+The installed root TUI rejects `--model`; its `mini --model` path did not honor
+the requested model in the live probe and lacks the root's `--auto` contract.
+`bin/fm-opencode-v2-launch.sh` instead verifies the requested model against one
+private leased server's settled catalog, creates a model-bound root session,
+and attaches the unattended root TUI to that same server. Keeping the server
+alive through the persistent TUI also lets asynchronous terminal hooks finish.
+`tests/fm-spawn-dispatch-profile.test.sh` exercises catalog readiness, model and
+variant refusal, session-binding validation, exact prompt forwarding, lease
+closure on success and failure, and both current auto-submission and older
+composer-prefill submission handshakes.
