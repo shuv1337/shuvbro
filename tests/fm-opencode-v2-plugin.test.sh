@@ -866,6 +866,30 @@ EOF
   pass "OpenCode plugin defaults are structs with id, a V2 entrypoint, and a server wrapping the V1 factory"
 }
 
+test_v2_same_location_is_not_lead_authority() {
+  local out status
+  out=$(node --input-type=module 2>&1 <<EOF
+import { pathToFileURL } from "node:url";
+const { createSessionBinder } = await import(pathToFileURL("$ROOT/.opencode/plugins/lib/fm-session-bind-v2.js").href);
+const directory = "$TMP_ROOT/shared-location";
+// A root session at the plugin location is a candidate, not an explicit lead
+// claim. No home/session/owner-generation binding has been established here.
+const binder = createSessionBinder({
+  location: { directory },
+  session: { async get({ sessionID }) { return { id: sessionID, location: { directory } }; } },
+});
+await binder.observe({ type: "session.created", data: { sessionID: "ses_unrelated", location: { directory } } });
+if (await binder.owns("ses_unrelated")) {
+  throw new Error("an unrelated root session acquired lead authority from directory equality and event arrival alone");
+}
+EOF
+  )
+  status=$?
+  expect_code 0 "$status" "same-location session must not acquire implicit lead authority: $out"
+  pass "OpenCode V2 requires explicit lead authority, not first same-location root session"
+}
+
+test_v2_same_location_is_not_lead_authority
 test_v2_watch_arm_does_not_cross_own_sessions
 test_v2_watch_arm_same_location_binds_only_first_session
 test_v2_watch_arm_requires_lock_ownership
