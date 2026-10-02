@@ -8,10 +8,13 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 FM_ROOT="${FM_ROOT_OVERRIDE:-$REPO_ROOT}"
 FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 CONFIG="${FM_CONFIG_OVERRIDE:-$FM_HOME/config}"
+STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 DOC_DIR="$REPO_ROOT/docs/supervision-protocols"
 
 # shellcheck source=bin/fm-persona-lib.sh
 . "$SCRIPT_DIR/fm-persona-lib.sh"
+# shellcheck source=bin/fm-primary-scope-lib.sh
+. "$SCRIPT_DIR/fm-primary-scope-lib.sh"
 
 HARNESS=
 READ_ONLY=0
@@ -90,6 +93,23 @@ case "$HARNESS" in
 esac
 [ -f "$SNIPPET" ] || SNIPPET="$DOC_DIR/unknown.md"
 
+# The OpenCode V2 primary plugins and turn-end hooks act only in a genuine plain
+# primary checkout, so a linked worktree or a secondmate home gets no automatic
+# V2 supervision. Name that instead of claiming the plugin owns continuity, and
+# fall back to the unknown-harness protocol, which owns the unverified-wake path.
+# A home whose state directory does not exist yet has not started a session, so
+# it keeps the ordinary block rather than being misread as a linked checkout.
+V2_INACTIVE=
+if [ "$HARNESS" = opencode-v2 ]; then
+  if fm_root_is_secondmate_home "$FM_ROOT" \
+    || { [ "$FM_HOME" != "$FM_ROOT" ] && fm_root_is_secondmate_home "$FM_HOME"; }; then
+    V2_INACTIVE=secondmate
+  elif [ -d "$STATE" ] && ! fm_primary_scope_matches "$FM_ROOT" "$STATE"; then
+    V2_INACTIVE=checkout
+  fi
+  [ -z "$V2_INACTIVE" ] || SNIPPET="$DOC_DIR/unknown.md"
+fi
+
 checkpoint_seconds=${FM_CODEX_WATCH_CHECKPOINT:-180}
 pi_ext="$FM_ROOT/.pi/extensions/fm-primary-pi-watch.ts"
 pi_turnend_ext="$FM_ROOT/.pi/extensions/fm-primary-turnend-guard.ts"
@@ -153,7 +173,16 @@ repair_line() {
     omp)
       printf '%s%s%s%s%s%s\n' "$prefix" 'repair a missing or failed watcher cycle with the omp tool fm_watch_arm_omp, or restart omp inside this home so ' "$omp_turnend_ext" ' and ' "$omp_ext" ' auto-load from .omp/extensions/ (use -e with both paths only when starting omp from another directory).'
       ;;
-    opencode|opencode-v2)
+    opencode-v2)
+      if [ "$V2_INACTIVE" = secondmate ]; then
+        printf '%s%s\n' "$prefix" 'automatic OpenCode V2 supervision is inactive in a secondmate home; run this secondmate on a qualified harness, or keep the generic bounded foreground wait over bin/fm-watch.sh, never shell &.'
+      elif [ -n "$V2_INACTIVE" ]; then
+        printf '%s%s\n' "$prefix" 'automatic OpenCode V2 supervision is inactive in this checkout; run the lead from a plain clone (not a git worktree), or keep the generic bounded foreground wait over bin/fm-watch.sh, never shell &.'
+      else
+        printf '%s%s\n' "$prefix" 'repair missing watcher supervision by letting the OpenCode TUI plugin arm after idle; use bin/fm-watch-arm.sh only as a manual recovery probe if the plugin reports failure.'
+      fi
+      ;;
+    opencode)
       printf '%s%s\n' "$prefix" 'repair missing watcher supervision by letting the OpenCode TUI plugin arm after idle; use bin/fm-watch-arm.sh only as a manual recovery probe if the plugin reports failure.'
       ;;
     grok)
@@ -182,7 +211,14 @@ ordinary_wake_line() {
     omp)
       printf '%s\n' '- Ordinary wake: the omp extension already owns watcher continuity; do not arm another cycle.'
       ;;
-    opencode|opencode-v2)
+    opencode-v2)
+      if [ -n "$V2_INACTIVE" ]; then
+        printf '%s\n' '- Ordinary wake: automatic OpenCode V2 supervision is inactive in this checkout; no plugin owns watcher continuity here, so follow the fallback below.'
+      else
+        printf '%s\n' '- Ordinary wake: the OpenCode TUI plugin already owns watcher continuity; do not arm manually.'
+      fi
+      ;;
+    opencode)
       printf '%s\n' '- Ordinary wake: the OpenCode TUI plugin already owns watcher continuity; do not arm manually.'
       ;;
     grok)
@@ -195,6 +231,21 @@ ordinary_wake_line() {
       printf '%s\n' '- Ordinary wake: follow the continuation in the harness protocol below; do not use shell &.'
       ;;
   esac
+}
+
+v2_inactive_notice() {
+  [ -n "$V2_INACTIVE" ] || return 0
+  printf '%s\n' 'OpenCode V2 automatic supervision: INACTIVE in this checkout.'
+  printf '%s\n' 'The OpenCode V2 primary plugins and turn-end guard act only in a plain primary checkout, so nothing here arms the watcher, delivers wakes, or warns at turn end.'
+  if [ "$V2_INACTIVE" = secondmate ]; then
+    printf '%s\n' 'This checkout is a secondmate home, and OpenCode V2 secondmates are not qualified.'
+    printf '%s\n' 'Supported: run this secondmate on a qualified harness.'
+  else
+    printf '%s\n' 'This checkout is not a plain primary checkout; a linked git worktree never is.'
+    printf '%s\n' 'Supported: run the OpenCode V2 lead from a plain clone (not a git worktree) that is its own home; the plugin owns watcher continuity only there.'
+  fi
+  printf '%s\n' 'Until then this session has no verified wake adapter, so the unknown-harness fallback below applies.'
+  printf '\n'
 }
 
 if [ "$REPAIR_LINE" -eq 1 ]; then
@@ -224,6 +275,7 @@ else
 fi
 ordinary_wake_line
 printf '\n'
+v2_inactive_notice
 render_snippet
 printf '\n'
 PERSONA_RC=0
