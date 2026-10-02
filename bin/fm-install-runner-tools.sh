@@ -199,7 +199,7 @@ lsof deb 110a797a57673d3ee497a141cf988199258058c57525799c63194d81822529a0 http:/
 lsof deb 212d8873ac952bc68f4cf56d7eaf17566f86f5c7cc4b971899a0c56e174699cc http://archive.ubuntu.com/ubuntu/pool/main/libt/libtirpc/libtirpc-common_1.3.4+ds-1.1build1_all.deb
 lsof deb 273f7cc95a68d927d7f71c3e78b7717a16a8d86e646a206bae7bf797150ae9db http://archive.ubuntu.com/ubuntu/pool/main/k/krb5/libk5crypto3_1.20.1-6ubuntu2.10_amd64.deb
 lsof deb 3a3cd37160399ab235fdf2f13159fd288940abb9660e0ed1afb418b44c73d43a http://archive.ubuntu.com/ubuntu/pool/main/libt/libtirpc/libtirpc3t64_1.3.4+ds-1.1build1_amd64.deb
-lsof deb 3d0955bc049bbcca0f4c3e78a3a8b994593d96db7d84f4320217224433844534 http://archive.ubuntu.com/ubuntu/pool/main/o/openssl/libssl3t64_3.0.13-0ubuntu3.15_amd64.deb
+lsof deb 219f43b1cd836a4da550938db5fda93160d269d39a4edcf1f1ce698a470db797 http://archive.ubuntu.com/ubuntu/pool/main/o/openssl/libssl3t64_3.0.13-0ubuntu3.16_amd64.deb
 lsof deb 46165f06b9568f9e2718f1fdd3d3a8db46aa597f5ff163c1d21c0d1daa12191d http://archive.ubuntu.com/ubuntu/pool/main/l/lsof/lsof_4.95.0-1build3_amd64.deb
 lsof deb 60b48c5a3233f1d8caba30d6573edc8e131911ab6d63adcd664f7cbe62708362 http://archive.ubuntu.com/ubuntu/pool/main/k/krb5/libkrb5-3_1.20.1-6ubuntu2.10_amd64.deb
 lsof deb 6abaa6c26f46ef17764c4a753e0e84de1cdadde5634fd2987621fdc617988d19 http://archive.ubuntu.com/ubuntu/pool/main/libs/libselinux/libselinux1_3.5-2ubuntu2.1_amd64.deb

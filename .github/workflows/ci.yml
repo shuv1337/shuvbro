@@ -124,7 +124,7 @@ jobs:
       - name: Install the Pi package for the Pi extension tests
         run: |
           set -eu
-          npm install -g --prefix "$RUNNER_TEMP/npm" @earendil-works/pi-coding-agent
+          npm install -g --prefix "$RUNNER_TEMP/npm" @earendil-works/pi-coding-agent@0.87.1
           echo "$RUNNER_TEMP/npm/bin" >> "$GITHUB_PATH"
           PATH="$RUNNER_TEMP/npm/bin:$PATH"
           npm ls -g --prefix "$RUNNER_TEMP/npm" --depth 0 @earendil-works/pi-coding-agent
@@ -255,7 +255,7 @@ jobs:
       - name: Install the Pi package for the Pi extension tests
         run: |
           set -eu
-          npm install -g --prefix "$RUNNER_TEMP/npm" @earendil-works/pi-coding-agent
+          npm install -g --prefix "$RUNNER_TEMP/npm" @earendil-works/pi-coding-agent@0.87.1
           echo "$RUNNER_TEMP/npm/bin" >> "$GITHUB_PATH"
           PATH="$RUNNER_TEMP/npm/bin:$PATH"
           npm ls -g --prefix "$RUNNER_TEMP/npm" --depth 0 @earendil-works/pi-coding-agent

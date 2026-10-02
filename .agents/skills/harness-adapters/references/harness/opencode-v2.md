@@ -37,11 +37,21 @@ A project plugin cannot import shuvcode's own `Tool.Error` class; shuvcode match
 
 ## Dispatch
 
-Ship and scout launches use `shuvcode --standalone --auto --prompt`; `--standalone` gives each worker a leased server whose lifetime matches the session, while `--auto` auto-approves permissions that are not explicitly denied so an unattended worker never parks on a permission dialog.
-The root command accepts only `--standalone`, `--server`, `--auto`, `--continue`, `--session`, `--prompt`, and a directory; it rejects `--model` with usage text and exit 1, so a requested model is not passed and the worker runs on the host's configured model.
-The interactive root command's `--prompt` only pre-fills the TUI composer and never submits it (verified live on shuvcode v2.0.3-shuv.4), so `bin/fm-spawn.sh` waits for the pre-filled left-bar composer and then submits it with Enter, retrying Enter only, until the shared composer classifier reads empty; a brief that never shows or never submits fails the spawn and closes the endpoint.
+Ship and scout launches with no model use `shuvcode --standalone --auto --prompt`.
+`--standalone` gives each worker a leased server whose lifetime matches the session, while `--auto` auto-approves permissions that are not explicitly denied so an unattended worker never parks on a permission dialog.
+The root command accepts only `--standalone`, `--server`, `--auto`, `--continue`, `--session`, `--prompt`, and a directory.
+It rejects `--model` and `--effort` with usage text and exit 1.
+A requested model uses `bin/fm-opencode-v2-launch.sh` to create a root session with the requested provider/model and variant, validate that binding, and attach the root `--server <private-url> --auto` TUI by its exact session id.
+The helper owns one private `serve --stdio` server for the entire TUI lifetime, waits for that server's model catalog, and rejects missing models or variants before creating a session. Its fresh in-memory password authenticates the loopback API; lease EOF retires only that private server when the TUI exits.
+That helper's header owns the CLI/API mechanics; it does not change project configuration, saved preferences, or permission policy.
+Firstmate maps its supported effort levels onto the requested model's variant.
+An effort with no `provider/model` stays in task metadata and leaves the default root launch unchanged.
+The model-bound launch uses the same composer submission handshake as the default launch.
+The root command on shuvcode v2.0.22-shuv.1 auto-submits `--prompt` once the model catalog is ready; `bin/fm-spawn.sh` accepts a current-generation worker execution event as submission proof, including when a short turn already finished.
+Older roots such as v2.0.3-shuv.4 only prefill the composer, so spawn retains the composer-ready/Enter fallback and retries Enter only until the shared classifier reads empty; a brief that neither starts nor submits fails the spawn and closes the endpoint.
+`tests/fm-opencode-v2-worker-live-e2e.test.sh` refreshes the model, permission, hook and persistent-steering evidence recorded in `docs/verification/runtime-backends.md`.
 Under `--auto` the composer footer reads `Build auto · <model> · <effort>` with the `auto` word and `·` separators in muted truecolor, so the classifier recognises that footer from the plain row rather than the ghost-stripped one.
 The worker wiring writes `.opencode/plugins/package.json` only when the project has none, so a project that tracks that file keeps its own copy.
 Secondmate launches are refused until that role is qualified.
 Busy state comes from the Firstmate-owned worker plugin's `session.execution.started` (busy) and its `session.execution.succeeded`, `failed`, or `interrupted` terminal event (idle), latched to the worker's own root session; shuvcode publishes no `session.status` or `session.idle` event to plugins.
-Exit command, interrupt, resume, model selection, and effort flags for this adapter have no verified facts yet; verify them before a control plan relies on them.
+Exit command, interrupt, and resume for this adapter have no verified facts in this file yet; verify them before a control plan relies on them.

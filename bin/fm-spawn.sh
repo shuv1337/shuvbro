@@ -1034,8 +1034,10 @@ spawn_herdr_presentation_order_lock_acquire() {
   [ -n "$session" ] || session=$(fm_backend_herdr_session)
   lock_path=$(fm_backend_herdr_presentation_session_lock_path "$session") || return 1
   HERDR_PRESENTATION_ORDER_LOCK="$lock_path"
+  # A peer resume waits out one reclaim. Five seconds was shorter than a
+  # loaded reclaim, so the waiter refused the resume this lock serializes.
   attempt=0
-  while [ "$attempt" -lt 50 ]; do
+  while [ "$attempt" -lt 300 ]; do
     if fm_lock_try_acquire "$HERDR_PRESENTATION_ORDER_LOCK"; then
       HERDR_PRESENTATION_ORDER_LOCK_HELD=1
       return 0
@@ -1838,8 +1840,46 @@ muse_credential_present() {
   [ -s "$auth" ] || muse_worker_meta_api_key_present
 }
 
+# The explicit-model launch helper accepts provider/model#variant and attaches
+# the root --auto TUI to a model-bound session. The variant is the effort.
+# An effort without a provider/model stays in task metadata; the root launch is
+# unchanged. bin/fm-opencode-v2-launch.sh owns the supported launch mechanics.
+opencode_v2_model_flag() {
+  local model=$1 effort=$2 ref='' variant=''
+  [ -n "$model" ] && [ "$model" != default ] && ref=$model
+  case "$effort" in
+    low|medium|high|xhigh|max) variant=$effort ;;
+  esac
+  [ -n "$ref" ] || return 0
+  case "$ref" in
+    *'#'*)
+      echo "error: opencode-v2 model '$ref' must be provider/model; pass the variant with --effort" >&2
+      return 1
+      ;;
+    /*|*/)
+      echo "error: opencode-v2 model '$ref' must have a nonempty provider and model" >&2
+      return 1
+      ;;
+    */*) ;;
+    *)
+      echo "error: opencode-v2 model '$ref' must be provider/model so shuvcode can take provider/model#variant" >&2
+      return 1
+      ;;
+  esac
+  if [ -n "$variant" ]; then
+    ref="${ref}#${variant}"
+  fi
+  printf -- '--model %s ' "$(shell_quote "$ref")"
+}
+
 model_flag_for_harness() {
   local harness=$1 model=$2
+  case "$harness" in
+    opencode-v2)
+      opencode_v2_model_flag "$model" "$EFFORT" || return 1
+      return 0
+      ;;
+  esac
   [ -n "$model" ] && [ "$model" != default ] || return 0
   case "$harness" in
     claude|codex|opencode|pi|pi-signed|grok|kimi|cursor|gemini|muse|rovo|omp)
@@ -1913,6 +1953,8 @@ effort_flag_for_harness() {
     # opencode's interactive `opencode --prompt` launch has a verified --model
     # flag but no verified effort flag. Its `opencode run --variant` flag belongs
     # to a different, non-interactive launch mode, so fm-spawn does not pass it.
+    # opencode-v2 effort is the #variant suffix of --model, built by
+    # opencode_v2_model_flag. This function emits no --effort flag for it.
     # kimi likewise has no reasoning-effort flag; the requested axis stays in
     # task metadata but never reaches the launch command. Cursor encodes effort
     # in model ids such as cursor-grok-4.5-high, so it also receives no separate
@@ -3033,15 +3075,22 @@ rovo_endpoint_cleanup() {
   fm_backend_kill "$BACKEND" "$T" "$tab_id" "fm-$ID" 2>/dev/null || true
 }
 
-# opencode-v2 (shuvcode): the root command's --prompt only PRE-FILLS the TUI
-# composer and never submits it (verified live on shuvcode v2.0.3-shuv.4: the
-# brief sat in the input box and the busy record stayed unchanged until a manual
-# Enter). So after launch the spawn waits for the pre-filled left-bar composer,
-# then submits it with Enter, retrying Enter only, until the shared classifier
-# reads the composer empty. The `╹▀` floor row was verified on shuvcode
-# v2.0.3-shuv.4 and is a launch-progress signal that the TUI (not the pane
-# shell) owns the screen; composer emptiness stays with the shared classifier,
-# like kimi and rovo.
+# Older shuvcode roots only prefill --prompt; newer releases submit it once
+# the model catalog is ready. A current-generation worker execution event is
+# authoritative submission proof, even when the turn finishes before the first
+# capture. Otherwise retain the prefill/Enter handshake for older releases.
+opencode_v2_turn_started() {
+  local record
+  record=$(fm_busy_record_read "$STATE_REAL" "$ID") || return 1
+  case "$record" in
+    'busy opencode-plugin session-execution-started '*|\
+    'idle opencode-plugin session-execution-succeeded '*|\
+    'idle opencode-plugin session-execution-failed '*|\
+    'idle opencode-plugin session-execution-interrupted '*) return 0 ;;
+  esac
+  return 1
+}
+
 opencode_v2_composer_state() {
   fm_backend_composer_state "$BACKEND" "$T" "$W" 2>/dev/null || true
 }
@@ -3050,6 +3099,7 @@ opencode_v2_wait_for_prefill() {
   local pane state i=0 max=${FM_OPENCODE_V2_READY_POLLS:-60} interval=${FM_OPENCODE_V2_POLL_INTERVAL:-0.5}
   local ready_marker=${FM_OPENCODE_V2_READY_MARKER:-'╹▀'}
   while [ "$i" -lt "$max" ]; do
+    opencode_v2_turn_started && return 0
     pane=$(fm_backend_capture "$BACKEND" "$T" 120 "$W" 2>/dev/null || true)
     if printf '%s\n' "$pane" | grep -Fq -- "$ready_marker"; then
       state=$(opencode_v2_composer_state)
@@ -3885,8 +3935,21 @@ sq_ompext=$(shell_quote "$STATE/$ID.omp-ext.ts")
 sq_ompcfg=$(shell_quote "${OMP_WORKER_CFG:-$FM_ROOT/.omp/fm-worker-overlay.yml}")
 sq_opinput=$(shell_quote "$FM_ROOT/bin/fm-operational-input.sh")
 sq_worktree=$(shell_quote "$WT")
-MODELFLAG=$(model_flag_for_harness "$HARNESS" "$MODEL")
+MODELFLAG=$(model_flag_for_harness "$HARNESS" "$MODEL") || exit 1
 EFFORTFLAG=$(effort_flag_for_harness "$HARNESS" "$EFFORT" "$MODEL") || exit 1
+# Preserve the root TUI's unattended permissions and composer handshake while
+# binding an explicitly requested model before its first prompt.
+if [ "$HARNESS" = opencode-v2 ] && [ -n "$MODELFLAG" ]; then
+  case "$LAUNCH" in
+    'shuvcode --standalone --auto --prompt '*)
+      LAUNCH="$(shell_quote "$FM_ROOT/bin/fm-opencode-v2-launch.sh") ${MODELFLAG}${LAUNCH#shuvcode --standalone --auto }"
+      ;;
+    *)
+      echo "error: opencode-v2 model launch could not use the model-bound root session helper" >&2
+      exit 1
+      ;;
+  esac
+fi
 LAUNCH=${LAUNCH//__MODELFLAG__/$MODELFLAG}
 LAUNCH=${LAUNCH//__EFFORTFLAG__/$EFFORTFLAG}
 if [ "$HARNESS" = rovo ]; then
@@ -4084,12 +4147,13 @@ if [ "$HARNESS" = rovo ]; then
     exit 1
   fi
 fi
+# Both model-bound and default launches retain the root submission contract.
 if [ "$HARNESS" = opencode-v2 ]; then
   if ! opencode_v2_wait_for_prefill; then
     opencode_v2_spawn_fail "shuvcode did not show its pre-filled launch brief in window $T"
     exit 1
   fi
-  if ! opencode_v2_submit_prefill; then
+  if ! opencode_v2_turn_started && ! opencode_v2_submit_prefill; then
     opencode_v2_spawn_fail "shuvcode pre-filled launch brief could not be submitted in window $T"
     exit 1
   fi

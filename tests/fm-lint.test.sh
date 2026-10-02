@@ -564,10 +564,11 @@ test_changed_mode_invokes_shellcheck_once_per_root() {
 }
 
 test_ci_keeps_external_sources_without_local_exclusions() {
-  local tmp fakebin log flag_log mode_log fixture out
+  local tmp fakebin log flag_log mode_log fixture other out invocation_count
   tmp=$(fm_test_tmproot fm-lint-ci-follow)
   fakebin=$(fm_fakebin "$tmp")
   fixture="$tmp/fixture.sh"
+  other="$tmp/other.sh"
   log="$tmp/shellcheck.log"
   flag_log="$tmp/flags.log"
   mode_log="$tmp/mode.log"
@@ -575,16 +576,46 @@ test_ci_keeps_external_sources_without_local_exclusions() {
 #!/usr/bin/env bash
 printf '%s\n' "${1:-ok}"
 SH
+  cp "$fixture" "$other"
   fm_lint_stub_shellcheck "$fakebin" "$log"
 
   out=$(PATH="$fakebin:$PATH" CI=true GITHUB_ACTIONS=true FM_LINT_JOBS=1 \
     FM_TEST_FLAG_LOG="$flag_log" FM_TEST_MODE_LOG="$mode_log" \
-    "$LINT" "$fixture" 2>&1) \
+    "$LINT" "$fixture" "$other" 2>&1) \
     || fail "CI lint with explicit path failed"$'\n'"$out"
-  [ "$(cat "$mode_log")" = on ] \
+  [ "$(LC_ALL=C sort "$mode_log")" = $'on\non' ] \
     || fail "CI lint disabled dataflow analysis"
+  invocation_count=$(grep -c '^external-sources=' "$flag_log" || true)
+  [ "$invocation_count" -eq 2 ] \
+    || fail "CI lint used $invocation_count ShellCheck calls for two roots"
+  [ "$(LC_ALL=C sort "$log")" = "$fixture"$'\n'"$other" ] \
+    || fail "CI lint did not analyze each root on its own"$'\n'"logged: $(cat "$log")"
   fm_lint_assert_flag_log "$flag_log" yes none
   pass "fm-lint.sh CI keeps source following without the local exclusion list"
+}
+
+test_source_following_defaults_to_one_worker() {
+  local tmp fakebin log telemetry fixture other out
+  tmp=$(fm_test_tmproot fm-lint-one-worker)
+  fakebin=$(fm_fakebin "$tmp")
+  fixture="$tmp/fixture.sh"
+  other="$tmp/other.sh"
+  log="$tmp/shellcheck.log"
+  telemetry="$tmp/telemetry.tsv"
+  cat > "$fixture" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "${1:-ok}"
+SH
+  cp "$fixture" "$other"
+  fm_lint_stub_shellcheck "$fakebin" "$log"
+
+  out=$(env -u FM_LINT_JOBS PATH="$fakebin:$PATH" CI=true GITHUB_ACTIONS=true \
+    "$LINT" --telemetry "$telemetry" "$fixture" "$other" 2>&1) \
+    || fail "source-following lint failed"$'\n'"$out"
+  assert_grep $'jobs\t1' "$telemetry" "source-following lint started two ShellCheck workers"
+  [ "$(wc -l < "$log" | tr -d '[:space:]')" -eq 2 ] \
+    || fail "source-following lint did not analyze both roots"
+  pass "fm-lint.sh source following defaults to one worker"
 }
 
 test_ci_one_file_invokes_shellcheck_once_per_root_with_external_sources() {
@@ -608,14 +639,14 @@ SH
   # Shard replay order with jobs=1: heavy, extra, then light.
   expected="$heavy"$'\n'"$extra"$'\n'"$light"
 
-  out=$(PATH="$fakebin:$PATH" CI=true GITHUB_ACTIONS=true FM_LINT_JOBS=1 \
+  out=$(PATH="$fakebin:$PATH" CI=true GITHUB_ACTIONS=true FM_LINT_JOBS=1 FM_LINT_ONE_FILE=0 \
     FM_TEST_FLAG_LOG="$flag_log" "$LINT" "$heavy" "$light" "$extra" 2>&1) \
     || fail "CI batched lint failed"$'\n'"$out"
   [ "$(cat "$log")" = "$expected" ] \
-    || fail "CI default did not analyze the three roots in shard order"$'\n'"logged: $(cat "$log")"
+    || fail "CI explicit batching did not analyze the three roots in shard order"$'\n'"logged: $(cat "$log")"
   batched=$(grep -c '^external-sources=' "$flag_log" || true)
   [ "$batched" -eq 2 ] \
-    || fail "CI default used $batched ShellCheck calls for two shards"
+    || fail "CI explicit batching used $batched ShellCheck calls for two shards"
   fm_lint_assert_flag_log "$flag_log" yes none
 
   : > "$log"
@@ -1454,6 +1485,7 @@ test_list_files_respects_changed_mode
 test_changed_mode_drops_external_sources_and_excludes_cross_file_codes
 test_changed_mode_invokes_shellcheck_once_per_root
 test_ci_keeps_external_sources_without_local_exclusions
+test_source_following_defaults_to_one_worker
 test_ci_one_file_invokes_shellcheck_once_per_root_with_external_sources
 test_one_file_rejects_a_value_other_than_zero_or_one
 test_main_branch_keeps_external_sources
