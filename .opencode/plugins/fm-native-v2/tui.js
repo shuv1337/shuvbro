@@ -3,10 +3,17 @@ import { createWatchArmCoordinator } from "../lib/fm-watch-arm-v2.js";
 import { createAdmissionJournal } from "./admission.js";
 import { bindingRPC } from "./rpc.js";
 import { eventSessionID, isIdleEvent } from "../lib/fm-plugin-v2.js";
-import { runProcess, shouldArm } from "../lib/fm-plugin-common.js";
+import { runProcess } from "../lib/fm-plugin-common.js";
 import { existsSync } from "node:fs";
 
 const slot = Symbol.for("firstmate.native.v2.tui.coordinator");
+
+export async function supervisionNeeded(paths) {
+  if (existsSync(`${paths.state}/.afk`)) return false;
+  const result = await runProcess("bash", ["-c", '. "$1/bin/fm-supervision-lib.sh" || exit 2; fm_supervision_status "$2" || exit 2; if [ "$FM_SUP_NEEDED" = true ] || [ "$FM_SUP_QUEUE_PENDING" = true ]; then echo needed; else echo idle; fi', "fm-native-v2", paths.root, paths.state], { cwd: paths.root, timeout: 10000 });
+  if (result.code !== 0 || !["needed", "idle"].includes(result.stdout.trim())) throw new Error("cannot evaluate canonical native supervision requirement");
+  return result.stdout.trim() === "needed";
+}
 
 export function helperEnvironment(record) {
   const env = { ...process.env, FM_HOME: record.home, FM_ROOT_OVERRIDE: record.root, FM_STATE_OVERRIDE: record.state, FM_CONFIG_OVERRIDE: record.config,
@@ -97,7 +104,8 @@ export default { id: "firstmate.native.v2", async setup(ctx) {
     catch { return false; }
   };
   const journal = createAdmissionJournal(paths, record.sessionID, input => ctx.client.session.prompt(input, { signal: AbortSignal.any([abort.signal, AbortSignal.timeout(10000)]) }), failure, { valid: validClaim, signal: abort.signal });
-  let coordinator = createWatchArmCoordinator(paths, () => {}, { owns, admission: journal, failure });
+  const coordinatorOptions = { owns, admission: journal, failure, needs: () => supervisionNeeded(paths) };
+  let coordinator = createWatchArmCoordinator(paths, () => {}, coordinatorOptions);
   globalThis[slot] = coordinator;
   const env = { ...helperEnvironment(record), OPENCODE_SESSION_ID: record.sessionID };
 
@@ -142,7 +150,7 @@ export default { id: "firstmate.native.v2", async setup(ctx) {
     try {
       await coordinator.cleanup();
       await rebind(ctx, record);
-      coordinator = createWatchArmCoordinator(paths, () => {}, { owns, admission: journal, failure });
+      coordinator = createWatchArmCoordinator(paths, () => {}, coordinatorOptions);
       globalThis[slot] = coordinator;
       await reconcile();
       ctx.ui?.toast.show({ variant: "success", message: "Exact lead execution service rebind verified." });
@@ -155,7 +163,7 @@ export default { id: "firstmate.native.v2", async setup(ctx) {
         if (!isIdleEvent(event)) continue;
         // Idle/interrupted alone never admits a continuation. The watcher is
         // restored here; only its genuine durable wake journal admits input.
-        if (shouldArm(paths)) await reconcile();
+        await reconcile();
       }
     } catch (error) { if (!abort.signal.aborted) failure("V2 event stream interrupted: " + error.message); }
   })();

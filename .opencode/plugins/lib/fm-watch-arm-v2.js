@@ -394,7 +394,7 @@ export function createWatchArmCoordinator(paths, deliverPrompt, options = {}) {
     if (!(await (options.owns ? options.owns() : sessionOwnsLock(paths)))) return { status: "read-only", armChild: null };
     if (state.child) return { status: "existing", armChild: state.child };
     if (state.retryTimer) return { status: "retrying", armChild: null };
-    if (!shouldArm(paths)) return { status: "not-needed", armChild: null };
+    if (!(await (options.needs ? options.needs() : shouldArm(paths)))) return { status: "not-needed", armChild: null };
     if (state.stopped) return { status: "skipped", armChild: null };
     return { status: "spawned", armChild: spawnArm(sessionID, predecessorArmPid) };
   }
