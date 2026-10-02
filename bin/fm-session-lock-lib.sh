@@ -133,6 +133,13 @@ fm_harness_ancestry_pids() {
   for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16; do
     comm=$(ps -o comm= -p "$pid" 2>/dev/null) || break
     args=$(ps -o args= -p "$pid" 2>/dev/null)
+    # A shared execution service is an ancestry barrier, not just an ignored
+    # harness. Never climb through it and adopt the TUI/job that started it.
+    case " $args " in
+      *' --service '*)
+        if fm_shuvcode_process_matches "$comm" "${args/--service/}"; then break; fi
+        ;;
+    esac
     if fm_harness_process_matches "$comm" "$args"; then
       printf '%s\n' "$pid"
       printed=1
@@ -154,6 +161,21 @@ fm_harness_ancestry_pids() {
 # is still running. Every non-Claude harness reports a single pid, so this is its
 # innermost match unchanged.
 fm_harness_ancestry_pid() {
+  # A native V2 model shell belongs to the shared execution service, not the
+  # owning TUI's ancestry. The supplemental owner is exact-session scoped.
+  if [ -n "${OPENCODE_SESSION_ID:-}" ]; then
+    local v2_owner v2_lib v2_probe
+    v2_lib="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/fm-opencode-v2-owner.mjs"
+    if v2_owner=$(node "$v2_lib" helper "${FM_STATE_OVERRIDE:-${FM_HOME:-${FM_ROOT_OVERRIDE:-$(dirname "$(dirname "$v2_lib")")}}/state}" acquire 2>&1); then
+      printf '%s\n' "$v2_owner"
+      return 0
+    fi
+    if [ -f "$v2_lib" ]; then
+      v2_probe=0
+      node "$v2_lib" probe "$OPENCODE_SESSION_ID" >/dev/null 2>&1 || v2_probe=$?
+      if [ "$v2_probe" -ne 3 ]; then printf '%s\n' "$v2_owner" >&2; return 1; fi
+    fi
+  fi
   local pids pid outermost=''
   pids=$(fm_harness_ancestry_pids) || return 1
   while IFS= read -r pid; do
@@ -183,6 +205,16 @@ fm_harness_pid_alive() {
 # lock, a malformed lock, a lock held by a harness outside this ancestry, or an
 # ancestry that cannot be resolved all fail closed.
 fm_session_lock_owned_by_self() {
+  if [ -n "${OPENCODE_SESSION_ID:-}" ]; then
+    local v2_lib v2_probe v2_owner
+    v2_lib="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/fm-opencode-v2-owner.mjs"
+    if v2_owner=$(node "$v2_lib" helper "$1" 2>&1); then return 0; fi
+    if [ -f "$v2_lib" ]; then
+      v2_probe=0
+      node "$v2_lib" probe "$OPENCODE_SESSION_ID" >/dev/null 2>&1 || v2_probe=$?
+      if [ "$v2_probe" -ne 3 ]; then printf '%s\n' "$v2_owner" >&2; return 1; fi
+    fi
+  fi
   local state=$1 lock_pid pids pid
   lock_pid=$(cat "$state/.lock" 2>/dev/null || true)
   case "$lock_pid" in

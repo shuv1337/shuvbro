@@ -275,7 +275,7 @@ family_for_basename() {
     fm-test-run.test.sh|fm-test-isolation-proof.test.sh)
       printf '%s\n' pure-contract-unit
       ;;
-    fm-daemon.test.sh|fm-guard-stale-banner.test.sh|fm-opencode-v2-plugin.test.sh|fm-pi-watch-extension.test.sh|\
+    fm-daemon.test.sh|fm-guard-stale-banner.test.sh|fm-opencode-v2-plugin.test.sh|fm-opencode-v2-launch.test.sh|fm-pi-watch-extension.test.sh|\
     fm-session-lock-ancestry.test.sh|fm-cursor-primary.test.sh|\
     fm-supervision-events.test.sh|fm-turnend-guard.test.sh|fm-wake-daemon-lifecycle-e2e.test.sh|\
     fm-wake-drain-unread-status.test.sh|\
@@ -656,6 +656,7 @@ tests/fm-omp-harness.test.sh 59969
 tests/fm-on.test.sh 34087
 tests/fm-opencode-primary-live-e2e.test.sh 21
 tests/fm-opencode-v2-plugin.test.sh 8000
+tests/fm-opencode-v2-launch.test.sh 8000
 tests/fm-operational-input.test.sh 231
 tests/fm-peek-remote.test.sh 1018
 tests/fm-pending-reply-10.test.sh 4350
@@ -1308,6 +1309,17 @@ families_for_changed_path() {
       ;;
     bin/fm-quota-choose.sh)
       printf '%s\n' "__script__:fm-quota-choose.test.sh"
+      ;;
+    bin/fm-opencode-v2-owner.mjs|bin/fm-opencode-v2-primary.sh)
+      printf '%s\n' __script__:fm-opencode-v2-plugin.test.sh
+      printf '%s\n' __script__:fm-session-lock-ancestry.test.sh
+      printf '%s\n' __script__:fm-sessionstart-nudge.test.sh
+      ;;
+    bin/fm-opencode-v2-launch.sh)
+      printf '%s\n' __script__:fm-opencode-v2-launch.test.sh
+      printf '%s\n' __script__:fm-busy-adapter-wiring.test.sh
+      printf '%s\n' __script__:fm-opencode-v2-plugin.test.sh
+      printf '%s\n' __script__:fm-opencode-v2-worker-live-e2e.test.sh
       ;;
     .opencode/plugins/*)
       printf '%s\n' __script__:fm-opencode-v2-plugin.test.sh

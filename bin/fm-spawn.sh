@@ -3396,7 +3396,7 @@ PKG
 // worker's busy state. Each owned terminal event touches the watcher's wake
 // NOTIFICATION; that marker is never current-state truth.
 import { execFile } from "node:child_process";
-import { realpathSync } from "node:fs";
+import { realpathSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 const busyEvent = (state, event) =>
   new Promise((resolve) => {
@@ -3437,7 +3437,7 @@ export const FmBusyState = async () => {
     },
   };
 };
-async function setupBusyStateV2(ctx) {
+export async function setupBusyStateV2(ctx) {
   const abort = new AbortController();
   const normalizeDir = (dir) => {
     if (!dir) return "";
@@ -3453,7 +3453,10 @@ async function setupBusyStateV2(ctx) {
   const sessionData = (event) => event.data || event.properties || {};
   async function owns(sessionID) {
     if (!sessionID) return false;
-    if (owned.has(sessionID)) return true;
+    try {
+      const assigned = JSON.parse(readFileSync("$STATE_REAL/$ID.opencode-v2-session.json", "utf8"));
+      if (assigned.sessionID !== sessionID) return false;
+    } catch { return false; }
     if (!ctx.session || typeof ctx.session.get !== "function") return false;
     try {
       const result = await ctx.session.get({ sessionID });
@@ -3501,14 +3504,29 @@ async function setupBusyStateV2(ctx) {
   return () => abort.abort();
 }
 export default {
-  id: "fm-busy-state",
-  setup: setupBusyStateV2,
+  id: "firstmate.v1.compat.worker",
+  setup() {},
   async server() {
     return FmBusyState();
   },
 };
 EOF
       exclude_path '.opencode/plugins/fm-busy-state.js'
+      if [ "$HARNESS" = opencode-v2 ]; then
+        if [ -d "$WT/.opencode/plugins/fm-worker-v2" ]; then
+          if ! jq -e --arg state "$STATE_REAL" --arg id "$ID" '.state==$state and .id==$id' \
+            "$WT/.opencode/plugins/fm-worker-v2/.fm-owned.json" >/dev/null 2>&1; then
+            echo 'error: existing native worker package is not owned by this task; refusing to overwrite it' >&2
+            exit 1
+          fi
+        fi
+        mkdir -p "$WT/.opencode/plugins/fm-worker-v2"
+        jq -cn --arg state "$STATE_REAL" --arg id "$ID" '{state:$state,id:$id}' > "$WT/.opencode/plugins/fm-worker-v2/.fm-owned.json"
+        printf '%s\n' 'import {setupBusyStateV2} from "../fm-busy-state.js";' \
+          'export default {id:"firstmate.worker.v2",setup:setupBusyStateV2};' > "$WT/.opencode/plugins/fm-worker-v2/server.js"
+        printf '%s\n' '{"name":"firstmate-worker-v2","private":true,"type":"module","exports":{"./server":"./server.js"}}' > "$WT/.opencode/plugins/fm-worker-v2/package.json"
+        exclude_path '.opencode/plugins/fm-worker-v2/'
+      fi
       ;;
     pi|pi-signed)
       # Written OUTSIDE the worktree: pi's project-trust gate fires on any extension
@@ -3939,10 +3957,10 @@ MODELFLAG=$(model_flag_for_harness "$HARNESS" "$MODEL") || exit 1
 EFFORTFLAG=$(effort_flag_for_harness "$HARNESS" "$EFFORT" "$MODEL") || exit 1
 # Preserve the root TUI's unattended permissions and composer handshake while
 # binding an explicitly requested model before its first prompt.
-if [ "$HARNESS" = opencode-v2 ] && [ -n "$MODELFLAG" ]; then
+if [ "$HARNESS" = opencode-v2 ]; then
   case "$LAUNCH" in
     'shuvcode --standalone --auto --prompt '*)
-      LAUNCH="$(shell_quote "$FM_ROOT/bin/fm-opencode-v2-launch.sh") ${MODELFLAG}${LAUNCH#shuvcode --standalone --auto }"
+      LAUNCH="env -u FM_V2_ACTIVATION $(shell_quote "$FM_ROOT/bin/fm-opencode-v2-launch.sh") --session-record $(shell_quote "$STATE_REAL/$ID.opencode-v2-session.json") ${MODELFLAG}${LAUNCH#shuvcode --standalone --auto }"
       ;;
     *)
       echo "error: opencode-v2 model launch could not use the model-bound root session helper" >&2

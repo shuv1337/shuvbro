@@ -223,6 +223,15 @@
 set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+retire_native_worker_package() {  # <worktree> <state> <task>
+  local dir="$1/.opencode/plugins/fm-worker-v2" state
+  state=$(cd "$2" 2>/dev/null && pwd -P) || return 0
+  [ -d "$dir" ] && [ ! -L "$dir" ] && [ ! -L "$dir/.fm-owned.json" ] || return 0
+  jq -e --arg state "$state" --arg id "$3" '.state==$state and .id==$id' "$dir/.fm-owned.json" >/dev/null 2>&1 || return 0
+  rm -f "$dir/server.js" "$dir/package.json" "$dir/.fm-owned.json"
+  rmdir "$dir" 2>/dev/null || true
+}
 FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
@@ -2707,11 +2716,13 @@ validate_firstmate_home_children_removal() {
       if [ -n "$child_wt" ] && [ -e "$child_wt" ]; then
         child_proj=$(meta_value "$child_meta" project)
         validate_child_worktree_for_removal "$child_wt" "$child_proj" >/dev/null || return 1
+        retire_native_worker_package "$child_wt" "$sub_state" "$child_id"
         require_orca_worktree_path_match "$child_orca_worktree_id" "$child_wt" || return 1
       fi
     elif [ -n "$child_wt" ] && [ -e "$child_wt" ]; then
       child_proj=$(meta_value "$child_meta" project)
       validate_child_worktree_for_removal "$child_wt" "$child_proj" >/dev/null || return 1
+      retire_native_worker_package "$child_wt" "$sub_state" "$child_id"
     fi
   done
 }
@@ -2941,7 +2952,7 @@ cleanup_firstmate_home_children() {
       "$sub_state/$child_id.pi-ext.ts" "$sub_state/$child_id.omp-ext.ts" \
       "$sub_state/$child_id.grok-turnend-token" "$sub_state/$child_id.kimi-turnend-token" \
       "$sub_state/$child_id.muse-session" "$sub_state/$child_id.muse-session-current" \
-      "$sub_state/$child_id.cursor-session" "$sub_state/$child_id.reconcile-nudged" \
+      "$sub_state/$child_id.cursor-session" "$sub_state/$child_id.opencode-v2-session.json" "$sub_state/$child_id.reconcile-nudged" \
       "$sub_state/.$child_id.branch-outcome-index"
   done
 }
@@ -3195,6 +3206,7 @@ fi
 
 # Best-effort: drop the local task branch so the shared repo does not accumulate refs.
 if [ "$BACKEND" = orca ] && [ "$KIND" != secondmate ]; then
+  retire_native_worker_package "$WT" "$STATE" "$ID"
   if [ "$ORCA_PATH_MATCH_VERIFIED" != 1 ]; then
     require_orca_worktree_path_match_if_present "$ORCA_WORKTREE_ID" "$WT" || exit 1
     ORCA_PATH_MATCH_VERIFIED=1
@@ -3213,6 +3225,7 @@ if [ "$BACKEND" = orca ] && [ "$KIND" != secondmate ]; then
   [ -z "$T_ORCA" ] || fm_backend_kill "$BACKEND" "$T" "$(meta_value "$META" zellij_tab_id)" "fm-$ID" 2>/dev/null || true
   fm_backend_remove_worktree "$BACKEND" "$ORCA_WORKTREE_ID"
 elif [ -d "$WT" ] && [ "$KIND" != secondmate ]; then
+  retire_native_worker_package "$WT" "$STATE" "$ID"
   branch=$(git -C "$WT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo HEAD)
   if [ "$branch" != "HEAD" ]; then
     if git -C "$WT" checkout --detach -q 2>/dev/null; then
@@ -3345,7 +3358,7 @@ status_retire_presentation_task "$STATE" "$ID" || exit 1
 rm -f "$STATE/$ID.turn-ended" "$STATE/$ID.progress" \
   "$STATE/$ID.pi-ext.ts" "$STATE/$ID.omp-ext.ts" "$STATE/$ID.grok-turnend-token" \
   "$STATE/$ID.kimi-turnend-token" "$STATE/$ID.muse-session" \
-  "$STATE/$ID.muse-session-current" "$STATE/$ID.cursor-session" \
+  "$STATE/$ID.muse-session-current" "$STATE/$ID.cursor-session" "$STATE/$ID.opencode-v2-session.json" \
   "$STATE/$ID.control-relaunch" "$STATE/$ID.control-relaunch.meta-prior" \
   "$STATE/$ID.control-relaunch.brief-prior" "$STATE/$ID.control-relaunch.note" \
   "$STATE/$ID.reconcile-nudged" "$STATE/$ID.gemini-settings.json" \

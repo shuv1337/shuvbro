@@ -1,11 +1,12 @@
 import { createdOwnsThisLocation, eventSessionID, eventType, proveSessionOwnership } from "./fm-plugin-v2.js";
 
-export function createSessionBinder(ctx) {
+export function createSessionBinder(ctx, activation) {
   const bound = new Set();
   const inflight = new Map();
 
   async function owns(sessionID) {
     if (!sessionID) return false;
+    if (!activation || activation.sessionID !== sessionID || activation.ownerPID !== process.pid) return false;
     if (bound.size > 0 && !bound.has(sessionID)) return false;
     if (bound.has(sessionID)) return true;
     if (inflight.has(sessionID)) return inflight.get(sessionID);

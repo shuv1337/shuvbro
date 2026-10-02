@@ -1,0 +1,182 @@
+import { identity, schema, publish, readRegistration, canonical, live, markerKey, writePrivate } from "../../../bin/fm-opencode-v2-owner.mjs";
+import { createWatchArmCoordinator } from "../lib/fm-watch-arm-v2.js";
+import { createAdmissionJournal } from "./admission.js";
+import { bindingRPC } from "./rpc.js";
+import { eventSessionID, isIdleEvent } from "../lib/fm-plugin-v2.js";
+import { runProcess, shouldArm } from "../lib/fm-plugin-common.js";
+import { existsSync } from "node:fs";
+
+const slot = Symbol.for("firstmate.native.v2.tui.coordinator");
+
+export function helperEnvironment(record) {
+  const env = { ...process.env, FM_HOME: record.home, FM_ROOT_OVERRIDE: record.root, FM_STATE_OVERRIDE: record.state, FM_CONFIG_OVERRIDE: record.config,
+    FM_V2_REGISTRY_NAMESPACE: process.env.FM_V2_REGISTRY_NAMESPACE || "default" };
+  for (const key of ["FM_V2_ACTIVATION", "OPENCODE_PASSWORD", "OPENCODE_SERVER_PASSWORD", "OPENCODE_SESSION_ID"]) delete env[key];
+  return env;
+}
+
+export async function rebind(ctx, activation) {
+  const current = readRegistration(activation.sessionID), own = identity(process.pid);
+  for (const field of ["ownerPID", "ownerStart", "hostBootID", "sessionID", "claimID", "root", "home", "state", "config"]) {
+    if (current[field] !== activation[field]) throw new Error("rebind is not this immutable TUI claim");
+  }
+  if (own.pid !== current.ownerPID || own.start !== current.ownerStart || own.boot !== current.hostBootID) throw new Error("rebind caller is not the exact TUI owner");
+  const service = identity((await ctx.client.server.info()).pid);
+  return activate(ctx, { ...current, servicePID: service.pid, serviceStart: service.start, lifecycle: "claimed" });
+}
+
+export async function activate(ctx, activation) {
+  const record = schema(activation);
+  const own = identity(process.pid);
+  if (record.ownerPID !== own.pid || record.ownerStart !== own.start || record.hostBootID !== own.boot) throw new Error("V2 activation is not for this exact TUI process");
+  if (existsSync(`${record.home}/.fm-secondmate-home`) || existsSync(`${record.root}/.fm-secondmate-home`)) throw new Error("V2 secondmate activation is unsupported");
+  const info = await ctx.client.session.get({ sessionID: record.sessionID });
+  if (info.id !== record.sessionID || info.parentID || info.location?.directory !== record.root) throw new Error("V2 activation session is not this exact root");
+  const service = identity((await ctx.client.server.info()).pid);
+  if (service.pid !== record.servicePID || service.start !== record.serviceStart || service.boot !== record.hostBootID) throw new Error("connected service does not match V2 activation");
+  // Reserve the serialized exact claim BEFORE changing session metadata, so
+  // a refused second owner cannot overwrite the live owner's marker. The
+  // server protects a registry entry even during marker publication.
+  publish("claim", record);
+  await ctx.client.session.update({ sessionID: record.sessionID, metadata: {
+    ...info.metadata, [markerKey]: { version: 1, sessionID: record.sessionID, claimID: record.claimID },
+  } });
+  const status = await ctx.client.rpc(bindingRPC).bindingStatus({ sessionID: record.sessionID, claimID: record.claimID }, { location: { directory: record.root } });
+  if (status.status !== "valid") throw new Error("execution service cannot validate this exact local V2 registration");
+  // Explicit-server clients deliberately do not push their caller environment
+  // in this native fork. Set only the frozen helper routing values once, after
+  // authority is proven. They are checked observations, never the claim.
+  await ctx.client.session.environment({ sessionID: record.sessionID, variables: helperEnvironment(record) });
+  return Object.freeze(record);
+}
+
+export default { id: "firstmate.native.v2", async setup(ctx) {
+  // Normal workers, children and observers are inert. The launcher, never
+  // tab focus or first-event arrival, selects the immutable activation tuple.
+  if (!process.env.FM_V2_ACTIVATION) return;
+  if (globalThis[slot]) throw new Error("another native V2 coordinator is still active in this TUI");
+  const requested = schema(JSON.parse(process.env.FM_V2_ACTIVATION));
+  let activation = requested;
+  try {
+    const current = readRegistration(requested.sessionID);
+    if (["ownerPID", "ownerStart", "hostBootID", "sessionID", "claimID", "root", "home", "state", "config"].every(key => current[key] === requested[key])) activation = { ...current, lifecycle: "claimed" };
+  } catch { /* activation itself still must pass full validation */ }
+  const record = await activate(ctx, activation);
+  const retireClaim = () => {
+    const current = readRegistration(record.sessionID);
+    if (current.claimID !== record.claimID || current.ownerPID !== process.pid || current.ownerStart !== record.ownerStart) throw new Error("obsolete TUI cannot retire a successor claim");
+    if (current.lifecycle !== "retired") publish("retire", current);
+  };
+  // The installed TUI's final exit may finish before its asynchronous plugin
+  // disposer. Keep a same-claim synchronous tombstone fallback; SIGKILL still
+  // uses the process-birth stale proof. This owns no watcher or retry loop.
+  const exitFallback = () => { try { retireClaim(); } catch (error) { console.error("V2 exit retirement: " + error.message); } };
+  process.once("exit", exitFallback);
+  const paths = { root: record.root, home: record.home, state: record.state, config: record.config };
+  const abort = new AbortController();
+  let stopped = false;
+  let reconcileInFlight;
+  let lastFailure = "";
+  const failure = reason => {
+    if (stopped) return;
+    if (lastFailure === reason) return;
+    lastFailure = reason;
+    console.error(reason);
+    writePrivate(`${record.state}/.opencode-v2-failure.json`, { version: 1, sessionID: record.sessionID, claimID: record.claimID, reason: String(reason).slice(0, 12000) });
+  };
+  const owns = () => {
+    try {
+      const current = live(readRegistration(record.sessionID));
+      if (current.claimID !== record.claimID || current.ownerPID !== process.pid) return false;
+      canonical(current);
+      return true;
+    } catch { return false; }
+  };
+  const validClaim = () => {
+    try { const value = live(readRegistration(record.sessionID)); canonical(value, false); return !stopped && value.claimID === record.claimID && value.ownerPID === process.pid; }
+    catch { return false; }
+  };
+  const journal = createAdmissionJournal(paths, record.sessionID, input => ctx.client.session.prompt(input, { signal: AbortSignal.any([abort.signal, AbortSignal.timeout(10000)]) }), failure, { valid: validClaim, signal: abort.signal });
+  let coordinator = createWatchArmCoordinator(paths, () => {}, { owns, admission: journal, failure });
+  globalThis[slot] = coordinator;
+  const env = { ...helperEnvironment(record), OPENCODE_SESSION_ID: record.sessionID };
+
+  async function reconcile() {
+    if (stopped || reconcileInFlight) return;
+    reconcileInFlight = (async () => {
+      if (!validClaim()) {
+        await coordinator.cleanup();
+        throw new Error("V2 owner/service proof is stale; explicitly rebind before continuing");
+      }
+      // Stock clients replace the session environment on tab navigation. Only
+      // this proven immutable TUI refreshes its frozen routing, never observers.
+      await ctx.client.session.environment({ sessionID: record.sessionID, variables: helperEnvironment(record) });
+      if (!owns()) {
+        const status = await ctx.client.rpc(bindingRPC).bindingStatus({ sessionID: record.sessionID, claimID: record.claimID }, { location: { directory: record.root } });
+        if (status.status !== "valid") throw new Error("V2 exact lead registration is stale; explicitly rebind before continuing");
+        for (const pending of journal.pending()) {
+          if (pending.kind === "startup:" + record.claimID) await journal.deliver(pending);
+        }
+        return;
+      }
+      const current = readRegistration(record.sessionID);
+      if (current.lifecycle !== "active") publish("claim", { ...current, lifecycle: "active" });
+      await coordinator.ensureArmed(record.sessionID);
+      await coordinator.resumePending(record.sessionID);
+    })();
+    try { await reconcileInFlight; } finally { reconcileInFlight = null; }
+  }
+  try {
+    const proof = await runProcess("node", [`${record.root}/bin/fm-opencode-v2-owner.mjs`, "helper", record.state, "acquire"], { cwd: record.root, env, timeout: 10000 });
+    if (proof.code !== 0) throw new Error("V2 startup helper proof failed: " + proof.stderr.trim());
+    const nudge = await runProcess(`${record.root}/bin/fm-sessionstart-nudge.sh`, [], { cwd: record.root, env, timeout: 10000 });
+    if (nudge.code !== 0) throw new Error("V2 startup nudge failed");
+    if (nudge.stdout.trim()) await journal.deliver(journal.prepare(nudge.stdout.trim(), "startup:" + record.claimID));
+    await reconcile();
+  } catch (error) { failure(error.message); }
+
+  const timer = setInterval(() => { void reconcile().catch(error => failure(error.message)); }, 2000);
+  timer.unref();
+  ctx.keymap?.layer(() => ({ commands: [{ id: "firstmate.rebind", title: "Rebind Firstmate execution service", palette: true, slash: { name: "firstmate-rebind" }, run: async () => {
+    if (stopped) return;
+    try {
+      await coordinator.cleanup();
+      await rebind(ctx, record);
+      coordinator = createWatchArmCoordinator(paths, () => {}, { owns, admission: journal, failure });
+      globalThis[slot] = coordinator;
+      await reconcile();
+      ctx.ui?.toast.show({ variant: "success", message: "Exact lead execution service rebind verified." });
+    } catch (error) { failure(error.message); }
+  } }] }));
+  void (async () => {
+    try {
+      for await (const event of ctx.client.event.subscribe({ signal: abort.signal })) {
+        if (stopped || eventSessionID(event) !== record.sessionID) continue;
+        if (!isIdleEvent(event)) continue;
+        // Idle/interrupted alone never admits a continuation. The watcher is
+        // restored here; only its genuine durable wake journal admits input.
+        if (shouldArm(paths)) await reconcile();
+      }
+    } catch (error) { if (!abort.signal.aborted) failure("V2 event stream interrupted: " + error.message); }
+  })();
+
+  return async () => {
+    stopped = true;
+    abort.abort();
+    clearInterval(timer);
+    // Publish the protective tombstone synchronously before the first await:
+    // process shutdown may tear down child spawns during async retirement.
+    // Cleanup still cannot complete until the owned arm's bounded retirement.
+    let publicationError;
+    try { retireClaim(); }
+    catch (error) { publicationError = error; }
+    try { await coordinator.cleanup(); }
+    finally {
+    // Native hot reload reuses the immutable claim on next setup. A retired
+    // record still protects the exact session between setups and after exit.
+      if (globalThis[slot] === coordinator) delete globalThis[slot];
+      process.removeListener("exit", exitFallback);
+    }
+    if (publicationError) throw publicationError;
+  };
+} };

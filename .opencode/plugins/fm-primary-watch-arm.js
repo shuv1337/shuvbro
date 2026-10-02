@@ -3,7 +3,6 @@ import { encodeFirstmateOperationalInput } from "./lib/fm-operational-input.js";
 import {
   effectivePaths,
   isPrimaryRoot,
-  pluginRoot,
   positiveInteger,
   resolvePath,
   resolveRoot,
@@ -11,19 +10,7 @@ import {
   sessionOwnsLock,
   shouldArm,
 } from "./lib/fm-plugin-common.js";
-import {
-  createWatchArmCoordinator,
-  registerWatchOwner,
-  unregisterWatchOwner,
-} from "./lib/fm-watch-arm-v2.js";
-import { createSessionBinder } from "./lib/fm-session-bind-v2.js";
-import {
-  definePlugin,
-  eventSessionID,
-  isIdleEvent,
-  promptQueued,
-  subscribeEvents,
-} from "./lib/fm-plugin-v2.js";
+import { definePlugin } from "./lib/fm-plugin-v2.js";
 
 const COORDINATOR_KEY = "__firstmateOpenCodeWatchArm";
 // 35s on Windows so the budget stays above arm's MSYS confirm default (30s in
@@ -427,38 +414,11 @@ export const FmPrimaryWatchArm = async ({ client, directory, worktree }) => {
   };
 };
 
-async function setupWatchArmV2(ctx) {
-  const root = await pluginRoot(ctx);
-  if (!root) return;
-  const paths = effectivePaths(root);
-  if (!(await isPrimaryRoot(paths.root, paths.home))) return;
-  const binder = createSessionBinder(ctx);
-  const coordinator = createWatchArmCoordinator(paths, (sessionID, text) => promptQueued(ctx, sessionID, text));
-  registerWatchOwner(paths.home, coordinator);
-  const abort = new AbortController();
-  void (async () => {
-    try {
-      for await (const event of subscribeEvents(ctx, abort.signal)) {
-        await binder.observe(event);
-        if (!isIdleEvent(event)) continue;
-        const sessionID = eventSessionID(event);
-        if (!(await binder.owns(sessionID))) continue;
-        void coordinator.ensureArmed(sessionID);
-      }
-    } catch {
-      if (abort.signal.aborted) return;
-    }
-  })();
-  return () => {
-    abort.abort();
-    coordinator.cleanup();
-    unregisterWatchOwner(paths.home, coordinator);
-  };
-}
-
 export default definePlugin({
-  id: "fm-primary-watch-arm",
-  setup: setupWatchArmV2,
+  id: "firstmate.v1.compat.watch-arm",
+  // Native V2 also auto-discovers flat V1 files. This compatibility definition
+  // owns no hooks; the native package is the only V2 lifecycle owner.
+  setup() {},
   async server(input) {
     return FmPrimaryWatchArm(input);
   },

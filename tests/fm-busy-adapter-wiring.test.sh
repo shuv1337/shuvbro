@@ -234,7 +234,7 @@ drive_oc_plugin_v2() {
 import { pathToFileURL } from "node:url";
 const spec = JSON.parse(process.argv[2]);
 const mod = await import(pathToFileURL(process.env.PLUGIN_PATH).href);
-if (!mod.default || typeof mod.default.setup !== "function") {
+if (typeof mod.setupBusyStateV2 !== "function") {
   throw new Error("generated plugin missing V2 setup");
 }
 const queue = [];
@@ -268,7 +268,7 @@ const ctx = {
     },
   },
 };
-const cleanup = await mod.default.setup(ctx);
+const cleanup = await mod.setupBusyStateV2(ctx);
 await new Promise((resolve) => setTimeout(resolve, 30));
 for (const event of spec.events) {
   queue.push(event);
@@ -290,6 +290,7 @@ test_opencode_v2_plugin_scopes_to_this_location() {
   state="$HOME_DIR/state"
   plugin="$WT_DIR/.opencode/plugins/fm-busy-state.js"
   assert_present "$plugin" "opencode spawn did not write the busy-state plugin"
+  printf '%s\n' '{"version":1,"sessionID":"ses_worker"}' > "$state/$id.opencode-v2-session.json"
   link="$TMP_ROOT/oc-v2-scope-link"
   ln -s "$WT_DIR" "$link"
 
@@ -322,6 +323,7 @@ test_opencode_v2_plugin_rejects_child_session() {
   state="$HOME_DIR/state"
   plugin="$WT_DIR/.opencode/plugins/fm-busy-state.js"
   rm -f "$state/$id.turn-ended"
+  printf '%s\n' '{"version":1,"sessionID":"ses_worker"}' > "$state/$id.opencode-v2-session.json"
 
   out=$(drive_oc_plugin_v2 "$plugin" "$(jq -nc --arg dir "$WT_DIR" '{
     directory: $dir,

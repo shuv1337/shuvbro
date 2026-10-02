@@ -6,7 +6,7 @@ Must-work continuity now lives above that process boundary instead of depending 
 ## Ownership
 
 Pi's `.pi/extensions/fm-primary-pi-watch.ts`, omp's `.omp/extensions/fm-primary-omp-watch.ts`, and OpenCode's `.opencode/plugins/fm-primary-watch-arm.js` own continuous re-arm after an actionable child close.
-OpenCode V2 uses the same plugin file's `setup` entry, binds only the lead session at this plugin instance location, and wakes with `ctx.session.prompt` using `delivery: "queue"`.
+OpenCode V2 uses the single native package under `.opencode/plugins/fm-native-v2/`; its [supervision protocol](supervision-protocols/opencode-v2.md) owns exact activation, service proof and queued admission behavior.
 Each adapter starts the next arm before delivering the wake prompt, checks current session-lock ownership at launch, preserves one child or scheduled retry at a time, and applies bounded exponential retry after an unexpected or failed close.
 A failed follow-up never cancels continuity restoration.
 Pi same-process session replacement follows the generation-owner contract in `.pi/extensions/fm-primary-pi-watch.ts`: an owning `session_start` arms the replacement generation without waiting for a model turn, and a state-scoped replacement handoff carries every actionable close whose delivery overlapped `session_shutdown`, including a main follow-up Pi accepted but had not yet consumed, branch handling, and a retiring child that reports after the bounded shutdown wait.
