@@ -86,8 +86,12 @@ v2_server_entries() {
 # spec: {directory, out, sessions: {id: snapshot}, event: {tool, sessionID, input}}
 # A snapshot is the native Session.Info shape the hook may fetch: id, parentID,
 # location.directory, metadata. Records "allowed" or "failed" plus messages.
+# V2_GUARD_PATH_PREFIX, when set, is prepended to PATH for the loaded entries and
+# their helper subprocesses only (the driver itself runs on the resolved node).
+V2_NODE_BIN=$(node -p process.execPath)
 v2_drive_guard() {  # <spec-json>
-  ENTRIES="$(v2_server_entries)" PLUGINS_DIR="$ROOT/.opencode/plugins" node --input-type=module - "$1" <<'EOF'
+  PATH="${V2_GUARD_PATH_PREFIX:+$V2_GUARD_PATH_PREFIX:}$PATH" \
+    ENTRIES="$(v2_server_entries)" PLUGINS_DIR="$ROOT/.opencode/plugins" "$V2_NODE_BIN" --input-type=module - "$1" <<'EOF'
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import { writeFileSync } from "node:fs";

@@ -100,6 +100,23 @@ test_exact_marker_without_registration_refuses_protected() {
   pass "guard: an exact-marked lead without a valid registration refuses protected commands, across reload"
 }
 
+# A broken JavaScript runtime makes the shell guard transports fail open
+# (observed live: a version-manager node shim refusing its config inside the
+# service). For an exact-marked lead that must still be protective refusal.
+test_broken_runtime_still_refuses_marked_lead() {
+  local repo sessions out fakebin
+  repo="$TMP_ROOT/broken-runtime/primary"
+  v2_make_primary "$repo"
+  fakebin=$(fm_fakebin "$TMP_ROOT/broken-runtime")
+  printf '#!/usr/bin/env bash\necho "node: runtime unavailable" >&2\nexit 1\n' > "$fakebin/node"
+  chmod +x "$fakebin/node"
+  sessions=$(jq -nc --argjson l "$(v2_root_session ses_lead "$repo" ses_lead)" '{ses_lead: $l}')
+  out="$TMP_ROOT/broken-runtime/out.json"
+  [ "$(V2_GUARD_PATH_PREFIX="$fakebin" guard_outcome "$repo" "$sessions" ses_lead "$PROTECTED" "$out")" = failed ] \
+    || fail "a broken node runtime turned the marked lead's protected command into an approval: $(cat "$out")"
+  pass "guard: a broken guard runtime still refuses the marked lead's protected command"
+}
+
 # The divergence pair that keeps the marker-only case honest: the same
 # protected command at the same checkout is refused only for the marked lead.
 test_marker_divergence_is_exact() {
@@ -174,6 +191,7 @@ v2_run_cases \
   test_root_with_foreign_marker_is_inert \
   test_worker_location_is_inert \
   test_exact_marker_without_registration_refuses_protected \
+  test_broken_runtime_still_refuses_marked_lead \
   test_marker_divergence_is_exact \
   test_valid_registered_lead_keeps_classifier_cases \
   test_registry_protects_when_marker_removed \
