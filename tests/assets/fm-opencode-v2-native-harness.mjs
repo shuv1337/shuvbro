@@ -129,7 +129,26 @@ async function serviceRole([codeRoot, socket, sessionsFile]) {
         const info = JSON.parse(readFileSync(sessionsFile, "utf8"))[param("sessionID")];
         return info ? { data: info } : { error: "session not found" };
       }
-      if (operation === "session.active") return { data: Object.fromEntries(Object.keys(executing()).map((id) => [id, { type: "running" }])) };
+      if (operation === "session.active") {
+        // <case>/active-samples (optional): one "running <id>" or "idle" line
+        // consumed per call, so a case can change activity between samples.
+        try {
+          const lines = readFileSync(`${caseDir}/active-samples`, "utf8").split("\n").filter(Boolean);
+          if (lines.length) {
+            writeFileSync(`${caseDir}/active-samples`, lines.slice(1).join("\n") + (lines.length > 1 ? "\n" : ""));
+            const [state, id] = lines[0].split(" ");
+            return { data: state === "running" ? { [id]: { type: "running" } } : {} };
+          }
+        } catch { /* no script: durable execution claims decide */ }
+        return { data: Object.fromEntries(Object.keys(executing()).map((id) => [id, { type: "running" }])) };
+      }
+      if (operation === "session.message.list") {
+        // <case>/messages.json: the session's messages, newest first.
+        let all = [];
+        try { all = JSON.parse(readFileSync(`${caseDir}/messages.json`, "utf8")); } catch { /* none */ }
+        const limit = Number(param("limit") || all.length);
+        return { data: (param("order") === "asc" ? [...all].reverse() : all).slice(0, limit) };
+      }
       if (operation === "session.interrupt") {
         if (param("resume") !== "false") return { error: "interrupt without resume=false" };
         const current = executing(), id = param("sessionID"), was = Object.hasOwn(current, id);

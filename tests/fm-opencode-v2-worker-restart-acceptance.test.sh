@@ -23,9 +23,15 @@
 #     cancellation is confirmed, ordinary teardown succeeds. For an idle
 #     successor session, shuvcode documents interrupting an idle session as a
 #     no-op rather than a terminal release of a durable claim, so an
-#     interrupted:false answer is not cancellation proof: ordinary teardown
-#     refuses naming a retry or --force, always after consulting the successor,
-#     and an explicit discard proceeds with the caveat;
+#     interrupted:false answer alone is not cancellation proof: while
+#     settlement is unproven (successor younger than its 30 s bound, the
+#     session active in a second sample, or the newest message not a terminal
+#     assistant answer completed after the successor started) ordinary
+#     teardown refuses naming a retry or --force, status reports the outcome
+#     as unknown, and the binding is unchanged; once settlement is proven
+#     ordinary teardown succeeds as settled (not interrupted) and the binding
+#     moves to the proven successor. An explicit discard proceeds with the
+#     caveat;
 #   - gone incarnation with no live successor: status may only answer an honest
 #     unknown (executing null, cancellation unconfirmed), never "stopped";
 #     teardown and interrupt refuse with a diagnostic naming the possible
@@ -161,7 +167,8 @@ test_successor_idle_needs_proof_or_discard() {
   worker_case successor-idle
   restart_at_same_endpoint
   reconcile status
-  { [ "$RC" = 0 ] && printf '%s' "$OUT" | jq -e '.executing == false' >/dev/null; } || miss "status did not report the successor's idle answer: rc=$RC out=$OUT err=$ERR"
+  { [ "$RC" = 0 ] && printf '%s' "$OUT" | jq -e '.executing == null and .observedExecuting == false and .incarnation == "successor" and .cancellation == "unproven"' >/dev/null; } \
+    || miss "status did not report an idle but unproven successor outcome: rc=$RC out=$OUT err=$ERR"
   [ "$(api_calls "$SUCCESSOR" session.get)" -ge 1 ] || miss "status concluded without consulting the live successor"
   reconcile teardown
   if [ "$RC" = 0 ]; then
@@ -173,7 +180,67 @@ test_successor_idle_needs_proof_or_discard() {
   reconcile discard
   [ "$RC" = 0 ] || miss "explicit discard was refused for an idle successor session: $ERR"
   printf '%s' "$ERR$OUT" | grep -qiE 'resume|unconfirmed' || miss "discard printed no caveat that cancellation is unconfirmed"
-  finish "worker restart: an idle successor answer refuses ordinary teardown without terminal proof (retry or --force), and an explicit discard proceeds with the caveat"
+  finish "worker restart: a young idle successor reports an unproven outcome and refuses ordinary teardown (retry or --force); an explicit discard proceeds with the caveat"
+}
+
+# Settlement proof against one successor that matures past the 30 s bound.
+now_ms() { date +%s%3N; }
+assistant() {  # <completed-ms> [finish] [error]: a terminal assistant message
+  jq -nc --argjson c "$1" --arg f "${2:-stop}" --arg e "${3:-}" '{type: "assistant", finish: $f, time: {created: ($c - 500), completed: $c}} + (if $e == "" then {} else {error: {message: $e}} end)'
+}
+idle_notice() { jq -nc --argjson c "$1" '{type: "idle", outcome: "succeeded", time: {created: $c}}'; }
+messages() { jq -s '.' > "$CASE/messages.json"; }  # newest first on stdin
+binding() { sha256sum "$RECORD" | cut -d' ' -f1; }
+unproven_refusal() {  # <label>
+  local before
+  before=$(binding)
+  reconcile teardown
+  if [ "$RC" = 0 ]; then
+    miss "$1: ordinary teardown accepted settlement without proof ($OUT)"
+  elif ! printf '%s' "$ERR" | grep -qiE 'retry|--force'; then
+    miss "$1: refusal names neither a retry nor --force: $ERR"
+  fi
+  [ "$(binding)" = "$before" ] || miss "$1: an unproven refusal rewrote the worker binding"
+}
+
+test_successor_settlement_proof() {
+  v2_require_native successor-settlement || return $?
+  worker_case successor-settlement
+  executing_turn
+  local restarted mature completed
+  restart_at_same_endpoint
+  restarted=$(now_ms)
+  # The successor resumes the turn and then finishes it: no longer executing,
+  # with a terminal answer completed after the successor started.
+  sleep 0.3
+  printf '{}' > "$CASE/execution.json"
+  completed=$(now_ms)
+  { idle_notice "$((completed + 5))"; assistant "$completed"; } | messages
+  unproven_refusal "young successor"
+  # Wait out the successor's 30 s uptime bound.
+  mature=$((restarted / 1000 + 32))
+  while [ "$(date +%s)" -lt "$mature" ]; do sleep 1; done
+  { assistant "$((restarted - 5000))"; } | messages
+  unproven_refusal "an answer completed before the successor started"
+  { jq -nc --argjson c "$(now_ms)" '{type: "user", time: {created: $c}}'; assistant "$completed"; } | messages
+  unproven_refusal "a newer user message after the answer"
+  { assistant "$completed" tool-calls; } | messages
+  unproven_refusal "a tool-call step as the newest message"
+  { assistant "$completed" stop "provider failed"; } | messages
+  unproven_refusal "an errored answer"
+  { idle_notice "$((completed + 5))"; assistant "$completed"; } | messages
+  printf 'idle\nrunning %s\nrunning %s\nrunning %s\n' "$SID" "$SID" "$SID" > "$CASE/active-samples"
+  unproven_refusal "the session active again in the second sample"
+  rm -f "$CASE/active-samples"
+  interrupts_exact || miss "an interrupt did not target the exact session with resume=false"
+  # Proven: mature, idle across samples, and a terminal answer after start.
+  reconcile teardown
+  { [ "$RC" = 0 ] && printf '%s' "$OUT" | jq -e '.executing == false and .interrupted == false and .cancellation == "settled"' >/dev/null; } \
+    || miss "ordinary teardown refused a proven settled successor: rc=$RC out=$OUT err=$ERR"
+  jq -e --argjson p "$SUCCESSOR" '.servicePID == $p' "$RECORD" >/dev/null || miss "the binding did not move to the proven successor"
+  reconcile teardown
+  { [ "$RC" = 0 ] && printf '%s' "$OUT" | jq -e '.executing == false' >/dev/null; } || miss "ordinary teardown refused after the binding moved: rc=$RC err=$ERR"
+  finish "worker restart: an idle successor tears down as settled only once proven (mature, idle across samples, terminal answer after start); each unproven variant refuses unchanged"
 }
 
 no_successor_case() {  # <case> <stop|unregister>
@@ -218,5 +285,6 @@ v2_run_cases \
   test_same_incarnation_control \
   test_successor_resumes_executing_worker \
   test_successor_idle_needs_proof_or_discard \
+  test_successor_settlement_proof \
   test_no_successor_refuses_unless_discarded \
   test_unregistered_endpoint_refuses_unless_discarded
