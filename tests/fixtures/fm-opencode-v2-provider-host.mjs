@@ -8,6 +8,7 @@ import { setTimeout as delay } from "node:timers/promises";
 const source = process.env.ROOT, lab = process.env.LAB;
 const owner = await import(pathToFileURL(source + "/bin/fm-opencode-v2-owner.mjs"));
 const tui = (await import(pathToFileURL(source + "/.opencode/plugins/fm-native-v2/tui.js"))).default;
+const { createFailureNotice } = await import(pathToFileURL(source + "/.opencode/plugins/fm-native-v2/tui.js"));
 const { createWatchArmCoordinator } = await import(pathToFileURL(source + "/.opencode/plugins/lib/fm-watch-arm-v2.js"));
 const { createAdmissionJournal } = await import(pathToFileURL(source + "/.opencode/plugins/fm-native-v2/admission.js"));
 const root = lab + "/root", home = lab + "/home", state = home + "/state";
@@ -62,6 +63,14 @@ echo "$$" > "$state/arm.pid"
 old=$(cat "$state/watcher.pid" 2>/dev/null || true); [ -z "$old" ] || kill -TERM "$old" 2>/dev/null || true
 sleep 1000 </dev/null >/dev/null 2>&1 & child=$!; echo "$child" > "$state/watcher.pid"
 trap 'kill -TERM "$child" 2>/dev/null || true; wait "$child" 2>/dev/null || true; exit 0' TERM INT HUP
+if [ -f "$state/prepare-missing" ] && [ "$count" = 2 ]; then
+  kill -TERM "$child"; wait "$child" 2>/dev/null || true
+  echo 'check: rearm-resurface'; exit 0
+fi
+if [ -f "$state/restore-failure" ] && [ "$count" -ge 3 ]; then
+  kill -TERM "$child"; wait "$child" 2>/dev/null || true
+  echo 'watcher: FAILED - fixture restoration failed'; exit 1
+fi
 if [ -f "$state/recovery-mode" ] && [ "$count" = 2 ]; then
   # The previous watcher was abandoned: its downtime episode is published,
   # then this ordinary arm announces it and resurfaces it with no rows.
@@ -71,6 +80,14 @@ if [ -f "$state/recovery-mode" ] && [ "$count" = 2 ]; then
   exit 0
 fi
 generation=
+if [ -f "$state/successor-generation" ] && [ "$count" -ge 3 ]; then
+  token=announced:downtime:fixture-prepared
+  echo "$token" > "$marker"
+fi
+if [ -f "$state/hide-generation" ] && [ "$count" -ge 3 ]; then
+  rm -f "$marker"
+  token=
+fi
 if [ -n "\${FM_WATCH_PREDECESSOR_ARM_PID:-}" ]; then
   case "$token" in
     pending:downtime:*|announced:downtime:*|pending:handling:*|announced:handling:*) generation=\${token##*:} ;;
@@ -95,6 +112,74 @@ process.env.FM_CONFIG_OVERRIDE = paths.config;
 process.env.OPENCODE_SESSION_ID = record.sessionID;
 fs.writeFileSync(state + "/.lock", String(me.pid));
 let provider = false, commands = [], subscribes = 0, environments = 0, unregisters = 0;
+if (process.argv.includes("--notice-transient") || process.argv.includes("--notice-persistent")) {
+  const persistent = process.argv.includes("--notice-persistent"), prompts = [], diagnostics = [];
+  const keepAlive = setInterval(() => {}, 1000);
+  let clock = 0, coordinator, noticeTask;
+  const journal = createAdmissionJournal(paths, record.sessionID, async input => {
+    if (input.text.includes("WATCHER FIRED")) assert.match(read("order"), /confirm fixture-recovery/, "wake admitted before confirmation");
+    prompts.push(input); return { id: input.id };
+  });
+  const { encodeFirstmateOperationalInput } = await import(pathToFileURL(source + "/.opencode/plugins/lib/fm-operational-input.js"));
+  const notices = createFailureNotice(reason => {
+    diagnostics.push(reason);
+    owner.writePrivate(state + "/.opencode-v2-failure.json", { reason });
+  }, reason => {
+    noticeTask = (async () => {
+      const text = await encodeFirstmateOperationalInput(root, "watcher", "WATCHER FAILURE - " + reason);
+      return await journal.deliver(journal.prepare(text, "failure:fixture"));
+    })();
+    return noticeTask;
+  }, { now: () => clock });
+  try {
+    fs.writeFileSync(state + "/recovery-mode", ""); fs.writeFileSync(state + "/hide-generation", "");
+    fs.writeFileSync(state + "/.wake-queue", "100\t1\tsignal\ttask\tready\n");
+    coordinator = createWatchArmCoordinator(paths, () => { throw new Error("unpersisted prompt"); }, {
+      owns: () => true, needs: () => true, admission: journal, processIdentity: owner.identity, failure: (reason, detail) => notices.failure(reason, detail),
+    });
+    await coordinator.ensureArmed(record.sessionID);
+    assert.ok(Number(read("arm.pid")) > 1 && running(read("arm.pid")), "notice fixture did not start its isolated arm");
+    process.kill(Number(read("arm.pid")), "SIGKILL");
+    await until(() => diagnostics.some(reason => reason.includes("no verifiable recovery generation")), "unverifiable successor was not reproduced");
+    assert.equal(prompts.length, 0, "transient failure prompted the lead");
+    assert.equal(journal.pending().filter(value => value.kind === "wake").length, 1);
+    assert.match(owner.readPrivate(state + "/.opencode-v2-failure.json").reason, /pending admission retained/);
+    clock = 29999; notices.tick(); assert.equal(prompts.length, 0);
+    if (persistent) {
+      clock = 30000; notices.tick(); await noticeTask;
+      for (let tick = 0; tick < 4; tick++) { clock += 2000; notices.failure(diagnostics[0]); notices.tick(); }
+      await noticeTask; assert.equal(prompts.filter(input => input.text.includes("WATCHER FAILURE")).length, 1);
+    }
+    fs.unlinkSync(state + "/hide-generation"); fs.writeFileSync(state + "/.watcher-down", "announced:downtime:fixture-recovery\n");
+    process.kill(Number(read("arm.pid")), "SIGTERM");
+    await until(async () => {
+      try { await coordinator.ensureArmed(record.sessionID); await coordinator.resumePending(record.sessionID); }
+      catch (error) { notices.failure(error.message); }
+      return prompts.some(input => input.text.includes("WATCHER FIRED"));
+    }, "retained wake did not recover");
+    notices.recovered(); clock += 60000; notices.tick();
+    await coordinator.resumePending(record.sessionID);
+    assert.equal(prompts.filter(input => input.text.includes("WATCHER FIRED")).length, 1);
+    assert.equal(prompts.filter(input => input.text.includes("WATCHER FAILURE")).length, persistent ? 1 : 0);
+    assert.equal(read(".wake-queue"), "100\t1\tsignal\ttask\tready", "notice policy consumed a real wake");
+    const immediate = [];
+    const terminal = createFailureNotice(() => {}, reason => { immediate.push(reason); return true; }, { now: () => 0 });
+    terminal.failure("retry exhaustion", { permanent: true }); terminal.failure("retry exhaustion", { permanent: true });
+    assert.deepEqual(immediate, ["retry exhaustion"]);
+    let rateClock = 0;
+    const flood = [], identities = [];
+    const limited = createFailureNotice(() => {}, (reason, detail) => { flood.push(reason); identities.push(detail.episode); return true; }, { now: () => rateClock });
+    for (let i = 0; i < 20; i++) limited.failure(`permanent ${i}`, { permanent: true });
+    assert.equal(flood.length, 1, "permanent flood exceeded the initial rate budget");
+    rateClock = 4999; limited.tick(); assert.equal(flood.length, 1);
+    for (let i = 1; i < 20; i++) { rateClock = i * 5000; limited.tick(); assert.equal(flood.length, i + 1); }
+    assert.deepEqual(flood, Array.from({ length: 20 }, (_, i) => `permanent ${i}`), "rate limiting dropped an actionable failure");
+    limited.recovered(); rateClock += 5000; limited.failure("permanent 0", { permanent: true });
+    assert.equal(flood.length, 21); assert.notEqual(identities[0], identities[20]);
+    console.log(`${persistent ? "persistent" : "transient"} unverifiable successor: private diagnostic retained, ${persistent ? "one failure prompt at 30s" : "no failure prompt"}, confirmed wake delivered exactly once`);
+  } finally { await coordinator?.cleanup(); clearInterval(keepAlive); }
+  process.exit(0);
+}
 function host(failAt) {
   const renders = [];
   return {
@@ -125,6 +210,108 @@ function host(failAt) {
       } },
     },
   };
+}
+if (process.argv.some(value => value.startsWith("--review-"))) {
+  const mode = process.argv.find(value => value.startsWith("--review-")).slice(9);
+  const prompts = [], admitted = [], toasts = [], ids = new Set();
+  const app = host();
+  const reloadIDs = [];
+  if (mode === "reload-pending") {
+    const { encodeFirstmateOperationalInput } = await import(pathToFileURL(source + "/.opencode/plugins/lib/fm-operational-input.js"));
+    const text = await encodeFirstmateOperationalInput(root, "watcher", "WATCHER FAILURE - prior setup\n\nsame pending reason");
+    const journal = createAdmissionJournal(paths, record.sessionID, async input => ({ id: input.id }));
+    for (const episode of ["prior-a", "prior-b"]) reloadIDs.push(journal.prepare(text, "failure:" + record.claimID + ":" + episode + ":hash").id);
+  }
+  let rejects = mode === "timeout-long" ? 5 : 8, savedSidecar, invalidated = false;
+  app.ui.toast.show = value => toasts.push(value);
+  app.client.session.prompt = async input => {
+    prompts.push(input);
+    if (input.text.includes("WATCHER FAILURE") && mode !== "prepare") {
+      if (mode === "invalid" && !invalidated) {
+        invalidated = true;
+        savedSidecar = owner.readPrivate(state + "/.opencode-v2-owner.json");
+        owner.writePrivate(state + "/.opencode-v2-owner.json", { ...savedSidecar, claimID: "e".repeat(48) });
+        setTimeout(() => owner.writePrivate(state + "/.opencode-v2-owner.json", savedSidecar), 2500);
+        throw new Error("fixture invalid ownership during notice admission");
+      }
+      if ((mode === "rejected" || mode === "timeout" || mode === "timeout-long") && rejects-- > 0) {
+        if (mode !== "rejected") throw new DOMException("fixture repair prompt timed out", "TimeoutError");
+        throw new Error("fixture repair prompt rejected");
+      }
+      if (mode === "wrong-id" && rejects-- > 0) return { id: "msg_" + "0".repeat(64) };
+    }
+    if (!ids.has(input.id)) { ids.add(input.id); admitted.push(input); }
+    return { id: input.id };
+  };
+  let dispose;
+  const keepAlive = setInterval(() => {}, 1000);
+  try {
+    dispose = await tui.setup(app); app.renderApp();
+    await until(() => running(read("watcher.pid")), "review fixture did not arm");
+    if (mode === "reload-pending") {
+      for (let i = 0; i < 300 && !reloadIDs.every(id => admitted.some(value => value.id === id)); i++) await delay(50);
+      assert.deepEqual(admitted.filter(value => reloadIDs.includes(value.id)).map(value => value.id).sort(), reloadIDs.sort(), "same-text obligations from earlier episodes were lost on setup reload");
+      assert.equal(prompts.filter(value => reloadIDs.includes(value.id)).length, 2);
+    } else if (mode === "prune") {
+      await commands[0].run();
+      await until(() => admitted.some(value => value.text.includes("WATCHER FAILURE")), "prune control never admitted a real repair notice");
+      const journal = createAdmissionJournal(paths, record.sessionID, async input => ({ id: input.id }), () => {}, { failureClaim: record.claimID });
+      const abandoned = journal.prepare("old repair", "failure:retired-claim:episode:hash");
+      const active = journal.prepare("active repair", "failure:" + record.claimID + ":active:hash");
+      const dirs = fs.readdirSync(state + "/.opencode-v2-admissions");
+      const dir = state + "/.opencode-v2-admissions/" + dirs[0];
+      const old = new Date(Date.now() - 8 * 86400000);
+      for (const name of fs.readdirSync(dir)) fs.utimesSync(dir + "/" + name, old, old);
+      journal.pending();
+      assert.equal(fs.existsSync(dir + "/" + abandoned.id + ".json"), false, "abandoned repair notice never expired");
+      assert.equal(fs.existsSync(dir + "/" + admitted.find(value => value.text.includes("WATCHER FAILURE")).id + ".json"), false, "admitted repair notice never expired");
+      assert.equal(fs.existsSync(dir + "/" + active.id + ".json"), true, "pruning erased an unresolved current-claim notice");
+    } else if (mode === "prepare" || mode === "prepare-generation" || mode === "prepare-empty") {
+      fs.writeFileSync(state + "/prepare-missing", "");
+      if (mode === "prepare") fs.writeFileSync(state + "/restore-failure", "");
+      else if (mode === "prepare-generation") fs.writeFileSync(state + "/successor-generation", "");
+      process.kill(Number(read("arm.pid")), "SIGKILL");
+      if (mode === "prepare-generation") {
+        await until(() => admitted.some(value => value.text.includes("WATCHER FIRED")), "successor generation did not repair missing preparation");
+        assert.match(read("order"), /confirm fixture-prepared/, "repaired preparation admitted before confirmation");
+        assert.equal(admitted.filter(value => value.text.includes("WATCHER FIRED")).length, 1);
+        assert.equal(admitted.filter(value => value.text.includes("WATCHER FAILURE")).length, 0);
+      } else if (mode === "prepare-empty") {
+        await until(() => admitted.some(value => value.text.includes("neither durable wake rows nor recovery generation")), "empty-journal failure was cleared by a healthy arm");
+        await delay(2100);
+        assert.equal(admitted.filter(value => value.text.includes("WATCHER FAILURE")).length, 1);
+        assert.equal(admitted.filter(value => value.text.includes("WATCHER FIRED")).length, 0);
+      } else {
+      for (let i = 0; i < 300 && !read(".opencode-v2-failure.json").includes("neither durable"); i++) await delay(50);
+      console.log("prepare/restore diagnostic: " + read(".opencode-v2-failure.json"));
+      fs.unlinkSync(state + "/restore-failure");
+      for (let i = 0; i < 200 && !admitted.some(value => value.text.includes("restore watcher continuity")); i++) await delay(50);
+      assert.ok(admitted.some(value => value.text.includes("restore watcher continuity")), "restore failure was hidden by prepare error or later healthy arm");
+      }
+    } else if (mode === "timeout-long") {
+      const long = "fixture long rebind failure " + "x".repeat(5000);
+      app.client.server.info = async () => { throw new Error(long); };
+      await commands[0].run();
+      for (let i = 0; i < 600 && !admitted.some(value => value.text.includes("fixture long rebind failure")); i++) await delay(50);
+      await delay(7000);
+      assert.equal(prompts.filter(value => value.text.includes("fixture long rebind failure")).length > 1, true, "long repair notice timeout injection was vacuous");
+      assert.equal(admitted.filter(value => value.text.includes("fixture long rebind failure")).length, 1, "long repair notice was admitted more than once");
+      assert.equal(toasts.filter(value => value.message.includes("fixture long rebind failure")).length, 1, "restored long repair notice raised a second toast");
+    } else {
+      await commands[0].run();
+      for (let i = 0; i < 900 && !admitted.some(value => value.id === prompts.find(value => value.text.includes("WATCHER FAILURE"))?.id); i++) await delay(50);
+      console.log(JSON.stringify({ mode, attempts: prompts.filter(value => value.text.includes("WATCHER FAILURE")).length, admitted: admitted.filter(value => value.text.includes("WATCHER FAILURE")).length, toasts: toasts.length }));
+      const original = prompts.find(value => value.text.includes("WATCHER FAILURE"));
+      assert.equal(admitted.filter(value => value.id === original?.id).length, 1, "original repair notice was not retried to confirmed admission");
+      assert.ok(prompts.filter(value => value.id === original.id).length > 1, "repair fault injection was vacuous");
+    }
+    console.log("review real-setup " + mode + " passed");
+  } finally {
+    if (savedSidecar) owner.writePrivate(state + "/.opencode-v2-owner.json", savedSidecar);
+    await dispose?.(); clearInterval(keepAlive);
+    owner.publish("cleanup-test-namespace", {});
+  }
+  process.exit(0);
 }
 if (process.argv.includes("--exit")) {
   process.env.FM_POLL = "1";

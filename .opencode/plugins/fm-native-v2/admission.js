@@ -64,19 +64,19 @@ export function createAdmissionJournal(paths, sessionID, admit, report = console
   }
   async function attemptDelivery(value) {
     validate(value);
-    if (["admitted", "acknowledged"].includes(value.phase) || acknowledged(value)) return;
+    if (["admitted", "acknowledged"].includes(value.phase) || acknowledged(value)) return true;
     if (value.kind === "wake" && value.phase !== "confirmed") throw new Error("V2 wake admission requires successor confirmation first");
     const retry = retries.get(value.id);
-    if (retry && Date.now() < retry.after) return;
+    if (retry && Date.now() < retry.after) return false;
     for (let attempt = 0; attempt < 5; attempt++) {
-      if (acknowledged(value)) { retries.delete(value.id); return; }
-      if (!allowed()) throw new Error("V2 admission cancelled after ownership loss or retirement");
+      if (acknowledged(value)) { retries.delete(value.id); return true; }
       try {
+        if (!allowed()) throw new Error("V2 admission cancelled after ownership loss or retirement");
         const result = await admit({ sessionID, id: value.id, text: value.text, delivery: "queue" });
         if (result?.id !== value.id) throw new Error("native admission did not acknowledge the exact message ID");
         save({ ...value, phase: "admitted" });
         retries.delete(value.id);
-        return;
+        return true;
       } catch (error) {
         if (attempt === 4) {
           const failures = (retry?.failures || 0) + 1;
@@ -90,6 +90,7 @@ export function createAdmissionJournal(paths, sessionID, admit, report = console
   }
   function deliver(value) {
     if (inflight.has(value.id)) return inflight.get(value.id);
+    value = validate(readPrivate(join(dir, value.id + ".json")));
     const promise = attemptDelivery(value).finally(() => inflight.delete(value.id));
     inflight.set(value.id, promise);
     return promise;
@@ -105,6 +106,7 @@ export function createAdmissionJournal(paths, sessionID, admit, report = console
       const acked = acknowledged(value);
       const completedRecovery = value.rows.length === 0 && value.phase === "admitted";
       if (value.kind === "wake" && (acked || completedRecovery) && old) { unlinkSync(path); continue; }
+      if (value.kind.startsWith("failure:") && old && (value.phase === "admitted" || options.failureClaim && !value.kind.startsWith("failure:" + options.failureClaim + ":"))) { unlinkSync(path); retries.delete(value.id); continue; }
       if (!["admitted", "acknowledged"].includes(value.phase) && !acked) result.push(value);
     }
     return result;

@@ -178,8 +178,8 @@ export function createWatchArmCoordinator(paths, deliverPrompt, options = {}) {
     await sendPrompt(sessionID, wakePrompt(message));
   }
 
-  function surfaceFailure(sessionID, reason) {
-    if (options.failure) { options.failure(reason); return; }
+  function surfaceFailure(sessionID, reason, detail) {
+    if (options.failure) { options.failure(reason, detail); return; }
     void sendPrompt(sessionID, wakePrompt(reason)).catch(() => {});
   }
 
@@ -238,7 +238,7 @@ export function createWatchArmCoordinator(paths, deliverPrompt, options = {}) {
     state.retryFailures += 1;
     if (state.retryFailures > REARM_RETRY_LIMIT) {
       setArmStatus("failed");
-      surfaceFailure(sessionID, `watcher: FAILED - OpenCode could not restore watcher continuity after ${REARM_RETRY_LIMIT} retries\n${reason}`);
+      surfaceFailure(sessionID, `watcher: FAILED - OpenCode could not restore watcher continuity after ${REARM_RETRY_LIMIT} retries\n${reason}`, { permanent: true });
       return;
     }
     setArmStatus("retrying");
@@ -366,7 +366,7 @@ export function createWatchArmCoordinator(paths, deliverPrompt, options = {}) {
             saved = options.admission
                ? options.admission.prepare(await encodeFirstmateOperationalInput(paths.root, "watcher", wakePrompt(classification.message)), "wake", { predecessorArmPid: predecessor, recovery: { generation: handlingGeneration() } })
               : undefined;
-          } catch (error) { preparationError = error.message; }
+          } catch (error) { preparationError = error.message; state.unpreparedWake = { message: classification.message, predecessor }; }
           const result = await restoreAfterActionableClose(sessionID, predecessor);
           return { ...result, saved, preparationError };
         })();
@@ -376,12 +376,16 @@ export function createWatchArmCoordinator(paths, deliverPrompt, options = {}) {
             try {
               const message = result.failure ? `${classification.message}\n\n${result.failure}` : classification.message;
               if (state.stopped) return;
-              if (result.preparationError) {
+              if (options.admission && result.failure) throw Object.assign(new Error(result.failure + (result.preparationError ? "\n" + result.preparationError : "")), { nonRecoverable: true });
+              if (result.preparationError && result.recovery?.generation) {
+                try { result.saved = options.admission.prepare(await encodeFirstmateOperationalInput(paths.root, "watcher", wakePrompt(message)), "wake", { predecessorArmPid: predecessor, recovery: result.recovery }); }
+                catch (error) { throw Object.assign(error, { nonRecoverable: true }); }
+                state.unpreparedWake = null;
+              } else if (result.preparationError) {
                 // Journal failure must not destroy restored continuity or mint
                 // a fresh downtime generation on every reconciliation tick.
-                throw new Error(result.preparationError);
+                throw Object.assign(new Error(result.preparationError), { nonRecoverable: true });
               }
-              if (options.admission && result.failure) throw new Error(result.failure);
               await deliverActionableWake(sessionID, message, result.recovery, result.saved);
             } finally {
               if (state.restorationInFlight === restoration) state.restorationInFlight = null;
@@ -392,6 +396,7 @@ export function createWatchArmCoordinator(paths, deliverPrompt, options = {}) {
             surfaceFailure(
               sessionID,
               `watcher: FAILED - OpenCode could not deliver an actionable wake\n${String(error?.message ?? error)}`,
+              { permanent: error.nonRecoverable === true },
             );
           });
         return;
@@ -460,12 +465,20 @@ export function createWatchArmCoordinator(paths, deliverPrompt, options = {}) {
   return {
     cleanupSync,
     ensureArmed: (sessionID) => ensureArm(sessionID),
+    hasUnpreparedWake: () => !!state.unpreparedWake,
     async resumePending(sessionID) {
       if (!options.admission || state.restorationInFlight || state.stopped) return;
       const pending = options.admission.pending().filter(value => value.kind === "wake");
-      if (!pending.length) return;
+      if (!pending.length && !state.unpreparedWake) return;
       const result = await restoreAfterActionableClose(sessionID, "");
-      if (result.failure) throw new Error(result.failure);
+      if (result.failure) throw Object.assign(new Error(result.failure), { nonRecoverable: true });
+      if (state.unpreparedWake) {
+        const { message, predecessor } = state.unpreparedWake;
+        try {
+          pending.push(options.admission.prepare(await encodeFirstmateOperationalInput(paths.root, "watcher", wakePrompt(message)), "wake", { predecessorArmPid: predecessor, recovery: result.recovery || { generation: handlingGeneration() } }));
+          state.unpreparedWake = null;
+        } catch (error) { throw Object.assign(error, { nonRecoverable: true }); }
+      }
       for (const saved of pending) {
         if (state.stopped) return;
         await deliverActionableWake(sessionID, "", result.recovery, saved);

@@ -25,7 +25,16 @@ When this session owns supervision and away mode is not active:
    An exhausted admission remains pending and produces a bounded diagnostic, not an unguarded recovery-marker reopen.
    Subsequent attempts continue with capped backoff while ownership remains valid; confirmed canonical queue acknowledgement retires the obsolete transport obligation without reporting it as admitted.
 6. Ordinary wake: do not ask the model to re-arm because continuity is plugin-owned.
-7. Unexpected child close enters bounded exponential retry; each distinct failure is shown as a TUI toast, queued once to the exact lead session as a bounded operational prompt, and kept in the home-owned adapter diagnostic.
+7. Unexpected child close enters bounded exponential retry; transient failures immediately update the private diagnostic but do not request manual repair.
+   A failure or retained admission unresolved for 30 seconds becomes eligible for a toast and operational prompt on the next two-second reconciliation tick; retry exhaustion, invalid ownership/service proof, inability to journal a wake, an unretried startup helper/nudge setup failure or a failed explicit `/firstmate-rebind` becomes eligible immediately, even after an earlier stall notice.
+   Waiting for session start to acquire the lock is silent until this TUI first owns supervision, and a self-healed startup admission retry clears its episode; ownership lost after being held counts toward the 30-second bound.
+   Notices are rate-limited to one per five seconds; distinct actionable reasons queue rather than being dropped, with exact-text deduplication scoped to the failure episode and no lifetime cap.
+   An actionable presentation that could not be journaled remains a recovery obligation even with an empty journal; simultaneous restoration failure takes precedence, and a verified successor generation can repair preparation before confirmation and admission.
+   A repair reason is deduplicated as surfaced only after exact-ID prompt admission succeeds; rejected, timed-out or temporarily unauthorized attempts retain their message identity and retry with the journal's capped backoff and the five-second notice rate limit.
+   Retries show the toast once per reason and report delivery failure privately without generating recursive failure prompts; unresolved current-claim notices survive setup reload and cannot be cleared as healthy recovery.
+   Verified recovery clears the episode only after its repair admissions are confirmed, without clearing the diagnostic or consuming canonical wake rows; a later failure can notify again with a fresh admission identity.
+   Repair notices may reach the frozen lead session while its service proof is stale only if the canonical registration still proves this same TUI process, claim, paths and endpoint; this notice-only exception never rebinds ownership or admits a wake.
+   Admitted repair records and abandoned records from older claims expire after seven days; unresolved current-claim records are retained.
    An interrupted model turn alone never schedules continuation; a later durable fleet wake may resume supervision.
 8. Failure or missing cycle only: if the plugin reports a watcher failure, drain queued wakes, inspect the failure text, and use `bin/fm-watch-arm.sh` manually only as a short recovery probe.
 9. Never use shell `&` for watcher supervision.
