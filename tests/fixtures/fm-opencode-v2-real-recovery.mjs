@@ -134,6 +134,26 @@ echo safe >> '${state}/check-probes'
   const startup = journal.prepare("startup", "startup:retention"); fs.utimesSync(journalPath(startup), 1, 1);
   journal.pending(); assert.equal(fs.existsSync(journalPath(prepared[0].value)), false);
   assert.equal(fs.existsSync(journalPath(pending)), true); assert.equal(fs.existsSync(journalPath(startup)), true);
+  // A confirmed presentation can outlive owner admission. Acking its episode
+  // retires it, but not a fresh row or a different/unconfirmed generation.
+  const recovered = journal.confirm(pending, { generation: "gen-pending" });
+  fs.writeFileSync(state + "/.watcher-down", "acked:handling:other-generation\n");
+  assert.equal(journal.acknowledged(recovered), false);
+  fs.writeFileSync(state + "/.wake-queue", "100\t90\tsignal\ttask\tfresh wake\n");
+  const rowWake = journal.prepare("fresh row wake", "wake", { recovery: { generation: "gen-pending" } });
+  fs.writeFileSync(state + "/.watcher-down", "acked:handling:gen-pending\n");
+  assert.equal(journal.acknowledged(recovered), true);
+  await journal.deliver(recovered); assert.equal(admitted.length, 1, "acked recovery was redundantly admitted");
+  assert.equal(owner.readPrivate(journalPath(pending)).phase, "acknowledged");
+  assert.equal(journal.confirm(owner.readPrivate(journalPath(pending)), {}).phase, "acknowledged", "confirmation reopened a retired presentation");
+  assert.equal(journal.pending().some(value => value.id === rowWake.id), true, "recovery ack lost a fresh real wake");
+  await assert.rejects(journal.deliver(rowWake), /confirmation first/);
+  assert.equal(journal.acknowledged(rowWake), false);
+  fs.writeFileSync(state + "/.wake-queue", "");
+  const unconfirmed = journal.prepare("unconfirmed", "wake", { recovery: { generation: "gen-unconfirmed" } });
+  fs.writeFileSync(state + "/.watcher-down", "acked:handling:gen-unconfirmed\n");
+  assert.equal(journal.acknowledged(unconfirmed), false, "ack bypassed successor confirmation");
+  await assert.rejects(journal.deliver(unconfirmed), /confirmation first/);
   console.log("real idle watcher TERM: one generation/admission, confirmed live successor; preparation failure retains continuity; credentials absent from evaluator, arm, watcher and custom check; no-row retention passed");
 } finally {
   await coordinator?.cleanup(); owner.publish("retire", record); owner.publish("cleanup-test-namespace", {});

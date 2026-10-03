@@ -41,7 +41,17 @@ export function createAdmissionJournal(paths, sessionID, admit, report = console
     return save({ version: 1, sessionID, id, kind, rows: identities, text, context, phase: "prepared" });
   }
   function acknowledged(value) {
-    if (!value.rows.length) return false;
+    if (!value.rows.length) {
+      // A confirmed recovery presentation is obsolete only when the canonical
+      // owner acked that exact episode. New rows remain separate obligations.
+      const generation = value.context?.recovery?.generation;
+      if (value.kind !== "wake" || value.phase !== "confirmed" || typeof generation !== "string" || !/^[A-Za-z0-9._-]{1,200}$/.test(generation)) return value.phase === "acknowledged";
+      let marker;
+      try { marker = readFileSync(join(paths.state, ".watcher-down"), "utf8").trim(); } catch { return false; }
+      if (!["acked:handling:" + generation, "acked:downtime:" + generation].includes(marker)) return false;
+      save({ ...value, phase: "acknowledged" });
+      return true;
+    }
     // Reading the canonical queue never consumes it. Once its sole ack owner
     // removed every captured row, this transport obligation is obsolete, not
     // "admitted". Missing/unreadable queue does not establish acknowledgement.
@@ -59,6 +69,7 @@ export function createAdmissionJournal(paths, sessionID, admit, report = console
     const retry = retries.get(value.id);
     if (retry && Date.now() < retry.after) return;
     for (let attempt = 0; attempt < 5; attempt++) {
+      if (acknowledged(value)) { retries.delete(value.id); return; }
       if (!allowed()) throw new Error("V2 admission cancelled after ownership loss or retirement");
       try {
         const result = await admit({ sessionID, id: value.id, text: value.text, delivery: "queue" });
@@ -101,7 +112,7 @@ export function createAdmissionJournal(paths, sessionID, admit, report = console
   return {
     prepare,
     confirm: (value, recovery) => {
-      const phase = value.phase === "admitted" ? "admitted" : "confirmed";
+      const phase = ["admitted", "acknowledged"].includes(value.phase) ? value.phase : "confirmed";
       if (value.phase === phase && JSON.stringify(value.context?.confirmedRecovery) === JSON.stringify(recovery || null)) return value;
       return save({ ...value, context: { ...value.context, confirmedRecovery: recovery || null }, phase });
     },
