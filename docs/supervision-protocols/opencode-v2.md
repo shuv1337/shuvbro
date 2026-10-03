@@ -38,6 +38,11 @@ The installed TUI can finish process exit before asynchronous plugin disposal, s
 The server retains protective refusal for stale exact registered leads, including after restart; unrelated and inherited child markers remain inert.
 If a surviving owner reconnects to a restarted service, invoke its native `/firstmate-rebind` command to verify and republish that service incarnation explicitly.
 The endpoint itself remains frozen and must have a local native managed registration; an unregistered `--server` or different endpoint cannot silently fall back to the default service.
+The fork preserves in-flight execution claims across shutdown and resumes them at boot with at-least-once semantics: the model may repeat side-effecting commands.
+Worker cleanup therefore refuses until exact-session cancellation on the live successor is proven, or an idle successor has been up at least 30 seconds, two execution samples at least one second apart are empty, and its newest terminal assistant response completed after successor start.
+An adjacent succeeded idle notice is accepted as the fork's terminal suffix; newer queued input or ambiguous evidence still refuses.
+After restart, `--force` discard without that proof explicitly accepts possible later execution in a removed isolated copy; it is not confirmed cancellation.
+The [adapter reference](../../.agents/skills/harness-adapters/references/harness/opencode-v2.md#dispatch) also documents the pre-dispatch capability gate.
 Observers cannot invoke this owner command; an unreachable old endpoint requires an explicit same-session relaunch after the old TUI exits, not passive takeover.
 The periodic reconciliation is the turn-end backstop: restore the one watcher mechanically, not by emitting an interruption-only continuation.
 It also bounds event-stream gaps; the adapter does not depend on stream reconnection for continuity.

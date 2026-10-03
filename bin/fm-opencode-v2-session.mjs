@@ -10,6 +10,7 @@ import * as fs from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { setTimeout } from "node:timers/promises";
+import { spawnSync } from "node:child_process";
 
 function incarnationGone(record) {
   try {
@@ -28,8 +29,40 @@ function absentSnapshot(file) {
   try { busy = readPrivateText(busyFile); }
   catch (error) { if (error.code !== "ENOENT") throw error; }
   if (busy !== undefined && (!/^v1\s/.test(busy) || (busy.match(/(?:^|\s)state=(?:busy|idle|unknown)(?=\s|$)/g) || []).length !== 1)) throw new Error("REFUSED: absent V2 sidecar has an invalid busy record");
-  if (busy && /(?:^|\s)state=busy(?:\s|$)/.test(busy)) throw new Error("REFUSED: V2 sidecar is absent but the task's busy record still reports execution");
+  if (busy && /(?:^|\s)state=busy(?:\s|$)/.test(busy)) return { recorded: false, executing: null, busyFile };
   return { recorded: false, executing: false };
+}
+
+function successorTiming(binding) {
+  const current = identity(binding.servicePID);
+  if (current.start !== binding.serviceStart || current.boot !== binding.hostBootID) throw new Error("successor changed while checking settlement");
+  const ticks = spawnSync("getconf", ["CLK_TCK"], { encoding: "utf8", timeout: 1000 });
+  const hz = Number(ticks.stdout?.trim()), uptime = Number(fs.readFileSync("/proc/uptime", "utf8").split(" ")[0]);
+  if (ticks.status !== 0 || !Number.isFinite(hz) || hz <= 0 || !Number.isFinite(uptime)) throw new Error("cannot verify successor uptime");
+  const age = (uptime - Number(current.start) / hz) * 1000;
+  return { age, started: Date.now() - age };
+}
+
+// Test seams exercise the same criterion; production callers always use real
+// kernel time, exact-service API reads and a one-second sample separation.
+export async function settledSuccessor(snapshot, deps = {}) {
+  const timing = (deps.timing || successorTiming)(snapshot.binding);
+  if (timing.age < 30000 || snapshot.executing) return false;
+  await (deps.wait || setTimeout)(1000);
+  const active = (deps.api || nativeAPI)(snapshot.binding, "session.active").data;
+  if (!active || typeof active !== "object" || Array.isArray(active) || Object.values(active).some(value => value?.type !== "running")) throw new Error("invalid successor settlement snapshot");
+  if (Object.hasOwn(active, snapshot.record.sessionID)) return false;
+  const messages = (deps.api || nativeAPI)(snapshot.binding, "session.message.list", [...snapshot.args, "--param", "order=desc", "--param", "limit=2"]).data;
+  if (!Array.isArray(messages) || !messages.length || messages.length > 2) return false;
+  // The installed fork appends a succeeded idle notice after the assistant.
+  // Accept only that adjacent terminal pair, never skip a newer user/tool row.
+  const notice = messages[0].type === "idle" ? messages[0] : undefined;
+  const latest = notice ? messages[1] : messages[0], completed = latest?.time?.completed;
+  if (notice && (notice.outcome !== "succeeded" || !Number.isFinite(notice.time?.created) || notice.time.created < completed || notice.time.created > Date.now())) return false;
+  // The unfiltered newest message must be a terminal assistant response, not
+  // a stale earlier answer, a tool-call step or a queued/restart user message.
+  return latest?.type === "assistant" && latest.finish === "stop" && !latest.error &&
+    Number.isFinite(completed) && completed > timing.started + 25 && completed <= Date.now();
 }
 
 function readPrivateText(file) {
@@ -83,6 +116,12 @@ export async function reconcileWorker(action, file, worktree) {
   let snapshot = workerSnapshot(file, worktree);
   const stoppedVerdict = value => {
     if (value.recorded === false) {
+      if (value.executing === null) {
+        const warning = `absent V2 session sidecar conflicts with busy record ${value.busyFile}; restore the binding and reconcile, or use explicit --force discard accepting possible resumed execution`;
+        if (action !== "status" && action !== "discard") throw new Error("REFUSED: " + warning);
+        if (action === "discard") console.error("WARNING: forced discard without confirmed native cancellation: " + warning);
+        return { executing: null, recorded: false, cancellation: "unconfirmed", busyFile: value.busyFile };
+      }
       console.error("V2 task has no recorded native session; no busy record reports execution.");
       return { executing: false, recorded: false };
     }
@@ -95,24 +134,28 @@ export async function reconcileWorker(action, file, worktree) {
   };
   const stopped = stoppedVerdict(snapshot);
   if (stopped) return stopped;
-  if (action === "status") return { sessionID: snapshot.record.sessionID, executing: snapshot.executing };
+  if (action === "status") return { sessionID: snapshot.record.sessionID, executing: snapshot.incarnation === "successor" && !snapshot.executing ? null : snapshot.executing, observedExecuting: snapshot.executing, incarnation: snapshot.incarnation, cancellation: snapshot.incarnation === "successor" ? "unproven" : "not-requested" };
   if (action === "teardown") {
     if (snapshot.executing) throw new Error(`REFUSED: exact V2 worker ${snapshot.record.sessionID} is still executing; pane death is not stopped execution`);
     if (snapshot.incarnation !== "successor") return { sessionID: snapshot.record.sessionID, executing: false };
     // Even an idle successor can still be completing its boot sweep. Require
-    // a real terminal interruption rather than relying on active alone.
+    // terminal interruption or bounded terminal-message settlement proof.
   }
   const bindingAtInterrupt = snapshot.binding;
   const recordAtInterrupt = snapshot.record;
+  let settled = false;
   let result;
   try {
     result = nativeAPI(snapshot.binding, "session.interrupt", [...snapshot.args, "--param", "resume=false"]);
     if (typeof result.interrupted !== "boolean") throw new Error("native interrupt did not acknowledge exact worker cancellation");
     if (snapshot.incarnation === "successor" && !result.interrupted) {
-      const warning = "successor reported idle interruption; no terminal cancellation of the old durable claim was proven and the turn may still resume";
-      if (action !== "discard") throw new Error("REFUSED: " + warning + "; retry after recovery settles or use explicit --force discard");
-      console.error("WARNING: forced discard without confirmed native cancellation: " + warning);
-      return { sessionID: snapshot.record.sessionID, executing: null, cancellation: "unconfirmed" };
+      settled = await settledSuccessor(snapshot);
+      if (!settled) {
+        const warning = "successor reported idle interruption; no terminal cancellation or settlement of the old durable claim was proven and the turn may still resume";
+        if (action !== "discard") throw new Error("REFUSED: " + warning + "; retry after recovery settles or use explicit --force discard");
+        console.error("WARNING: forced discard without confirmed native cancellation: " + warning);
+        return { sessionID: snapshot.record.sessionID, executing: null, cancellation: "unconfirmed" };
+      }
     }
   }
   catch (error) {
@@ -135,7 +178,7 @@ export async function reconcileWorker(action, file, worktree) {
         if (JSON.stringify(readPrivate(file)) !== JSON.stringify(recordAtInterrupt)) throw new Error("REFUSED: V2 worker binding changed during cancellation");
         writePrivate(file, bindingAtInterrupt);
       }
-      return { sessionID: snapshot.record.sessionID, executing: false, interrupted: result.interrupted, cancellation: "confirmed" };
+      return { sessionID: snapshot.record.sessionID, executing: false, interrupted: result.interrupted, cancellation: settled ? "settled" : "confirmed" };
     }
     await setTimeout(100);
   }

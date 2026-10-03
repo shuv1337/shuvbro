@@ -870,6 +870,8 @@ case "$VERB" in
       result=$(fm_control_v2_interrupt "$STATE" "$ID" "$WT") || exit 1
       if jq -e '.recorded == false' <<< "$result" >/dev/null; then
         echo "interrupt-not-needed $ID harness=opencode-v2 backend=$BACKEND verified=no-recorded-session cancel=not-needed"
+      elif jq -e '.cancellation == "settled"' <<< "$result" >/dev/null; then
+        echo "interrupt-not-needed $ID harness=opencode-v2 backend=$BACKEND verified=settled-successor cancel=not-needed"
       else
         echo "interrupt-delivered $ID harness=opencode-v2 backend=$BACKEND verified=native-session cancel=confirmed"
       fi

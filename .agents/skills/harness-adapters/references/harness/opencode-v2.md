@@ -37,6 +37,8 @@ A project plugin cannot import shuvcode's own `Tool.Error` class; shuvcode match
 
 ## Dispatch
 
+Before dispatch publishes task runtime state or acquires an isolated copy, `bin/fm-opencode-v2-capability.mjs` checks the qualified installed version, native launch flags and pinned Effect guard runtime.
+Unsupported builds or missing runtime capabilities refuse with installation/qualification instructions; the probe never discovers or starts a managed service.
 Ship and scout launches use `bin/fm-opencode-v2-launch.sh` for both default and explicit models.
 Its header owns the shared-service creation, exact recorded session, unattended permissions and queued admission mechanics.
 The root command accepts only `--standalone`, `--server`, `--auto`, `--continue`, `--session`, `--prompt`, and a directory.
@@ -55,5 +57,9 @@ Secondmate launches are refused until that role is qualified.
 Busy state comes from the Firstmate-owned worker plugin's `session.execution.started` (busy) and its `session.execution.succeeded`, `failed`, or `interrupted` terminal event (idle), latched to the worker's own root session; shuvcode publishes no `session.status` or `session.idle` event to plugins.
 `bin/fm-opencode-v2-session.mjs` reconciles the exact recorded worker through native `session.get` and `session.active`, and interrupts that exact session before pane lifecycle actions or explicitly approved discard.
 Teardown refuses active or unverifiable native execution; a dead pane is not evidence that the worker stopped.
-These native lifecycle changes have portable fixture coverage; actual shared-service cancellation/cleanup qualification remains pending.
+The fork resumes durable in-flight claims at boot with at-least-once replay risk, including repeated side effects.
+After restart, cleanup requires exact-session successor cancellation or the conservative settled-idle proof owned by the [V2 supervision protocol](../../../../../docs/supervision-protocols/opencode-v2.md).
+Unproven successors remain visibly unproven; confirmed cancellation or settlement records the successor binding.
+`--force` discard without proof accepts that a later service start may resume work in a removed isolated copy; it never reports confirmed cancellation.
+Portable regressions and isolated installed-fork probes cover these lifecycle paths; combined shared-service/Herdr qualification remains pending.
 Unattended wildcard permission is scoped to the recorded worker session and is inherited by its native child sessions, never a global service policy.

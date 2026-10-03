@@ -345,7 +345,8 @@ try {
   const absent=state+'/absent.opencode-v2-session.json';
   fs.symlinkSync(lab+'/does-not-exist',absent);await assert.rejects(session.reconcileWorker('discard',absent,root),/symlink/);fs.unlinkSync(absent);
   fs.writeFileSync(state+'/absent.busy-state','v1 gen=fixture seq=1 state=busy source=opencode-plugin event=started ts=1\n',{mode:0o600});
-  await assert.rejects(session.reconcileWorker('discard',absent,root),/busy record/);fs.unlinkSync(state+'/absent.busy-state');
+  await assert.rejects(session.reconcileWorker('teardown',absent,root),/busy record.*--force/);
+  assert.equal((await session.reconcileWorker('discard',absent,root)).cancellation,'unconfirmed');fs.unlinkSync(state+'/absent.busy-state');
   // A dead original can leave execution in the successor at the frozen endpoint.
   process.env.FIXTURE_ROOT=root;
  const deadService=spawn(process.execPath,['-e','setInterval(()=>{},10000)'],{stdio:'ignore'});
@@ -364,6 +365,8 @@ try {
   assert.equal((await session.reconcileWorker('teardown',damaged,root)).cancellation,'confirmed'); // positive terminal acknowledgment settles old claim
   owner.writePrivate(damaged,deadRecord);
   process.env.FIXTURE_IDLE_INTERRUPT='1';
+  assert.equal((await session.reconcileWorker('status',damaged,root)).cancellation,'unproven');
+  assert.equal((await session.reconcileWorker('status',damaged,root)).executing,null);
   await assert.rejects(session.reconcileWorker('teardown',damaged,root),/no terminal cancellation/);
   await assert.rejects(session.reconcileWorker('interrupt',damaged,root),/no terminal cancellation/);
   assert.equal((await session.reconcileWorker('discard',damaged,root)).cancellation,'unconfirmed');
@@ -390,6 +393,19 @@ try {
    assert.equal(fs.readFileSync(process.env.FIXTURE_LOG,'utf8'),proofLog,'registration replacement must not prove the still-live original service stopped');
  } finally {owner.writePrivate(lab+'/native/service.json',originalRegistration);replacement.kill();await replacementClosed;}
   const log=fs.readFileSync(process.env.FIXTURE_LOG,'utf8');assert.match(log,/shell.list/);assert.equal(log.split('session.interrupt').length-1,10);
+  const sample={record:owner.readPrivate(worker),binding:owner.readPrivate(worker),args:[],executing:false};
+  let age=31000,latest={type:'assistant',finish:'stop',time:{completed:Date.now()-500}},active={},waited=0;
+  const deps={timing:()=>({age,started:Date.now()-age}),wait:async ms=>{assert.equal(ms,1000);waited++;},api:(_record,op,args)=>{
+    if(op==='session.active') return {data:active};
+    assert.equal(op,'session.message.list'); assert.ok(args.includes('order=desc')); assert.ok(args.includes('limit=2')); return {data:Array.isArray(latest)?latest:[latest]};
+  }};
+  assert.equal(await session.settledSuccessor(sample,deps),true);assert.equal(waited,1);
+  latest=[{type:'idle',outcome:'succeeded',time:{created:Date.now()-100}},latest];assert.equal(await session.settledSuccessor(sample,deps),true);latest=latest[1];
+  age=29999;const beforeWait=waited;assert.equal(await session.settledSuccessor(sample,deps),false);assert.equal(waited,beforeWait);age=31000;
+  active={[r.sessionID]:{type:'running'}};assert.equal(await session.settledSuccessor(sample,deps),false);active={};
+  for(const message of [{type:'user',time:{completed:Date.now()-500}},{type:'assistant',finish:'tool-calls',time:{completed:Date.now()-500}},{type:'assistant',finish:'stop',time:{completed:Date.now()-60000}},{type:'assistant',finish:'stop',time:{}}]) {
+    latest=message;assert.equal(await session.settledSuccessor(sample,deps),false);
+  }
  console.log('frozen registered endpoint, cwd/session divergence and exact worker execution/cancellation passed');
 } finally {child.kill();await new Promise(resolve=>child.on('close',resolve));owner.publish('cleanup-test-namespace',{});}
 JS

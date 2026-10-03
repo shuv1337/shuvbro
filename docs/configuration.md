@@ -28,6 +28,7 @@ Ordinary dead-direct-report recovery is owned by `stuck-crewmate-recovery`, whil
 ## Native OpenCode V2 state and activation
 
 Shared-service qualification remains pending; the [native protocol](supervision-protocols/opencode-v2.md) owns current topology limits and activation/recovery behavior.
+Its restart contract covers at-least-once turn resumption, refusal until cancellation/settlement is proven, and the explicit replay risk accepted by forced discard; the [adapter reference](../.agents/skills/harness-adapters/references/harness/opencode-v2.md#dispatch) owns the pre-dispatch capability gate.
 The effective home state contains `.opencode-v2-owner.json` (canonical supplemental ownership proof), `.opencode-v2-failure.json` (bounded native diagnostic), and `.opencode-v2-admissions/<sha256(session)>/msg_*.json` (transport admission journal, not canonical queue acknowledgements).
 `bin/fm-opencode-v2-owner.mjs` owns strict proof schema, safe publication and discovery, `.opencode/plugins/fm-native-v2/tui.js` owns the diagnostic, and `.opencode/plugins/fm-native-v2/admission.js` owns journal phases and retention.
 `state/<id>.opencode-v2-session.json` binds a worker to its exact session, location/model and service endpoint/incarnation; `bin/fm-opencode-v2-launch.sh` publishes it before admission and `bin/fm-opencode-v2-session.mjs` owns execution checks and exact interruption before lifecycle cleanup.
