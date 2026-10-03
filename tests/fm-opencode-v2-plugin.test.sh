@@ -10,15 +10,30 @@ export NODE_NO_WARNINGS=1
 
 test_standalone_registry_guard() {
   local fixture namespace out home="$TMP_ROOT/guard-home" lab="$TMP_ROOT/guard-lab"
+  local preload="--import=$ROOT/tests/assets/fm-opencode-v2-scratch-home.mjs"
+  local -a scratch=(env HOME="$TMP_ROOT/not-the-registry-home" FM_V2_TEST_SCRATCH_HOME="$home" NODE_OPTIONS="$preload")
   mkdir -p "$home/.local/state/shuvbro/opencode-v2/default"
   mkdir -p "$home/.local/state/shuvbro/opencode-v2/test-existing"
   printf 'untouched sentinel\n' > "$home/.local/state/shuvbro/opencode-v2/default/sentinel"
+  out=$("${scratch[@]}" FM_V2_REGISTRY_NAMESPACE=test-positive ROOT="$ROOT" node --input-type=module <<'JS'
+import assert from 'node:assert/strict';
+import {userInfo} from 'node:os';
+import {pathToFileURL} from 'node:url';
+const owner=await import(pathToFileURL(process.env.ROOT+'/bin/fm-opencode-v2-owner.mjs'));
+const expected=process.env.FM_V2_TEST_SCRATCH_HOME+'/.local/state/shuvbro/opencode-v2/test-positive';
+assert.equal(userInfo().homedir,process.env.FM_V2_TEST_SCRATCH_HOME);
+assert.equal(owner.registry(),expected);
+console.log(expected);
+owner.publish('cleanup-test-namespace',{});
+JS
+  ) || fail "scratch registry positive control failed"
+  [ "$out" = "$home/.local/state/shuvbro/opencode-v2/test-positive" ] || fail "registry redirect landed elsewhere"
   for fixture in fixtures/fm-opencode-v2-provider-host.mjs fixtures/fm-opencode-v2-real-recovery.mjs assets/fm-opencode-v2-native-harness.mjs; do
     for namespace in unset default '../unsafe' test-existing; do
       if [ "$namespace" = unset ]; then
-        out=$(env -u FM_V2_REGISTRY_NAMESPACE HOME="$home" ROOT="$ROOT" LAB="$lab" node "$ROOT/tests/$fixture" 2>&1) && fail "standalone $fixture accepted unset namespace"
+        out=$(env -u FM_V2_REGISTRY_NAMESPACE "${scratch[@]:1}" ROOT="$ROOT" LAB="$lab" node "$ROOT/tests/$fixture" 2>&1) && fail "standalone $fixture accepted unset namespace"
       else
-        out=$(env FM_V2_REGISTRY_NAMESPACE="$namespace" HOME="$home" ROOT="$ROOT" LAB="$lab" node "$ROOT/tests/$fixture" 2>&1) && fail "standalone $fixture accepted $namespace namespace"
+        out=$("${scratch[@]}" FM_V2_REGISTRY_NAMESPACE="$namespace" ROOT="$ROOT" LAB="$lab" node "$ROOT/tests/$fixture" 2>&1) && fail "standalone $fixture accepted $namespace namespace"
       fi
       [[ "$out" == *refusing*registry*namespace* ]] || fail "standalone guard was not the refusal: $out"
       [ "$(find "$home/.local/state/shuvbro/opencode-v2" -type f | wc -l)" = 1 ] || fail "standalone fixture wrote to disposable default registry"
@@ -26,9 +41,38 @@ test_standalone_registry_guard() {
       [ ! -e "$lab" ] || fail "standalone fixture mutated its lab before registry guard"
     done
   done
-  pass "all standalone native fixtures refuse unset/default/invalid/non-fresh namespaces before any write, with disposable HOME"
+  pass "positive OS-user-home redirect and standalone refusal preserve scratch default even when HOME differs"
 }
 test_standalone_registry_guard
+
+test_inherited_lock_registry_boundary() {
+  local home="$TMP_ROOT/lock-registry-home" trace="$TMP_ROOT/lock-registry.trace" out
+  mkdir -p "$home/.local/state/shuvbro/opencode-v2/default"
+  printf 'lock sentinel\n' > "$home/.local/state/shuvbro/opencode-v2/default/sentinel"
+  # The child shell, not this fixture, expands its identity and root variables.
+  # shellcheck disable=SC2016
+  out=$(env -u FM_V2_TEST_NAMESPACE_FILE OPENCODE_SESSION_ID=ses_inherited_registry_probe FM_V2_ACTIVATION=inherited-probe FM_V2_REGISTRY_NAMESPACE=default \
+    FM_V2_TEST_SCRATCH_HOME="$home" NODE_OPTIONS="--import=$ROOT/tests/assets/fm-opencode-v2-scratch-home.mjs" \
+    bash -c '. "$1/tests/lib.sh"; [ -z "${OPENCODE_SESSION_ID:-}" ] && [ -z "${FM_V2_ACTIVATION:-}" ] || exit 91; node --input-type=module -e '\''import {pathToFileURL} from "node:url"; const owner=await import(pathToFileURL(process.argv[1]+"/bin/fm-opencode-v2-owner.mjs")); console.log(owner.registry());'\'' "$1"' _ "$ROOT" 2>&1) || fail "common native boundary positive control failed: $out"
+  [[ "$out" == *"$home/.local/state/shuvbro/opencode-v2/fmtest"* ]] || fail "common boundary did not replace inherited default"
+  [ "$(find "$home/.local/state/shuvbro/opencode-v2" -mindepth 1 -maxdepth 1 -type d | wc -l)" = 1 ] || fail "common native namespace survived exit cleanup"
+  if ! command -v strace >/dev/null; then
+    printf 'skip: inherited lock registry access trace requires strace\n'
+    return
+  fi
+  out=$(env -u FM_V2_TEST_NAMESPACE_FILE OPENCODE_SESSION_ID=ses_inherited_registry_probe FM_V2_ACTIVATION=inherited-probe FM_V2_REGISTRY_NAMESPACE=default \
+    FM_V2_TEST_SCRATCH_HOME="$home" NODE_OPTIONS="--import=$ROOT/tests/assets/fm-opencode-v2-scratch-home.mjs" \
+    strace -f -e trace=%file -o "$trace" bash "$ROOT/tests/fm-session-lock-ancestry.test.sh" 2>&1) || fail "inherited lock-path suite failed: $out"
+  [[ "$out" == *'ok -'* ]] || fail "lock-path regression exercised no cases"
+  if grep -F "$V2_REGISTRY_HOME/.local/state/shuvbro/opencode-v2" "$trace" >/dev/null \
+    || grep -F "$home/.local/state/shuvbro/opencode-v2/default" "$trace" >/dev/null; then
+    fail "inherited lock-path script accessed real registry or scratch default"
+  fi
+  [ "$(find "$home/.local/state/shuvbro/opencode-v2" -type f | wc -l)" = 1 ] || fail "lock-path suite wrote registry records"
+  [ "$(cat "$home/.local/state/shuvbro/opencode-v2/default/sentinel")" = 'lock sentinel' ] || fail "lock-path suite changed default"
+  pass "inherited native identity is stripped at common setup; lock-path access trace touches neither real registry nor scratch default"
+}
+test_inherited_lock_registry_boundary
 
 test_native_exact_owner_and_transport() {
   local out

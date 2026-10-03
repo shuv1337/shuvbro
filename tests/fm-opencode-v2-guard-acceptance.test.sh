@@ -236,11 +236,11 @@ test_registry_read_failure_inert_without_marker() {
   registered_lead registry-unreadable
   positive_control
   v2_session "$CASE" ses_adhoc "$LEAD_ROOT"
-  chmod 755 "$HOME/.local/state/shuvbro/opencode-v2/$FM_V2_REGISTRY_NAMESPACE"
+  chmod 755 "$V2_REGISTRY_HOME/.local/state/shuvbro/opencode-v2/$FM_V2_REGISTRY_NAMESPACE"
   local lead adhoc
   lead=$(v2_guard ses_lead "$PROTECTED")
   adhoc=$(v2_guard ses_adhoc "$PROTECTED")
-  chmod 700 "$HOME/.local/state/shuvbro/opencode-v2/$FM_V2_REGISTRY_NAMESPACE"
+  chmod 700 "$V2_REGISTRY_HOME/.local/state/shuvbro/opencode-v2/$FM_V2_REGISTRY_NAMESPACE"
   v2_expect_kind "marked lead with an unreadable registry" scope "$lead"
   v2_expect_kind "unmarked root with an unreadable registry" allow "$adhoc"
   pass "guard: an unreadable registry refuses the marked lead and leaves unmarked roots inert"

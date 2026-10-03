@@ -53,6 +53,28 @@ unset FM_TASK_ID
 # shellcheck disable=SC2034
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+# Native identity is an operator credential, never an ambient fixture input.
+# A case testing native identity must explicitly set it after this boundary.
+unset OPENCODE_SESSION_ID FM_V2_ACTIVATION
+FM_TEST_NATIVE_NODE=$(node -p process.execPath) || return 1
+FM_TEST_NATIVE_HOME=$("$FM_TEST_NATIVE_NODE" -p 'require("os").userInfo().homedir') || return 1
+FM_TEST_NATIVE_NAMESPACE="fmtest$$$RANDOM"
+if [ -n "${FM_V2_TEST_NAMESPACE_FILE:-}" ] && [ -f "$FM_V2_TEST_NAMESPACE_FILE" ] && grep -qxF "${FM_V2_REGISTRY_NAMESPACE:-}" "$FM_V2_TEST_NAMESPACE_FILE"; then
+  # A deliberately shared acceptance runner owns this namespace's cleanup.
+  FM_TEST_NATIVE_NAMESPACE=''
+else
+  export FM_V2_REGISTRY_NAMESPACE="$FM_TEST_NATIVE_NAMESPACE"
+fi
+bash "$ROOT/tests/fm-opencode-v2-acceptance-lib.sh" --assert-test-namespace || return 1
+
+fm_test_cleanup_native_registry() {
+  local dir="$FM_TEST_NATIVE_HOME/.local/state/shuvbro/opencode-v2/$FM_TEST_NATIVE_NAMESPACE"
+  [ -n "$FM_TEST_NATIVE_NAMESPACE" ] || return 0
+  [ -d "$dir" ] || return 0
+  FM_V2_REGISTRY_NAMESPACE="$FM_TEST_NATIVE_NAMESPACE" "$FM_TEST_NATIVE_NODE" "$ROOT/bin/fm-opencode-v2-owner.mjs" cleanup-test-namespace >/dev/null || return 1
+  [ ! -d "$dir" ] || rmdir "$dir"
+}
+
 # --- reporters --------------------------------------------------------------
 
 fail() {
@@ -148,6 +170,7 @@ export FM_TEST_STUB_MAX_BLOCK_SECONDS
 
 fm_test_cleanup() {
   local d
+  fm_test_cleanup_native_registry || { printf 'not ok - common test registry cleanup refused\n' >&2; return 1; }
   fm_test_reap_procevent_homes
   for d in "${FM_TEST_CLEANUP_DIRS[@]:-}"; do
     [ -n "$d" ] && rm -rf "$d"

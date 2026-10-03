@@ -24,7 +24,9 @@ v2_assert_test_namespace() {
     default|'') printf 'refusing unset/default V2 test registry namespace\n' >&2; return 1 ;;
   esac
   [[ "$FM_V2_REGISTRY_NAMESPACE" =~ ^[a-zA-Z0-9_-]{1,64}$ ]] || { printf 'refusing invalid V2 test registry namespace\n' >&2; return 1; }
-  if [ "${1:-}" != --existing ] && [ -e "$HOME/.local/state/shuvbro/opencode-v2/$FM_V2_REGISTRY_NAMESPACE" ]; then
+  local registry_home
+  registry_home=$(node -p 'require("os").userInfo().homedir') || return 1
+  if [ "${1:-}" != --existing ] && [ -e "$registry_home/.local/state/shuvbro/opencode-v2/$FM_V2_REGISTRY_NAMESPACE" ]; then
     if ! { [ -n "${FM_V2_TEST_NAMESPACE_FILE:-}" ] && [ -f "$FM_V2_TEST_NAMESPACE_FILE" ] && grep -qxF "$FM_V2_REGISTRY_NAMESPACE" "$FM_V2_TEST_NAMESPACE_FILE"; }; then
       printf 'refusing non-fresh unmanaged V2 test registry namespace\n' >&2; return 1
     fi
@@ -45,7 +47,8 @@ V2_PENDING=0
 V2_FAILED=0
 V2_STATE_DIR=$(mktemp -d "${TMPDIR:-/tmp}/fm-v2-accept.XXXXXX")
 V2_NS_BASE="v2t$$$RANDOM"
-[ ! -e "$HOME/.local/state/shuvbro/opencode-v2/$V2_NS_BASE" ] || { printf 'refusing a colliding V2 test namespace\n' >&2; exit 1; }
+V2_REGISTRY_HOME=$("$V2_NODE_BIN" -p 'require("os").userInfo().homedir') || return 1
+[ ! -e "$V2_REGISTRY_HOME/.local/state/shuvbro/opencode-v2/$V2_NS_BASE" ] || { printf 'refusing a colliding V2 test namespace\n' >&2; exit 1; }
 export FM_V2_REGISTRY_NAMESPACE="${V2_NS_BASE}"
 # Fixture boundary: an ambient native session identity or activation (for
 # example from the developer's own shuvcode shell) must never reach production
@@ -111,7 +114,7 @@ v2_teardown() {
   if v2_native_ready; then
     while IFS= read -r ns; do
       [ -n "$ns" ] && [ "$ns" != default ] || continue
-      dir="$HOME/.local/state/shuvbro/opencode-v2/$ns"
+       dir="$V2_REGISTRY_HOME/.local/state/shuvbro/opencode-v2/$ns"
       [ -d "$dir" ] || continue
       chmod 700 "$dir" 2>/dev/null
       if ! FM_V2_REGISTRY_NAMESPACE="$ns" "$V2_NODE_BIN" "$V2_CODE_ROOT/bin/fm-opencode-v2-owner.mjs" cleanup-test-namespace >/dev/null 2>"$V2_STATE_DIR/cleanup.err"; then
