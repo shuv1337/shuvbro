@@ -182,11 +182,24 @@ ln -s "$V2_NODE_BIN" "$V2_SERVICE_EXEC"
 export V2_SERVICE_EXEC
 
 # Start a service stand-in; sets V2_SERVICE_PID and V2_SOCKET.
+# Each case directory has one stable endpoint and private native state: a
+# second start in the same directory is a restart at the same endpoint, which
+# replaces the managed registration (new pid, new credential). Sets
+# V2_SERVICE_URL, V2_NATIVE_STATE and V2_NATIVE_BIN (the fixture CLI).
 v2_start_service() {  # <dir>
   local dir=$1
   v2_assert_test_namespace
   mkdir -p "$dir"
   [ -f "$dir/sessions.json" ] || printf '{}' > "$dir/sessions.json"
+  export V2_NATIVE_STATE="$dir/native" V2_NATIVE_BIN="$dir/native-bin"
+  if [ ! -d "$V2_NATIVE_STATE" ]; then
+    mkdir -m 700 "$V2_NATIVE_STATE" "$V2_NATIVE_BIN"
+    printf '%s\n' "http://127.0.0.1:$((20000 + RANDOM % 40000))" > "$V2_NATIVE_STATE/.endpoint"
+    printf '#!/usr/bin/env bash\nexec %q %q cli %q "$@"\n' "$V2_NODE_BIN" "$V2_HARNESS" "$V2_NATIVE_STATE" > "$V2_NATIVE_BIN/shuvcode"
+    chmod 700 "$V2_NATIVE_BIN/shuvcode"
+  fi
+  V2_SERVICE_URL=$(cat "$V2_NATIVE_STATE/.endpoint")
+  export V2_SERVICE_URL
   V2_SOCKET="$dir/svc-$RANDOM.sock"
   "$V2_SERVICE_EXEC" "$V2_HARNESS" service "$V2_CODE_ROOT" "$V2_SOCKET" "$dir/sessions.json" --service > "$dir/service.out" 2>&1 &
   V2_SERVICE_PID=$!
@@ -271,8 +284,8 @@ v2_expect_kind() {  # <label> <expected-kind-regex> <reply-json>
 }
 
 # A model shell of <session> inside the service. Prints {code, signal, stdout, stderr}.
-v2_shell() {  # <session> <command> [extra-env-json]
-  v2_call "$(jq -nc --arg s "$1" --arg c "$2" --argjson e "${3:-null}" '{op: "shell", sessionID: $s, command: $c, extraEnv: $e}')"
+v2_shell() {  # <session> <command> [extra-env-json] [workdir]
+  v2_call "$(jq -nc --arg s "$1" --arg c "$2" --argjson e "${3:-null}" --arg w "${4:-}" '{op: "shell", sessionID: $s, command: $c, extraEnv: $e} + (if $w == "" then {} else {workdir: $w} end)')"
 }
 
 # The frozen helper routing environment a lead's model shell carries.

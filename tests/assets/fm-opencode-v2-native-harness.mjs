@@ -19,6 +19,18 @@
 //       steps and records admissions, metadata, environment pushes and failures.
 //   call <socket> <json>
 //       One request to a running service; prints the JSON reply.
+//   cli <native-state> <args...>
+//       The fixture's `shuvcode` CLI (installed as <case>/native-bin/shuvcode):
+//       `debug paths` reports the case's private native state directory, and
+//       `api --server URL OPERATION [--param k=v]...` reaches the service only
+//       when URL and OPENCODE_PASSWORD match that directory's managed
+//       service.json. Everything else is refused, so a fixture can never reach
+//       the installed CLI or the operator's service.
+//
+// The service registers itself like a managed native service: it writes
+// <native-state>/service.json (0600, {url, pid, password, socket}) at the
+// case's stable endpoint V2_SERVICE_URL, so a restarted service replaces the
+// registration at the same endpoint with its own pid and a fresh credential.
 // Sessions live in sessions.json: {id: Session.Info}. The service re-reads it on
 // every request so tests can edit snapshots between steps.
 import net from "node:net";
@@ -74,13 +86,19 @@ async function serviceRole([codeRoot, socket, sessionsFile]) {
   // Model shells reach it through a `shuvcode` on PATH that queries this
   // service, as a real shell's `shuvcode api` reaches its own service.
   const shells = new Map();
-  const { mkdtempSync, chmodSync } = await import("node:fs");
-  const apiBin = mkdtempSync(`${socket}.bin-`);
-  writeFileSync(`${apiBin}/shuvcode`, `#!/usr/bin/env bash
-[ "$1" = api ] || { echo "stand-in shuvcode supports only api" >&2; exit 2; }
-exec ${JSON.stringify(process.execPath)} ${JSON.stringify(process.argv[1])} call ${JSON.stringify(socket)} "$(printf '{"op":"api","operation":"%s"}' "$2")"
-`);
-  chmodSync(`${apiBin}/shuvcode`, 0o755);
+  const nativeState = process.env.V2_NATIVE_STATE, nativeBin = process.env.V2_NATIVE_BIN;
+  if (!nativeState || !nativeBin || !process.env.V2_SERVICE_URL) throw new Error("service stand-in needs V2_NATIVE_STATE, V2_NATIVE_BIN and V2_SERVICE_URL");
+  {
+    const { randomBytes } = await import("node:crypto");
+    const { renameSync } = await import("node:fs");
+    const registration = { url: process.env.V2_SERVICE_URL, pid: process.pid, password: randomBytes(18).toString("hex"), socket };
+    const temporary = `${nativeState}/.service.json.${process.pid}`;
+    writeFileSync(temporary, JSON.stringify(registration), { mode: 0o600 });
+    renameSync(temporary, `${nativeState}/service.json`);
+  }
+  const sessionDirectory = (sessionID) => {
+    try { return JSON.parse(readFileSync(sessionsFile, "utf8"))[sessionID]?.location?.directory || codeRoot; } catch { return codeRoot; }
+  };
   const handlers = {
     pid: async () => ({ pid: process.pid }),
     bindingStatus: async ({ input }) => server.bindingStatus(api, input),
@@ -96,19 +114,24 @@ exec ${JSON.stringify(process.execPath)} ${JSON.stringify(process.argv[1])} call
       finally { for (const key of Object.keys(process.env)) if (!(key in saved)) delete process.env[key]; Object.assign(process.env, saved); }
     },
     environment: async ({ sessionID, variables }) => ({ variables: await api.environment({ sessionID, variables }) ?? null }),
-    api: async ({ operation }) => {
+    api: async ({ operation, params }) => {
       if (operation === "server.info") return { pid: process.pid };
-      if (operation === "shell.list") return { data: [...shells.entries()].map(([pid, sessionID]) => ({ pid, status: "running", metadata: { sessionID } })) };
+      if (operation === "shell.list") {
+        const directory = (params || []).map((p) => /^location\[directory\]=(.*)$/.exec(p)?.[1]).find(Boolean);
+        return { data: [...shells.values()].filter((shell) => !directory || shell.cwd === directory) };
+      }
       return { error: "unsupported operation" };
     },
     // A model shell tool: the session's pushed environment replaces the
     // service environment, and the server then sets OPENCODE_SESSION_ID.
-    shell: ({ sessionID, command, extraEnv }) => new Promise((resolve) => {
+    // workdir mirrors the native shell tool's working-directory parameter.
+    shell: ({ sessionID, command, extraEnv, workdir }) => new Promise((resolve) => {
       const base = environments.get(sessionID) ?? process.env;
       const env = { ...base, TERM: "xterm-256color", OPENCODE_TERMINAL: "1", OPENCODE_SESSION_ID: sessionID, ...(extraEnv || {}) };
-      env.PATH = `${apiBin}:${env.PATH || "/usr/local/bin:/usr/bin:/bin"}`;
-      const child = spawn("/bin/bash", ["-c", command], { cwd: codeRoot, env, stdio: ["ignore", "pipe", "pipe"] });
-      shells.set(child.pid, sessionID);
+      env.PATH = `${nativeBin}:${env.PATH || "/usr/local/bin:/usr/bin:/bin"}`;
+      const cwd = workdir || sessionDirectory(sessionID);
+      const child = spawn("/bin/bash", ["-c", command], { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
+      shells.set(child.pid, { pid: child.pid, status: "running", cwd, command, metadata: { sessionID } });
       let stdout = "", stderr = "";
       child.stdout.on("data", (c) => (stdout += c));
       child.stderr.on("data", (c) => (stderr += c));
@@ -138,7 +161,7 @@ async function ownerRole([codeRoot, socket, sessionID, root, home, state, config
   const record = owner.publish("claim", {
     version: 1, sessionID, claimID: randomBytes(24).toString("hex"), root, home, state, config,
     ownerPID: self.pid, ownerStart: self.start, hostBootID: self.boot,
-    servicePID: service.pid, serviceStart: service.start, lifecycle: "claimed",
+    servicePID: service.pid, serviceStart: service.start, serviceURL: process.env.V2_SERVICE_URL, lifecycle: "claimed",
   });
   console.log(JSON.stringify(record));
   process.on("SIGUSR1", () => {
@@ -162,8 +185,12 @@ async function tuiRole([codeRoot, socketFile, specFile, outFile]) {
   const claimID = spec.claimID || randomBytes(24).toString("hex");
   const activation = {
     version: 1, sessionID: spec.sessionID, claimID, root: spec.root, home: spec.home, state: spec.state, config: spec.config,
-    ownerPID: self.pid, ownerStart: self.start, hostBootID: self.boot, servicePID: service.pid, serviceStart: service.start, lifecycle: "claimed",
+    ownerPID: self.pid, ownerStart: self.start, hostBootID: self.boot, servicePID: service.pid, serviceStart: service.start,
+    serviceURL: process.env.V2_SERVICE_URL, lifecycle: "claimed",
   };
+  // The owner's own native CLI calls (endpoint registration on rebind) reach
+  // only the fixture CLI.
+  process.env.PATH = `${process.env.V2_NATIVE_BIN}:${process.env.PATH}`;
   const record = { activation, prompts: [], admitted: [], metadataWrites: 0, environmentPushes: [], failures: [], steps: [], claimID };
   const ids = new Set();
   let rejectPrompts = spec.rejectPrompts || 0;
@@ -194,9 +221,26 @@ async function tuiRole([codeRoot, socketFile, specFile, outFile]) {
   const watcherLive = () => {
     try { const pid = Number(readFileSync(`${spec.state}/.watch.lock/pid`, "utf8").trim()); process.kill(pid, 0); return true; } catch { return false; }
   };
+  // Host model: plugin setup runs outside the keymap provider; app slots are
+  // rendered later, inside it. keymap.layer outside a provider render throws,
+  // as the host's does.
+  const slots = [];
+  let inProvider = false;
+  const renderSlots = () => {
+    inProvider = true;
+    try { for (const entry of slots) if (!entry.removed) entry.render(); }
+    finally { inProvider = false; }
+  };
   const ctx = {
-    keymap: { layer(fn) { for (const command of fn().commands || []) commands.set(command.slash?.name || command.id, command); return () => {}; } },
-    ui: { toast: { show(t) { record.toasts = [...(record.toasts || []), t]; } } },
+    keymap: { layer(fn) {
+      if (!inProvider) throw new Error("keymap.layer called outside the keymap provider");
+      for (const command of fn().commands || []) commands.set(command.slash?.name || command.id, command);
+      return () => {};
+    } },
+    ui: {
+      slot(entry) { const item = { ...entry, removed: false }; slots.push(item); return () => { item.removed = true; }; },
+      toast: { show(t) { record.toasts = [...(record.toasts || []), t]; } },
+    },
     client: {
       session: {
         async get({ sessionID }) {
@@ -252,6 +296,7 @@ async function tuiRole([codeRoot, socketFile, specFile, outFile]) {
   let cleanup = null;
   try { cleanup = await tui.default.setup(ctx); record.setup = "ok"; }
   catch (error) { record.setup = "threw: " + String(error?.message ?? error); }
+  renderSlots();
   for (const step of spec.steps || []) {
     const entry = { step: step.do };
     if (step.do === "sleep") await sleep(step.ms);
@@ -285,6 +330,7 @@ async function tuiRole([codeRoot, socketFile, specFile, outFile]) {
     else if (step.do === "setup-again") {
       const again = await import(pathToFileURL(`${codeRoot}/.opencode/plugins/fm-native-v2/tui.js`).href + `?r=${Date.now()}`);
       try { cleanup = await again.default.setup(ctx); entry.ok = true; } catch (error) { entry.threw = String(error.message); }
+      renderSlots();
     } else if (step.do === "restart-service") {
       // Replace the execution service under the live owner: new pid, new
       // in-memory session environments, same durable sessions.
@@ -307,6 +353,12 @@ async function tuiRole([codeRoot, socketFile, specFile, outFile]) {
       const command = commands.get(step.name);
       if (!command) entry.error = "command not registered";
       else { try { await command.run(); entry.ok = true; } catch (error) { entry.threw = String(error.message); } }
+    } else if (step.do === "exit") {
+      // Abrupt owner exit: the host's async disposer never runs, only
+      // process 'exit' listeners do.
+      record.steps.push({ ...entry, at: Date.now() });
+      writeFileSync(outFile, JSON.stringify(record));
+      process.exit(0);
     } else if (step.do === "registration") {
       try { entry.record = owner.readRegistration(spec.sessionID); } catch (error) { entry.error = String(error.message); }
     }
@@ -318,8 +370,27 @@ async function tuiRole([codeRoot, socketFile, specFile, outFile]) {
   process.exit(0);
 }
 
+async function cliRole([nativeState, ...argv]) {
+  if (argv[0] === "debug" && argv[1] === "paths") { console.log(`state ${nativeState}`); return; }
+  if (argv[0] !== "api" || argv[1] !== "--server" || !argv[2] || !argv[3]) {
+    console.error("fixture shuvcode supports only `debug paths` and `api --server URL OPERATION`");
+    process.exit(2);
+  }
+  let registration;
+  try { registration = JSON.parse(readFileSync(`${nativeState}/service.json`, "utf8")); }
+  catch { console.error("fixture shuvcode: no managed service registration"); process.exit(1); }
+  if (argv[2] !== registration.url) { console.error("fixture shuvcode: unknown server endpoint"); process.exit(1); }
+  if (process.env.OPENCODE_PASSWORD !== registration.password) { console.error("fixture shuvcode: unauthorized"); process.exit(1); }
+  const params = [];
+  for (let i = 4; i < argv.length; i++) if (argv[i] === "--param") params.push(argv[++i]);
+  const reply = await request(registration.socket, { op: "api", operation: argv[3], params });
+  if (reply.error) { console.error(reply.error); process.exit(1); }
+  console.log(JSON.stringify(reply));
+}
+
 if (role === "service") await serviceRole(args);
+else if (role === "cli") await cliRole(args);
 else if (role === "owner") await ownerRole(args);
 else if (role === "tui") await tuiRole(args);
 else if (role === "call") console.log(JSON.stringify(await request(args[0], JSON.parse(args[1]), 90000)));
-else { console.error("usage: service|owner|tui|call"); process.exit(2); }
+else { console.error("usage: service|owner|tui|call|cli"); process.exit(2); }

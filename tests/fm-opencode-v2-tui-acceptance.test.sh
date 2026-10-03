@@ -74,6 +74,12 @@ watchers_step() {
 startup_admissions() { jq '[.admitted[] | select(.text | test("fm-session-start"))] | length' "$1"; }
 wake_admissions() { jq --arg w "$WAKE" '[.admitted[] | select(.text | test($w))] | length' "$1"; }
 wake_prompts() { jq -c --arg w "$WAKE" '[.prompts[] | select(.text | test($w))]' "$1"; }
+# Setup refuses an activation either by throwing or by reporting the bounded
+# setup failure and disposing itself; both must carry the specific reason.
+refused_with() {  # <out> <reason-regex>
+  jq -e --arg r "$2" '(.setup | test($r)) or ([.failures[] | select(test("V2 setup failed: .*" + $r))] | length > 0)' "$1" >/dev/null
+}
+
 step_ok() {  # <out> <index> <label>
   jq -e --argjson i "$2" '.steps[$i].ok == true' "$1" >/dev/null || fail "$3: $(jq -c --argjson i "$2" '{step: .steps[$i], failures}' "$1")"
 }
@@ -119,7 +125,7 @@ test_copied_activation_is_inert_in_another_process() {
   local foreign=$! out="$CASE/out.json"
   v2_track "$foreign"
   v2_tui "$CASE" "$(spec "$(jq -nc --argjson p "$foreign" '{foreignOwnerPid: $p, steps: [{do: "sleep", ms: 1500}, {do: "registration"}]}')")" "$out"
-  jq -e '.setup | startswith("threw")' "$out" >/dev/null || fail "an activation for another process was accepted: $(jq -c .setup "$out")"
+  refused_with "$out" "not for this exact TUI process" || fail "an activation for another process was accepted: $(jq -c '{setup, failures}' "$out")"
   jq -e '.prompts == [] and .metadataWrites == 0 and .environmentPushes == []' "$out" >/dev/null \
     || fail "a copied activation published or prompted: $(cat "$out")"
   jq -e '.steps[1] | has("error")' "$out" >/dev/null || fail "a copied activation registered a claim"
@@ -134,7 +140,7 @@ test_subdirectory_root_never_owns_or_drives_the_lead() {
   v2_session "$CASE" ses_sub "$V2_CODE_ROOT/.opencode"
   local out="$CASE/out-sub.json" lead="$CASE/out-lead.json" steps
   v2_tui "$CASE" "$(spec '{"steps":[{"do":"sleep","ms":1000},{"do":"registration"}]}' ses_sub)" "$out" sub-spec.json
-  jq -e '.setup | test("not this exact root")' "$out" >/dev/null || fail "a subdirectory root was activated as the lead: $(jq -c .setup "$out")"
+  refused_with "$out" "not this exact root" || fail "a subdirectory root was activated as the lead: $(jq -c '{setup, failures}' "$out")"
   jq -e '.prompts == [] and .metadataWrites == 0' "$out" >/dev/null || fail "the refused subdirectory activation published or prompted"
   # The real owner ignores the subdirectory session's events: no reconcile, no prompt.
   steps=$(jq -nc --argjson a "$(owned_and_armed "$(lock_step)")" \
@@ -418,6 +424,28 @@ test_owner_exit_then_next_owner_represents_the_wake() {
   pass "tui: owner exit retires supervision and keeps the wake durable; the next explicit owner re-presents it once under its original id and text"
 }
 
+# D2: an owner process that exits without its asynchronous disposer still
+# retires its claim and leaves no owned watcher running. Positive control in
+# the same run: the watcher was live before the exit.
+test_abrupt_owner_exit_retires_and_stops_the_watcher() {
+  v2_require_native abrupt-exit || return $?
+  tui_case abrupt-exit 1
+  local out="$CASE/out.json" steps state="$HOME_DIR/state" wpid lifecycle _
+  steps=$(jq -nc --argjson a "$(owned_and_armed "$(lock_step)")" --arg s "$state" '$a + [{do: "shell", command: ("cat " + $s + "/.watch.lock/pid")}, {do: "exit"}]')
+  v2_tui "$CASE" "$(spec "$(jq -nc --argjson s "$steps" '{steps: $s}')")" "$out"
+  step_ok "$out" 3 "positive control: the lead did not arm before exiting"
+  wpid=$(jq -r '.steps[4].stdout | gsub("\\s"; "")' "$out")
+  [[ "$wpid" =~ ^[0-9]+$ ]] || fail "fixture: no live watcher pid before the exit: $(jq -c '.steps[4]' "$out")"
+  for _ in $(seq 1 50); do
+    kill -0 "$wpid" 2>/dev/null || break
+    sleep 0.2
+  done
+  ! kill -0 "$wpid" 2>/dev/null || fail "the owned watcher $wpid survived an abrupt owner exit"
+  lifecycle=$("$V2_NODE_BIN" "$V2_CODE_ROOT/bin/fm-opencode-v2-owner.mjs" read ses_lead | jq -r .lifecycle)
+  [ "$lifecycle" = retired ] || fail "an abrupt owner exit left the registration $lifecycle"
+  pass "tui: an owner that exits without its disposer retires its claim and its watcher stops"
+}
+
 # Two homes on one service: a durable wake in home B reaches only lead B, and
 # lead A ignores B's session events.
 test_two_homes_route_wakes_to_their_own_lead() {
@@ -548,6 +576,7 @@ v2_run_cases \
   test_lost_receipt_admits_once_without_failure \
   test_rejected_admissions_retry_one_id \
   test_owner_exit_then_next_owner_represents_the_wake \
+  test_abrupt_owner_exit_retires_and_stops_the_watcher \
   test_two_homes_route_wakes_to_their_own_lead \
   test_pending_admission_retires_after_real_drain_and_ack \
   test_worker_child_event_isolation

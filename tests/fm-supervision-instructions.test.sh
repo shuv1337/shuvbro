@@ -5,12 +5,6 @@ set -u
 # shellcheck source=tests/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
-# Native V2 isolation: the shared primary-scope predicate consults the V2 owner
-# helper whenever a session id is inherited, so strip ambient native identity
-# and pin a token-only registry namespace for anything that still reaches it.
-unset OPENCODE_SESSION_ID FM_V2_ACTIVATION
-export FM_V2_REGISTRY_NAMESPACE="v2si$$"
-
 TMP_ROOT=$(fm_test_tmproot fm-supervision-instructions)
 RENDER="$ROOT/bin/fm-supervision-instructions.sh"
 unset OPENCODE_SESSION_ID FM_V2_ACTIVATION

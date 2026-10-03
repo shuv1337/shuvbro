@@ -75,22 +75,49 @@ test_shell_without_session_identity_never_locks() {
   pass "ownership: a service shell without a session id never locks; the lead then locks for its owner, never the service pid"
 }
 
-# The helper's native shell-identity proof calls `shuvcode api`. Inside these
-# fixtures that must resolve to the stand-in's own transport (its pid and the
-# shells it spawned), never to the installed CLI or the operator's service.
+# The helper's native shell-identity proof calls `shuvcode debug paths` and
+# `shuvcode api --server`. Inside these fixtures that must resolve to the
+# fixture CLI, which reaches the stand-in only through its managed endpoint
+# registration and credential, never the installed CLI or operator service.
 test_fixture_cli_reaches_only_the_stand_in() {
   v2_require_native fixture-cli || return $?
   registered fixture-cli
-  local out
-  out=$(v2_shell ses_lead 'command -v shuvcode; shuvcode api server.info; shuvcode api shell.list; shuvcode serve --service; echo "serve-rc=$?"')
-  printf '%s' "$out" | jq -e --arg sock "$V2_SOCKET" '.stdout | split("\n")[0] | startswith($sock + ".bin-")' >/dev/null \
-    || fail "model shells do not resolve shuvcode to the stand-in transport: $out"
-  printf '%s' "$out" | jq -e --argjson pid "$V2_SERVICE_PID" '.stdout | split("\n")[1] | fromjson | .pid == $pid' >/dev/null \
-    || fail "shuvcode api server.info did not report the stand-in service: $out"
-  printf '%s' "$out" | jq -e '.stdout | split("\n")[2] | fromjson | .data | map(select(.metadata.sessionID == "ses_lead" and .status == "running")) | length == 1' >/dev/null \
-    || fail "shuvcode api shell.list did not report exactly this running lead shell: $out"
-  printf '%s' "$out" | jq -e '.stdout | test("serve-rc=2")' >/dev/null || fail "the stand-in transport accepted a non-api command: $out"
-  pass "ownership: model shells reach only the stand-in's native transport, which reports its own pid and this exact running shell"
+  local out lines
+  # shellcheck disable=SC2016 # expanded by the lead model shell
+  out=$(v2_shell ses_lead 'command -v shuvcode; shuvcode debug paths
+    pw=$(jq -r .password "$V2_NATIVE_STATE/service.json"); url=$(jq -r .url "$V2_NATIVE_STATE/service.json")
+    OPENCODE_PASSWORD=$pw shuvcode api --server "$url" server.info
+    OPENCODE_PASSWORD=$pw shuvcode api --server "$url" shell.list --param "location[directory]=$PWD"
+    OPENCODE_PASSWORD=wrong shuvcode api --server "$url" server.info >/dev/null 2>&1; echo "badpw-rc=$?"
+    OPENCODE_PASSWORD=$pw shuvcode api --server http://127.0.0.1:1 server.info >/dev/null 2>&1; echo "badurl-rc=$?"
+    OPENCODE_PASSWORD=$pw shuvcode api server.info >/dev/null 2>&1; echo "noserver-rc=$?"
+    shuvcode serve --service >/dev/null 2>&1; echo "serve-rc=$?"' "$(jq -nc --arg p "$PATH" --arg n "$V2_NATIVE_STATE" '{PATH: $p, V2_NATIVE_STATE: $n}')")
+  lines=$(printf '%s' "$out" | jq -c '.stdout | split("\n")')
+  printf '%s' "$lines" | jq -e --arg b "$V2_NATIVE_BIN/shuvcode" --arg n "$V2_NATIVE_STATE" '.[0] == $b and .[1] == ("state " + $n)' >/dev/null \
+    || fail "model shells do not resolve shuvcode to the fixture CLI and its private native state: $out"
+  printf '%s' "$lines" | jq -e --argjson pid "$V2_SERVICE_PID" '.[2] | fromjson | .pid == $pid' >/dev/null \
+    || fail "authenticated server.info at the registered endpoint did not report the stand-in service: $out"
+  printf '%s' "$lines" | jq -e --arg root "$V2_CODE_ROOT" '.[3] | fromjson | .data | map(select(.metadata.sessionID == "ses_lead" and .status == "running" and .cwd == $root and (.command | type) == "string")) | length == 1' >/dev/null \
+    || fail "shell.list did not report exactly this running lead shell with its cwd and command: $out"
+  printf '%s' "$lines" | jq -e '.[4] == "badpw-rc=1" and .[5] == "badurl-rc=1" and .[6] == "noserver-rc=2" and .[7] == "serve-rc=2"' >/dev/null \
+    || fail "the fixture CLI accepted a wrong credential, unknown endpoint, implicit default service or non-api command: $out"
+  pass "ownership: model shells reach the stand-in only through its registered endpoint and credential; anything else is refused"
+}
+
+# N2: the service-ancestry proof also binds the running shell's cwd to the
+# frozen root. The same lead session's shell in another directory is refused;
+# the same command from the root (positive control) acquires.
+test_lead_shell_outside_frozen_root_is_refused() {
+  v2_require_native shell-cwd || return $?
+  registered shell-cwd
+  local elsewhere="$CASE/elsewhere" out
+  mkdir -p "$elsewhere"
+  out=$(v2_shell ses_lead "node '$V2_CODE_ROOT/bin/fm-opencode-v2-owner.mjs' helper \"\$FM_STATE_OVERRIDE\" acquire" "$(v2_lead_env "$HOME_DIR")" "$elsewhere")
+  printf '%s' "$out" | jq -e '.code != 0 and (.stderr | test("PID/cwd"))' >/dev/null \
+    || fail "a lead shell outside the frozen root passed the helper proof: $out"
+  out=$(v2_shell ses_lead "node '$V2_CODE_ROOT/bin/fm-opencode-v2-owner.mjs' helper \"\$FM_STATE_OVERRIDE\" acquire" "$(v2_lead_env "$HOME_DIR")")
+  printf '%s' "$out" | jq -e '.code == 0' >/dev/null || fail "positive control: the lead shell at the frozen root was refused: $out"
+  pass "ownership: the lead session's shell outside the frozen root is refused by the shell-identity proof; at the root it passes"
 }
 
 # M2: a non-lead shell on the same service that exports the lead's session id
@@ -166,6 +193,7 @@ test_second_claim_on_live_session_is_refused() {
 v2_run_cases \
   test_registered_lead_shell_acquires_for_owner \
   test_fixture_cli_reaches_only_the_stand_in \
+  test_lead_shell_outside_frozen_root_is_refused \
   test_unregistered_session_is_refused \
   test_shell_without_session_identity_never_locks \
   test_spoofed_session_id_gains_no_authority \
