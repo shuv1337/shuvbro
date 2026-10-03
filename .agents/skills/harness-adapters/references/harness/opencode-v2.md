@@ -40,7 +40,7 @@ A project plugin cannot import shuvcode's own `Tool.Error` class; shuvcode match
 Before dispatch publishes task runtime state or acquires an isolated copy, `bin/fm-opencode-v2-capability.mjs` checks the qualified installed version, native launch flags and pinned Effect guard runtime.
 Unsupported builds or missing runtime capabilities refuse with installation/qualification instructions; the probe never discovers or starts a managed service.
 Ship and scout launches use `bin/fm-opencode-v2-launch.sh` for both default and explicit models.
-Its header owns the shared-service creation, exact recorded session, unattended permissions and queued admission mechanics.
+Its header owns the shared-service creation, exact recorded session, `--auto` attachment and queued admission mechanics.
 The root command accepts only `--standalone`, `--server`, `--auto`, `--continue`, `--session`, `--prompt`, and a directory.
 It rejects `--model` and `--effort` with usage text and exit 1.
 A requested model is validated against the same shared service catalog before creating its worker; an unspecified variant resolves to native `default`.
@@ -62,4 +62,4 @@ After restart, cleanup requires exact-session successor cancellation or the [pro
 Unproven successors remain visibly unproven; confirmed cancellation or settlement records the successor binding.
 `--force` discard without proof accepts that a later service start may resume work in a removed isolated copy; it never reports confirmed cancellation.
 Portable regressions and isolated installed-fork probes cover these lifecycle paths; combined shared-service/Herdr qualification remains pending.
-Unattended wildcard permission is scoped to the recorded worker session and is inherited by its native child sessions, never a global service policy.
+The worker session is created without a permission override, so project deny rules still apply; `--auto` on its TUI is the only unattended-approval mechanism.
