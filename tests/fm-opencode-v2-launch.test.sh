@@ -57,12 +57,14 @@ case "$operation" in
   session.environment)
     [ "$param" = sessionID=ses_worker_exact ] || exit 95
     jq -e '.variables.TEST_WORK!=null and .variables.FM_V2_ACTIVATION==null and .variables.OPENCODE_SESSION_ID==null and .variables.OPENCODE_PASSWORD==null and .variables.OPENCODE_SERVER_PASSWORD==null' <<< "$body" >/dev/null
-    echo environment >> "$TEST_LOG" ;;
+    echo environment >> "$TEST_LOG"
+    case "${TEST_META_RACE:-}" in remove) rm -f "${TEST_RECORD%.opencode-v2-session.json}.meta" ;; replace) echo replacement > "${TEST_RECORD%.opencode-v2-session.json}.meta" ;; esac ;;
   *) exit 96 ;;
 esac
 SH
 chmod +x "$TMP_ROOT/bin/shuvcode"
-export TEST_LOG="$TMP_ROOT/order" TEST_CREATE="$TMP_ROOT/create.json" TEST_RECORD="$TMP_ROOT/session.json" TEST_WORK="$TMP_ROOT/work"
+export TEST_LOG="$TMP_ROOT/order" TEST_CREATE="$TMP_ROOT/create.json" TEST_RECORD="$TMP_ROOT/worker.opencode-v2-session.json" TEST_WORK="$TMP_ROOT/work"
+printf '%s\n' task-fixture > "$TMP_ROOT/worker.meta"
 export PATH="$TMP_ROOT/bin:$PATH"
 export TEST_NATIVE_STATE="$TMP_ROOT/native-state" TEST_SERVICE_PID=$$
 mkdir -p "$TEST_NATIVE_STATE"
@@ -83,6 +85,19 @@ for model in default explicit variant configured configured-object; do
   jq -e --arg variant "$expected" '.sessionID=="ses_worker_exact" and .model.variant==$variant' "$TEST_RECORD" >/dev/null || fail "incorrect $model variant record"
   pass "$model worker shares service, records exact session/model, strips activation and admits before attachment"
 done
+
+for race in remove replace; do
+  printf '%s\n' task-fixture > "$TMP_ROOT/worker.meta"
+  : > "$TEST_LOG"
+  if (cd "$TEST_WORK" && TEST_META_RACE="$race" "$ROOT/bin/fm-opencode-v2-launch.sh" --model fixture/test-model --prompt 'exact worker brief' --session-record "$TEST_RECORD") 2> "$TMP_ROOT/meta-race-$race"; then
+    fail "$race metadata race admitted a worker prompt"
+  fi
+  assert_contains "$(cat "$TMP_ROOT/meta-race-$race")" 'metadata disappeared or changed' "$race metadata race did not refuse"
+  assert_not_contains "$(cat "$TEST_LOG")" admitted "$race metadata race admitted execution"
+  assert_not_contains "$(cat "$TEST_LOG")" attached "$race metadata race attached the worker"
+  pass "$race task metadata before prompt admission refuses execution"
+done
+printf '%s\n' task-fixture > "$TMP_ROOT/worker.meta"
 unset TEST_CONFIGURED TEST_CONFIGURED_OBJECT
 : > "$TEST_LOG"
 export TEST_CONFIGURED='fixture/unavailable'

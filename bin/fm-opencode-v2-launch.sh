@@ -21,6 +21,10 @@ done
 [ "$have_prompt" -eq 1 ] && [ -n "$record" ] || exit 2
 unset FM_V2_ACTIVATION OPENCODE_SESSION_ID
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+case "$record" in *.opencode-v2-session.json) ;; *) echo 'error: native worker requires a task-bound session sidecar' >&2; exit 1 ;; esac
+meta=${record%.opencode-v2-session.json}.meta
+[ -f "$meta" ] && [ ! -L "$meta" ] || { echo 'error: native worker task metadata is absent or unsafe' >&2; exit 1; }
+meta_before=$(cat "$meta")
 service=$(node "$SCRIPT_DIR/fm-opencode-v2-owner.mjs" service)
 # Every API read/write targets the verified frozen endpoint. No default service
 # discovery/auto-start is allowed after registration, even if it disappears.
@@ -84,6 +88,8 @@ mv "$temporary" "$record"
 worker_env=$(node -e 'const variables={...process.env}; for(const key of ["FM_V2_ACTIVATION","OPENCODE_SESSION_ID","OPENCODE_PASSWORD","OPENCODE_SERVER_PASSWORD"]) delete variables[key]; console.log(JSON.stringify({variables}))')
 api session.environment --param "sessionID=$session" --data "$worker_env" >/dev/null
 prompt_body=$(jq -cn --arg session "$session" --arg text "$prompt" '{sessionID:$session,text:$text,delivery:"queue"}')
+[ -f "$meta" ] && [ ! -L "$meta" ] && [ "$(cat "$meta")" = "$meta_before" ] \
+  || { echo 'error: native worker task metadata disappeared or changed before prompt admission' >&2; exit 1; }
 api session.prompt --param "sessionID=$session" --param "location[directory]=$directory" --data "$prompt_body" >/dev/null
 rm -f "$catalog"
 trap - EXIT

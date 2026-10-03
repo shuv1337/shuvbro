@@ -867,8 +867,12 @@ do_relaunch() {
 case "$VERB" in
   interrupt)
     if [ "$RECORDED_HARNESS" = opencode-v2 ]; then
-      fm_control_v2_interrupt "$STATE" "$ID" "$WT" >/dev/null || exit 1
-      echo "interrupt-delivered $ID harness=opencode-v2 backend=$BACKEND verified=native-session cancel=confirmed"
+      result=$(fm_control_v2_interrupt "$STATE" "$ID" "$WT") || exit 1
+      if jq -e '.recorded == false' <<< "$result" >/dev/null; then
+        echo "interrupt-not-needed $ID harness=opencode-v2 backend=$BACKEND verified=no-recorded-session cancel=not-needed"
+      else
+        echo "interrupt-delivered $ID harness=opencode-v2 backend=$BACKEND verified=native-session cancel=confirmed"
+      fi
       exit 0
     fi
     state=$(agent_state)
