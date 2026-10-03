@@ -30,6 +30,10 @@ exit 0
 SH
 chmod +x "$BIN/fmfakeharness"
 
+# tests/lib.sh resolves node when sourced, so the minimal PATH keeps node's own
+# directory (CI installs it outside /usr/bin) without adding any harness.
+ESSENTIAL_PATH="$BIN:$(dirname "$(node -p process.execPath)"):/usr/bin:/bin"
+
 clean_env() {
   env -i \
     HOME="${HOME:-$TMP_ROOT}" \
@@ -60,13 +64,13 @@ guard() {
 }
 
 # run_guard <path> [env assignment ...]: execute a guard on a PATH that carries
-# only the fakebin plus the system essentials, capturing stdout and stderr.
+# only the fakebin, node, and the system essentials, capturing stdout and stderr.
 run_guard() {
   local path=$1
   shift
   local out rc
   set +e
-  out=$(clean_env "$@" PATH="$BIN:/usr/bin:/bin" "$path" 2>&1)
+  out=$(clean_env "$@" PATH="$ESSENTIAL_PATH" "$path" 2>&1)
   rc=$?
   set -e
   printf '%s\n' "$rc"
@@ -171,7 +175,7 @@ test_gate_lets_a_guard_drive_the_real_fleet_scripts_under_a_gate_marker() {
   } > "$path"
   chmod +x "$path"
   set +e
-  out=$(clean_env NO_MISTAKES_GATE=1 PATH="$BIN:/usr/bin:/bin" "$path" 2>&1)
+  out=$(clean_env NO_MISTAKES_GATE=1 PATH="$ESSENTIAL_PATH" "$path" 2>&1)
   rc=$?
   set -e
   expect_code 0 "$rc" "a guard opened with the shared gate must not be refused"
