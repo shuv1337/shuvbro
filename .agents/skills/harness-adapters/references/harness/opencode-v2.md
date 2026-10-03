@@ -1,6 +1,6 @@
 # Shuvcode (OpenCode V2 fork)
 
-Verified on 2026-09-10 with shuvcode v2.0.0-alpha-20 on Linux.
+Native shared-service qualification is pending; [runtime verification](../../../../../docs/verification/runtime-backends.md#native-shared-service-qualification-status) owns the actual isolated v2.0.22-shuv.1 evidence and remaining live matrix.
 This is a fork of OpenCode V2 distributed as `shuvcode`, never sloppy-matched as V1 `opencode` and never claimed as the upstream `opencode2` beta.
 
 ## Identity
@@ -27,7 +27,7 @@ Process detection is structural; it never executes a stranger binary during an a
 
 ## Guard runtime
 
-Verified on 2026-09-18 with shuvcode v2.0.3-shuv.4 on Linux.
+The historical private-server observations are not qualification of the native shared-service route.
 Shuvcode resolves a project plugin's bare imports natively and shares none of its own modules, so `import("effect")` from `.opencode/plugins/` fails until the dependency pinned in `.opencode/plugins/package.json` is installed.
 Run `npm ci --prefix .opencode/plugins` in the primary checkout before starting a shuvcode lead.
 A shuvcode primary whose checkout lacks that install gets a `MISSING: opencode-v2-runtime` line from `../../../bin/fm-bootstrap.sh`.
@@ -48,9 +48,12 @@ Firstmate maps its supported effort levels onto the requested model's variant.
 An effort with no `provider/model` stays in task metadata and leaves the default root launch unchanged.
 Launch admits the brief through the native API before attaching its exact `--auto` TUI.
 `bin/fm-spawn.sh` accepts current-generation exact-worker execution events as submission proof, including a short turn that already finished.
-`tests/fm-opencode-v2-worker-live-e2e.test.sh` refreshes the model, permission, hook and persistent-steering evidence recorded in `docs/verification/runtime-backends.md`.
+`tests/fm-opencode-v2-worker-live-e2e.test.sh` is an opt-in isolated-XDG/shared-service worker probe, pending a new live run; its former private-server result is not evidence for the current launcher.
 Under `--auto` the composer footer reads `Build auto · <model> · <effort>` with the `auto` word and `·` separators in muted truecolor, so the classifier recognises that footer from the plain row rather than the ghost-stripped one.
 The worker wiring writes `.opencode/plugins/package.json` only when the project has none, so a project that tracks that file keeps its own copy.
 Secondmate launches are refused until that role is qualified.
 Busy state comes from the Firstmate-owned worker plugin's `session.execution.started` (busy) and its `session.execution.succeeded`, `failed`, or `interrupted` terminal event (idle), latched to the worker's own root session; shuvcode publishes no `session.status` or `session.idle` event to plugins.
-Exit command, interrupt, and resume for this adapter have no verified facts in this file yet; verify them before a control plan relies on them.
+`bin/fm-opencode-v2-session.mjs` reconciles the exact recorded worker through native `session.get` and `session.active`, and interrupts that exact session before pane lifecycle actions or explicitly approved discard.
+Teardown refuses active or unverifiable native execution; a dead pane is not evidence that the worker stopped.
+These native lifecycle changes have portable fixture coverage; actual shared-service cancellation/cleanup qualification remains pending.
+Unattended wildcard permission is scoped to the recorded worker session and is inherited by its native child sessions, never a global service policy.
