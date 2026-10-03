@@ -2709,6 +2709,9 @@ validate_firstmate_home_children_removal() {
     validate_pr_poll_cleanup "$sub_state" "$child_id" || return 1
     child_wt=$(meta_value "$child_meta" worktree)
     child_kind=$(meta_value "$child_meta" kind)
+    if [ "$(meta_value "$child_meta" harness)" = opencode-v2 ]; then
+      node "$SCRIPT_DIR/fm-opencode-v2-session.mjs" discard "$sub_state/$child_id.opencode-v2-session.json" "$child_wt" >/dev/null || return 1
+    fi
     [ -n "$child_kind" ] || child_kind=ship
     child_backend=$(fm_backend_of_meta "$child_meta")
     if [ "$child_kind" = secondmate ]; then
@@ -3231,6 +3234,9 @@ if [ "$BACKEND" = orca ] && [ "$KIND" != secondmate ]; then
       "$WT/.fm-grok-turnend" "$WT/.fm-kimi-turnend"
   fi
   [ -z "$T_ORCA" ] || fm_backend_kill "$BACKEND" "$T" "$(meta_value "$META" zellij_tab_id)" "fm-$ID" 2>/dev/null || true
+  if [ "$(fm_meta_get "$META" harness)" = opencode-v2 ]; then
+    node "$SCRIPT_DIR/fm-opencode-v2-session.mjs" "$v2_action" "$STATE/$ID.opencode-v2-session.json" "$WT" >/dev/null || exit 1
+  fi
   fm_backend_remove_worktree "$BACKEND" "$ORCA_WORKTREE_ID"
 elif [ -d "$WT" ] && [ "$KIND" != secondmate ]; then
   retire_native_worker_package "$WT" "$STATE" "$ID"
