@@ -9,6 +9,26 @@ import { existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 
 const slot = Symbol.for("firstmate.native.v2.tui.coordinator");
+
+export function createFailureNotice(report, surface, { now = () => performance.now(), bound = 30000 } = {}) {
+  let episode;
+  function tick() {
+    if (!episode || episode.notified || now() - episode.since < bound) return;
+    episode.notified = true;
+    surface(episode.reason);
+  }
+  return {
+    failure(reason, { permanent = false } = {}) {
+      report(reason);
+      episode ||= { since: now(), notified: false };
+      episode.reason = reason;
+      if (permanent && !episode.notified) { episode.notified = true; surface(reason); }
+      else tick();
+    },
+    recovered() { episode = undefined; },
+    tick,
+  };
+}
 const FAILURE_PROMPT_LIMIT = 8;
 
 export async function supervisionNeeded(record, env = helperEnvironment(record)) {
@@ -143,13 +163,15 @@ export default { id: "firstmate.native.v2", async setup(ctx) {
   let reconcileInFlight;
   let lastFailure = "";
   const surfaced = new Set();
-  const failure = reason => {
+   const notices = createFailureNotice(reason => {
     if (stopped) return;
     if (lastFailure === reason) return;
     lastFailure = reason;
     console.error(reason);
-    const text = String(reason).slice(0, 4000);
     writePrivate(`${record.state}/.opencode-v2-failure.json`, { version: 1, sessionID: record.sessionID, claimID: record.claimID, reason: String(reason).slice(0, 12000) });
+   }, reason => {
+    if (stopped) return;
+    const text = String(reason).slice(0, 4000);
     if (surfaced.has(text) || surfaced.size >= FAILURE_PROMPT_LIMIT) return;
     surfaced.add(text);
     try { ctx.ui.toast?.show({ variant: "error", message: "Firstmate watcher failure: " + text }); } catch (error) { console.error("V2 failure toast: " + error.message); }
@@ -157,7 +179,9 @@ export default { id: "firstmate.native.v2", async setup(ctx) {
       const prompt = await encodeFirstmateOperationalInput(record.root, "watcher", `WATCHER FAILURE - native V2 supervision reported a failure; drain queued wakes with bin/fm-wake-drain.sh, inspect this reason, and probe recovery manually with bin/fm-watch-arm.sh if continuity is not restored.\n\n${text}`);
       await journal.deliver(journal.prepare(prompt, "failure:" + record.claimID + ":" + createHash("sha256").update(text).digest("hex")));
     })().catch(error => console.error("V2 failure prompt: " + error.message));
-  };
+   });
+   const failure = (reason, detail) => { if (!stopped) notices.failure(reason, detail); };
+   const failureFromError = error => failure(error.message, { permanent: error.nonRecoverable === true });
   const owns = () => {
     try {
       const current = live(readRegistration(record.sessionID));
@@ -181,23 +205,27 @@ export default { id: "firstmate.native.v2", async setup(ctx) {
     reconcileInFlight = (async () => {
       if (!validClaim()) {
         await coordinator.cleanup();
-        throw new Error("V2 owner/service proof is stale; explicitly rebind before continuing");
+        throw Object.assign(new Error("V2 owner/service proof is stale; explicitly rebind before continuing"), { nonRecoverable: true });
       }
       // Stock clients replace the session environment on tab navigation. Only
       // this proven immutable TUI refreshes its frozen routing, never observers.
       await ctx.client.session.environment({ sessionID: record.sessionID, variables: helperEnvironment(record) });
       if (!owns()) {
         const status = await ctx.client.rpc(bindingRPC).bindingStatus({ sessionID: record.sessionID, claimID: record.claimID }, { location: { directory: record.root } });
-        if (status.status !== "valid") throw new Error("V2 exact lead registration is stale; explicitly rebind before continuing");
+        if (status.status !== "valid") throw Object.assign(new Error("V2 exact lead registration is stale; explicitly rebind before continuing"), { nonRecoverable: true });
         for (const pending of journal.pending()) {
           if (pending.kind === "startup:" + record.claimID) await journal.deliver(pending);
         }
+        failure("V2 supervision ownership is unavailable; automatic reconciliation is continuing");
         return;
       }
       const current = readRegistration(record.sessionID);
       if (current.lifecycle !== "active") publish("claim", { ...current, lifecycle: "active" });
-      await coordinator.ensureArmed(record.sessionID);
+      const armStatus = await coordinator.ensureArmed(record.sessionID);
       await coordinator.resumePending(record.sessionID);
+      const pending = journal.pending().filter(value => !value.kind.startsWith("failure:"));
+      if (pending.length) failure("V2 retained admission remains undelivered; automatic recovery is continuing");
+      else if (["armed", "existing", "not-needed"].includes(armStatus)) notices.recovered();
     })();
     try { await reconcileInFlight; } finally { reconcileInFlight = null; }
   }
@@ -208,10 +236,10 @@ export default { id: "firstmate.native.v2", async setup(ctx) {
     if (nudge.code !== 0) throw new Error("V2 startup nudge failed");
     if (nudge.stdout.trim()) await journal.deliver(journal.prepare(nudge.stdout.trim(), "startup:" + record.claimID));
     await reconcile();
-  } catch (error) { failure(error.message); }
+  } catch (error) { failureFromError(error); }
 
    if (stopped) return cleanup;
-   timer = setInterval(() => { void reconcile().catch(error => failure(error.message)); }, 2000);
+   timer = setInterval(() => { void reconcile().catch(failureFromError).finally(() => notices.tick()); }, 2000);
   timer.unref();
   void (async () => {
     try {

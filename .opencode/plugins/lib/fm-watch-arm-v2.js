@@ -178,8 +178,8 @@ export function createWatchArmCoordinator(paths, deliverPrompt, options = {}) {
     await sendPrompt(sessionID, wakePrompt(message));
   }
 
-  function surfaceFailure(sessionID, reason) {
-    if (options.failure) { options.failure(reason); return; }
+  function surfaceFailure(sessionID, reason, detail) {
+    if (options.failure) { options.failure(reason, detail); return; }
     void sendPrompt(sessionID, wakePrompt(reason)).catch(() => {});
   }
 
@@ -238,7 +238,7 @@ export function createWatchArmCoordinator(paths, deliverPrompt, options = {}) {
     state.retryFailures += 1;
     if (state.retryFailures > REARM_RETRY_LIMIT) {
       setArmStatus("failed");
-      surfaceFailure(sessionID, `watcher: FAILED - OpenCode could not restore watcher continuity after ${REARM_RETRY_LIMIT} retries\n${reason}`);
+      surfaceFailure(sessionID, `watcher: FAILED - OpenCode could not restore watcher continuity after ${REARM_RETRY_LIMIT} retries\n${reason}`, { permanent: true });
       return;
     }
     setArmStatus("retrying");
@@ -379,9 +379,11 @@ export function createWatchArmCoordinator(paths, deliverPrompt, options = {}) {
               if (result.preparationError) {
                 // Journal failure must not destroy restored continuity or mint
                 // a fresh downtime generation on every reconciliation tick.
-                throw new Error(result.preparationError);
+                throw Object.assign(new Error(result.preparationError), {
+                  nonRecoverable: !result.preparationError.includes("neither durable wake rows nor recovery generation"),
+                });
               }
-              if (options.admission && result.failure) throw new Error(result.failure);
+              if (options.admission && result.failure) throw Object.assign(new Error(result.failure), { nonRecoverable: true });
               await deliverActionableWake(sessionID, message, result.recovery, result.saved);
             } finally {
               if (state.restorationInFlight === restoration) state.restorationInFlight = null;
@@ -392,6 +394,7 @@ export function createWatchArmCoordinator(paths, deliverPrompt, options = {}) {
             surfaceFailure(
               sessionID,
               `watcher: FAILED - OpenCode could not deliver an actionable wake\n${String(error?.message ?? error)}`,
+              { permanent: error.nonRecoverable === true },
             );
           });
         return;
@@ -465,7 +468,7 @@ export function createWatchArmCoordinator(paths, deliverPrompt, options = {}) {
       const pending = options.admission.pending().filter(value => value.kind === "wake");
       if (!pending.length) return;
       const result = await restoreAfterActionableClose(sessionID, "");
-      if (result.failure) throw new Error(result.failure);
+      if (result.failure) throw Object.assign(new Error(result.failure), { nonRecoverable: true });
       for (const saved of pending) {
         if (state.stopped) return;
         await deliverActionableWake(sessionID, "", result.recovery, saved);

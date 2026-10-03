@@ -25,7 +25,9 @@ When this session owns supervision and away mode is not active:
    An exhausted admission remains pending and produces a bounded diagnostic, not an unguarded recovery-marker reopen.
    Subsequent attempts continue with capped backoff while ownership remains valid; confirmed canonical queue acknowledgement retires the obsolete transport obligation without reporting it as admitted.
 6. Ordinary wake: do not ask the model to re-arm because continuity is plugin-owned.
-7. Unexpected child close enters bounded exponential retry; each distinct failure is shown as a TUI toast, queued once to the exact lead session as a bounded operational prompt, and kept in the home-owned adapter diagnostic.
+7. Unexpected child close enters bounded exponential retry; transient failures immediately update the private diagnostic but do not request manual repair.
+   A failure or retained admission unresolved for 30 seconds surfaces a bounded, deduplicated toast and operational prompt on the next two-second reconciliation tick; retry exhaustion, invalid ownership/service proof or inability to journal a wake surfaces immediately.
+   Verified recovery clears the notice episode without clearing the diagnostic or consuming canonical wake rows.
    An interrupted model turn alone never schedules continuation; a later durable fleet wake may resume supervision.
 8. Failure or missing cycle only: if the plugin reports a watcher failure, drain queued wakes, inspect the failure text, and use `bin/fm-watch-arm.sh` manually only as a short recovery probe.
 9. Never use shell `&` for watcher supervision.

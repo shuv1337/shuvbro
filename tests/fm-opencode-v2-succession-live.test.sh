@@ -199,7 +199,7 @@ http.createServer((req, res) => {
     const tools = (parsed.tools || []).map((t) => t.function?.name);
     let cmd = null;
     if (!lastIsTool && tools.includes("shell")) {
-      if (/^\u2063?FIRSTMATE_OP: v1 watcher:/.test(last)) cmd = `bash ${handle}`;
+      if (/^\u2063?FIRSTMATE_OP: v1 watcher:.*WATCHER FIRED/.test(last)) cmd = `bash ${handle}`;
       else { const m = /^RUN: ([^\n]+)/.exec(last); if (m) cmd = m[1]; }
     }
     appendFileSync(log, JSON.stringify({ lastIsTool, cmd }) + "\n");
@@ -254,7 +254,8 @@ user_messages() {
     | jq -r '[.data.messages[]? | select(.type == "user")] | .[] | [.id, ((.text // "") | gsub("\u2063"; "") | split("\n")[0])] | @tsv'
 }
 # Exact IDs of the watcher wake messages delivered to a session.
-wake_ids() { user_messages "$1" | awk -F'\t' '$2 ~ /^FIRSTMATE_OP: v1 watcher:/ {print $1}'; }
+wake_ids() { user_messages "$1" | awk -F'\t' '$2 ~ /^FIRSTMATE_OP: v1 watcher:.*WATCHER FIRED/ {print $1}'; }
+failure_ids() { user_messages "$1" | awk -F'\t' '$2 ~ /^FIRSTMATE_OP: v1 watcher:.*WATCHER FAILURE/ {print $1}'; }
 guard_ids() { user_messages "$1" | awk -F'\t' '$2 ~ /^FIRSTMATE_OP: v1 turn-end-guard:/ {print $1}'; }
 nudge_ids() { user_messages "$1" | awk -F'\t' '$2 ~ /^FIRSTMATE_OP: v1 session-start:/ {print $1}'; }
 count() { grep -c . || true; }
@@ -319,26 +320,27 @@ session_start() {  # canonical session start in the lead; ready when .lock is th
   wait_until 120 lock_is_tui
 }
 # Inject one status change and wait for one canonical ack. Prints
-# "<handled> <new-wake-ids> <journaled-of-new> <new-guard> <watchers> <beacon> <rows>".
+# "<handled> <new-wake-ids> <journaled-of-new> <new-guard> <watchers> <beacon> <rows> <new-failure-prompts>".
 one_wake() {  # <label> [tries]
-  local a0 w0 g0 new journaled=0 id ok=0 rows
+  local a0 w0 g0 f0 new journaled=0 id ok=0 rows
   a0=$(acks); w0=$(wake_ids "$LEAD"); g0=$(guard_ids "$LEAD" | count)
+  f0=$(failure_ids "$LEAD" | count)
   printf 'done: %s\n' "$1" >> "$PRIMARY/state/lab.status"
   wait_until "${2:-120}" acks_above "$a0" && ok=1
   wait_until 20 one_supervisor || true
   new=$(comm -13 <(printf '%s\n' "$w0" | sort) <(wake_ids "$LEAD" | sort) | grep . || true)
   for id in $new; do journal_ids | grep -qx "$id" && journaled=$((journaled + 1)); done
   rows=$(queue_rows)
-  printf '%s %s %s %s %s %s %s\n' "$((ok ? $(acks) - a0 : 0))" "$(printf '%s\n' "$new" | count)" "$journaled" \
-    "$(( $(guard_ids "$LEAD" | count) - g0 ))" "$(watchers)" "$(beacon_age)" "${rows:-0}"
+  printf '%s %s %s %s %s %s %s %s\n' "$((ok ? $(acks) - a0 : 0))" "$(printf '%s\n' "$new" | count)" "$journaled" \
+    "$(( $(guard_ids "$LEAD" | count) - g0 ))" "$(watchers)" "$(beacon_age)" "${rows:-0}" "$(( $(failure_ids "$LEAD" | count) - f0 ))"
 }
 wake_ok() {  # <label> [tries]
-  local out handled ids journaled guard live beacon rows
+  local out handled ids journaled guard live beacon rows failures
   out=$(one_wake "$@")
   printf '%s: %s\n' "$1" "$out" >> "$LAB/cycles.log"
-  read -r handled ids journaled guard live beacon rows <<< "$out"
+  read -r handled ids journaled guard live beacon rows failures <<< "$out"
   [ "$handled" = 1 ] && [ "$ids" = 1 ] && [ "$journaled" = 1 ] && [ "$guard" = 0 ] \
-    && [ "$live" = 1 ] && [ "$beacon" -le 5 ] && [ "$rows" = 0 ]
+    && [ "$live" = 1 ] && [ "$beacon" -le 5 ] && [ "$rows" = 0 ] && [ "$failures" = 0 ]
 }
 
 # --- activation, session start, first arm ---------------------------------------
@@ -373,7 +375,8 @@ steady_ok=1
 for c in $(seq 1 "${FM_V2_SUCC_CYCLES:-10}"); do
   wake_ok "cycle $c" || { live_fail "steady cycle $c: $(tail -1 "$LAB/cycles.log")"; steady_ok=0; }
 done
-[ "$steady_ok" = 1 ] && pass "steady succession: ${FM_V2_SUCC_CYCLES:-10} wakes, each one journaled message ID and one canonical ack, one watcher, fresh beacon, empty queue"
+[ "$(failure_ids "$LEAD" | count)" = 0 ] || live_fail "steady succession emitted WATCHER FAILURE prompts"
+[ "$steady_ok" = 1 ] && pass "steady succession: ${FM_V2_SUCC_CYCLES:-10} wakes, each one journaled message ID and one canonical ack, one watcher, fresh beacon, empty queue, zero failure prompts"
 
 # --- kills mid-idle ---------------------------------------------------------------
 replaced() { [ "$(watch_pid)" != "$1" ] && one_supervisor; }
@@ -424,7 +427,7 @@ for s in "$SUB" "$UNRELATED" "$CHILD"; do prompt "$s" "unrelated work"; done
 others_done() { local s; for s in "$SUB" "$UNRELATED" "$CHILD"; do [ "$(user_messages "$s" | count)" -ge 1 ] || return 1; done; }
 wait_until 40 others_done || live_fail "other sessions never accepted their own prompts (fixture vacuous)"
 sleep 6   # absence window: a takeover would replace the watcher or prompt another session here
-others() { local s n=0; for s in "$SUB" "$UNRELATED" "$CHILD"; do n=$(( n + $(wake_ids "$s" | count) + $(guard_ids "$s" | count) )); done; echo "$n"; }
+others() { local s n=0; for s in "$SUB" "$UNRELATED" "$CHILD"; do n=$(( n + $(wake_ids "$s" | count) + $(failure_ids "$s" | count) + $(guard_ids "$s" | count) )); done; echo "$n"; }
 if [ "$(watch_pid)" = "$before" ] && [ "$(others)" = 0 ] && wake_ok "with other sessions" && [ "$(others)" = 0 ]; then
   pass "subdirectory, unrelated and child sessions neither take over the watcher nor receive wakes"
 else

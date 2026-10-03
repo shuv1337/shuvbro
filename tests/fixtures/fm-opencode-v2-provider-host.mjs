@@ -8,6 +8,7 @@ import { setTimeout as delay } from "node:timers/promises";
 const source = process.env.ROOT, lab = process.env.LAB;
 const owner = await import(pathToFileURL(source + "/bin/fm-opencode-v2-owner.mjs"));
 const tui = (await import(pathToFileURL(source + "/.opencode/plugins/fm-native-v2/tui.js"))).default;
+const { createFailureNotice } = await import(pathToFileURL(source + "/.opencode/plugins/fm-native-v2/tui.js"));
 const { createWatchArmCoordinator } = await import(pathToFileURL(source + "/.opencode/plugins/lib/fm-watch-arm-v2.js"));
 const { createAdmissionJournal } = await import(pathToFileURL(source + "/.opencode/plugins/fm-native-v2/admission.js"));
 const root = lab + "/root", home = lab + "/home", state = home + "/state";
@@ -71,6 +72,10 @@ if [ -f "$state/recovery-mode" ] && [ "$count" = 2 ]; then
   exit 0
 fi
 generation=
+if [ -f "$state/hide-generation" ] && [ "$count" -ge 3 ]; then
+  rm -f "$marker"
+  token=
+fi
 if [ -n "\${FM_WATCH_PREDECESSOR_ARM_PID:-}" ]; then
   case "$token" in
     pending:downtime:*|announced:downtime:*|pending:handling:*|announced:handling:*) generation=\${token##*:} ;;
@@ -95,6 +100,63 @@ process.env.FM_CONFIG_OVERRIDE = paths.config;
 process.env.OPENCODE_SESSION_ID = record.sessionID;
 fs.writeFileSync(state + "/.lock", String(me.pid));
 let provider = false, commands = [], subscribes = 0, environments = 0, unregisters = 0;
+if (process.argv.includes("--notice-transient") || process.argv.includes("--notice-persistent")) {
+  const persistent = process.argv.includes("--notice-persistent"), prompts = [], diagnostics = [];
+  const keepAlive = setInterval(() => {}, 1000);
+  let clock = 0, coordinator, noticeTask;
+  const journal = createAdmissionJournal(paths, record.sessionID, async input => {
+    if (input.text.includes("WATCHER FIRED")) assert.match(read("order"), /confirm fixture-recovery/, "wake admitted before confirmation");
+    prompts.push(input); return { id: input.id };
+  });
+  const { encodeFirstmateOperationalInput } = await import(pathToFileURL(source + "/.opencode/plugins/lib/fm-operational-input.js"));
+  const notices = createFailureNotice(reason => {
+    diagnostics.push(reason);
+    owner.writePrivate(state + "/.opencode-v2-failure.json", { reason });
+  }, reason => {
+    noticeTask = (async () => {
+      const text = await encodeFirstmateOperationalInput(root, "watcher", "WATCHER FAILURE - " + reason);
+      await journal.deliver(journal.prepare(text, "failure:fixture"));
+    })();
+  }, { now: () => clock });
+  try {
+    fs.writeFileSync(state + "/recovery-mode", ""); fs.writeFileSync(state + "/hide-generation", "");
+    fs.writeFileSync(state + "/.wake-queue", "100\t1\tsignal\ttask\tready\n");
+    coordinator = createWatchArmCoordinator(paths, () => { throw new Error("unpersisted prompt"); }, {
+      owns: () => true, needs: () => true, admission: journal, processIdentity: owner.identity, failure: (reason, detail) => notices.failure(reason, detail),
+    });
+    await coordinator.ensureArmed(record.sessionID);
+    assert.ok(Number(read("arm.pid")) > 1 && running(read("arm.pid")), "notice fixture did not start its isolated arm");
+    process.kill(Number(read("arm.pid")), "SIGKILL");
+    await until(() => diagnostics.some(reason => reason.includes("no verifiable recovery generation")), "unverifiable successor was not reproduced");
+    assert.equal(prompts.length, 0, "transient failure prompted the lead");
+    assert.equal(journal.pending().filter(value => value.kind === "wake").length, 1);
+    assert.match(owner.readPrivate(state + "/.opencode-v2-failure.json").reason, /pending admission retained/);
+    clock = 29999; notices.tick(); assert.equal(prompts.length, 0);
+    if (persistent) {
+      clock = 30000; notices.tick(); await noticeTask;
+      for (let tick = 0; tick < 4; tick++) { clock += 2000; notices.failure(diagnostics[0]); notices.tick(); }
+      await noticeTask; assert.equal(prompts.filter(input => input.text.includes("WATCHER FAILURE")).length, 1);
+    }
+    fs.unlinkSync(state + "/hide-generation"); fs.writeFileSync(state + "/.watcher-down", "announced:downtime:fixture-recovery\n");
+    process.kill(Number(read("arm.pid")), "SIGTERM");
+    await until(async () => {
+      try { await coordinator.ensureArmed(record.sessionID); await coordinator.resumePending(record.sessionID); }
+      catch (error) { notices.failure(error.message); }
+      return prompts.some(input => input.text.includes("WATCHER FIRED"));
+    }, "retained wake did not recover");
+    notices.recovered(); clock += 60000; notices.tick();
+    await coordinator.resumePending(record.sessionID);
+    assert.equal(prompts.filter(input => input.text.includes("WATCHER FIRED")).length, 1);
+    assert.equal(prompts.filter(input => input.text.includes("WATCHER FAILURE")).length, persistent ? 1 : 0);
+    assert.equal(read(".wake-queue"), "100\t1\tsignal\ttask\tready", "notice policy consumed a real wake");
+    const immediate = [];
+    const terminal = createFailureNotice(() => {}, reason => immediate.push(reason), { now: () => 0 });
+    terminal.failure("retry exhaustion", { permanent: true }); terminal.failure("retry exhaustion", { permanent: true });
+    assert.deepEqual(immediate, ["retry exhaustion"]);
+    console.log(`${persistent ? "persistent" : "transient"} unverifiable successor: private diagnostic retained, ${persistent ? "one failure prompt at 30s" : "no failure prompt"}, confirmed wake delivered exactly once`);
+  } finally { await coordinator?.cleanup(); clearInterval(keepAlive); }
+  process.exit(0);
+}
 function host(failAt) {
   const renders = [];
   return {
