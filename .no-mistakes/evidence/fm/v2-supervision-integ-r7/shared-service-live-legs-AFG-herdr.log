@@ -1,0 +1,16 @@
+ok - live phase 1: isolated shared service shuvcode v2.0.22-shuv.1 pid 1938352 on port 40519 with all paths in the lab
+ok - live phase 1: the dispatch capability probe qualifies the installed shuvcode v2.0.22-shuv.1 with the primary's pinned runtime
+ok - live phase 1: with the installed executable, a code root lacking the pinned runtime is refused with the install step
+ok - live phase 2: the primary's plugin inventory has no failed or duplicate plugins
+ok - live phase 2: exactly one active V2 lead implementation (firstmate.native.v2)
+ok - live phase 3: an unrelated root session at the primary ran the protected command
+ok - live phase 3: a child carrying the inherited marker ran the protected command
+ok - live phase 3: the exact-marked unregistered lead's command was refused with the stale-scope rebind diagnostic before execution
+ok - live phase 4: a model shell carries its exact session id under the shared service and cannot lock unregistered
+ok - live leg A: activated UI pid 1939395 owns lead ses_f004e74deffeS5jSMdgo464Y5r: active registration, .lock is the UI pid, watcher armed
+ok - live leg A: in one lead session the allowed command completed, cd was rejected as [persistent-cd] and the backgrounded arm as [watcher-background], before execution
+not ok - leg G needs the two workers from leg C
+ok - live leg F: Herdr detach/attach with the real owner (12 checks)
+not ok - 1 live qualification check(s) failed
+note: live evidence retained at /tmp/fm-opencode-v2-shared-live.Em1cg1
+exit=1

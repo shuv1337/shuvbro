@@ -1,0 +1,16 @@
+ok - exact owner/guard/transport behaviors passed
+ok - V1 factories preserved; competing V2 entrypoints removed
+ok - persistent admission precedes handoff; confirmation precedes delivery; cleanup retires child
+ok - V2 task has no recorded native session; no busy record reports execution.
+V2 task has no recorded native session; no busy record reports execution.
+WARNING: forced discard without confirmed native cancellation: absent V2 session sidecar conflicts with busy record /tmp/fm-opencode-v2-plugin.3t9dp8/endpoint/home/state/absent.busy-state; restore the binding and reconcile, or use explicit --force discard accepting possible resumed execution
+WARNING: forced discard without confirmed native cancellation: successor reported idle interruption; no terminal cancellation or settlement of the old durable claim was proven and the turn may still resume
+WARNING: forced discard without confirmed native cancellation: native service unavailable; an orphaned turn may resume at the next service start. Start the frozen-endpoint service and retry, or use explicit --force discard
+frozen registered endpoint, cwd/session divergence and exact worker execution/cancellation passed
+ok - V2 setup failed: fixture slot registration failure
+V2 command registration: fixture layer failure
+V2 command registration: fixture layer failure
+V2 setup failed: fixture activation failure
+provider-scoped command, exception-safe setup/reload, synchronous exit and SIGKILL/no-row recovery passed
+ok - real idle watcher TERM: one generation/admission, confirmed live successor; preparation failure retains continuity; credentials absent from evaluator, arm, watcher and custom check; no-row retention passed
+exit=0

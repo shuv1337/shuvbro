@@ -1,0 +1,14 @@
+ok - live phase 1: isolated shared service shuvcode v2.0.22-shuv.1 pid 1950743 on port 42667 with all paths in the lab
+ok - live phase 1: the dispatch capability probe qualifies the installed shuvcode v2.0.22-shuv.1 with the primary's pinned runtime
+ok - live phase 1: with the installed executable, a code root lacking the pinned runtime is refused with the install step
+ok - live phase 2: the primary's plugin inventory has no failed or duplicate plugins
+ok - live phase 2: exactly one active V2 lead implementation (firstmate.native.v2)
+ok - live phase 3: an unrelated root session at the primary ran the protected command
+ok - live phase 3: a child carrying the inherited marker ran the protected command
+ok - live phase 3: the exact-marked unregistered lead's command was refused with the stale-scope rebind diagnostic before execution
+ok - live phase 4: a model shell carries its exact session id under the shared service and cannot lock unregistered
+ok - live leg A: activated UI pid 1952652 owns lead ses_f004dffa5ffel3XjB6rt9N82mI: active registration, .lock is the UI pid, watcher armed
+ok - live leg A: in one lead session the allowed command completed, cd was rejected as [persistent-cd] and the backgrounded arm as [watcher-background], before execution
+ok - live leg C: two workers (explicit and configured-default model, both mock/echo) ran on the one shared service with exact recorded sessions; a worker shell cannot claim the lead home
+ok - live leg G: a wake raised while the lead was busy was queued and handled after its turn, an idle-lead wake was handled promptly; two wakes, two canonical acks, no duplicate execution
+exit=0

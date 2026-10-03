@@ -1,0 +1,4 @@
+$ fm-spawn.sh v2-live <project> --harness opencode-v2 --model opencode/space-bunny-free (home has stale active owner record, dead ownerPID 2770224)
+error: this home's V2 lead owner record is not a live canonical claim (ENOENT: no such file or directory, open '/proc/2770224/stat'); relaunch or /firstmate-rebind the lead with bin/fm-opencode-v2-primary.sh before dispatching opencode-v2 workers
+exit=nonzero
+sessions before=0 after=0; no window; no meta

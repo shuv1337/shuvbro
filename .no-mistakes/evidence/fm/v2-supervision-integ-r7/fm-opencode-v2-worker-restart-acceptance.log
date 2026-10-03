@@ -1,0 +1,7 @@
+ok - worker restart: same incarnation reports executing, refuses teardown and interrupts the exact session with resume=false
+ok - worker restart: a live successor's resumed turn is reported executing, refuses teardown, is interrupted there with resume=false, then tears down
+ok - worker restart: a young idle successor reports an unproven outcome and refuses ordinary teardown (retry or --force); an explicit discard proceeds with the caveat
+ok - worker restart: an idle successor settles only past its bound, idle across samples, with a terminal newest message of any outcome (including a turn that ended before the restart); each unproven variant refuses unchanged
+ok - worker restart: with the service down, status answers only an honest unknown, teardown and interrupt refuse naming the possible resume, and discard proceeds with the caveat
+ok - worker restart: with no registration at the frozen endpoint, only an explicit discard proceeds, with the caveat
+exit=0

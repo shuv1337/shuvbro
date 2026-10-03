@@ -1,0 +1,50 @@
+ • Shell spawn permission diagno +
+  ┃  pointer.
+  ┃                                                                                                                     Shell spawn permission diagnostic
+                                                                                                                        fixture
+     I'll run the allowed command first.
+                                                                                                                        ▼ Context
+  ┃                                                                                                                     14,525 tokens
+  ┃  $ sleep 3; printf ALLOWED > allowed-proof.txt; cat allowed-proof.txt                                               1% used
+  ┃
+  ┃  ALLOWED
+  ┃
+
+     Now the denied attempt:
+
+  ┃
+  ┃  $ touch denied-proof.txt
+  ┃
+  ┃  (no output)
+  ┃
+
+     + Thought · 570ms
+
+  ┃
+  ┃  $ ls -la allowed-proof.txt denied-proof.txt
+  ┃
+  ┃  -rw-r--r-- 1 shuv shuv 7 Oct  2 20:06 allowed-proof.txt
+  ┃  -rw-r--r-- 1 shuv shuv 0 Oct  2 20:06 denied-proof.txt
+  ┃
+
+     FIXTURE_DONE
+
+     Result detail for Bro:
+
+     - Allowed step succeeded: sleep 3; printf ALLOWED > allowed-proof.txt ran; file contains ALLOWED.
+     - Denied step did not get denied: touch denied-proof.txt was permitted and created denied-proof.txt (0 bytes).       ⬖ Getting started                ✕
+     - Per the brief I did not retry or attempt any workaround with another tool.
+     - No supervision, commit, or validation started.                                                                       OpenCode includes free models so
+                                                                                                                            you can start immediately.
+     So the spawn/permission behavior under test did not reproduce — the fixture's expected denial is missing.
+     Standing by for follow-up.                                                                                             Connect from 75+ providers to
+                                                                                                                            use other models, including
+     Build · Space Bunny Free · 10.4s · 42.9 tok/s                                                                          Claude, GPT, Gemini etc
+
+  ┃                                                                                                                         Connect provider        /connect
+  ┃
+  ┃
+  ┃  Build auto · Space Bunny Free OpenCode Zen · low                                                                   /…/fm-opencode-v2-li…/worktree:v2-live
+  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+  /tmp/fm-opencode-v2-live.VebeL1/worktree:v2-live                                       14.5K (1%)  ctrl+p commands    shuvcode 2.0.22-shuv.1
+

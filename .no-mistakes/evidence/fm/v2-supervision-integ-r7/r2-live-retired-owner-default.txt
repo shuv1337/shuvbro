@@ -1,0 +1,23 @@
+$ fm-spawn.sh v2-live ... (home has retired owner record)
+warning: /tmp/fm-opencode-v2-live.qYZ3y4/home/data/v2-live/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+spawned v2-live harness=opencode-v2 kind=ship mode=no-mistakes yolo=off window=firstmate:fm-v2-live worktree=/tmp/fm-opencode-v2-live.qYZ3y4/worktree
+--- sidecar:
+{
+  "version": 1,
+  "sessionID": "ses_f0035cfbbffewZgipY7y9S873c",
+  "location": {
+    "directory": "/tmp/fm-opencode-v2-live.qYZ3y4/worktree"
+  },
+  "model": {
+    "id": "space-bunny-free",
+    "providerID": "opencode",
+    "variant": "low"
+  },
+  "serviceURL": "http://127.0.0.1:37435",
+  "servicePID": 2770161,
+  "serviceStart": "51074485",
+  "hostBootID": "acc3e9ba-d788-43c2-9500-bfbbe0f2a4d5"
+}
+--- default service.json url: http://127.0.0.1:37435
+--- interrupt:
+{"sessionID":"ses_f0035cfbbffewZgipY7y9S873c","executing":false,"interrupted":true,"cancellation":"confirmed"}

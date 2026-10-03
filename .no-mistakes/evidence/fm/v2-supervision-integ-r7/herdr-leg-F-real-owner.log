@@ -1,0 +1,12 @@
+ok - herdr lab fm-lab-v2-detach-1941710-1214 provisioned through the helper
+ok - owner pid 1942857 is live in lab pane w1:p1 with its supervision sentinel
+ok - a real client attached to the lab in a PTY
+ok - the client detached with prefix+q
+ok - the owner survives detach with the same pid and process-start token
+ok - the owner's supervision sentinel persists across detach
+ok - the client reattached and renders the owner workspace
+ok - the owner is still the same process after reattach
+ok - owner exit fires the retirement observable
+ok - the owner process is gone after exit
+ok - the separately started shared execution keeps running with the same start token
+ok - shared execution is still progressing after owner exit
