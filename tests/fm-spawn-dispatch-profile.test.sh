@@ -719,6 +719,8 @@ test_opencode_v2_rollback_cancels_admitted_session() {
   printf '%s\n' '# Backlog' '' '## In flight' '' '## Queued' '' '## Done' > "$HOME_DIR/data/backlog.md"
   tasks-axi add "$id" "item for $id" --kind ship --file "$HOME_DIR/data/backlog.md" >/dev/null
   real=$(command -v tasks-axi)
+  # The fake expands its own arguments at run time, so they stay single-quoted here.
+  # shellcheck disable=SC2016
   printf '#!/usr/bin/env bash\n[ "${1:-}" != start ] || { echo "error: backlog is unwritable" >&2; exit 1; }\nexec %q "$@"\n' "$real" > "$FAKEBIN_DIR/tasks-axi"
   chmod +x "$FAKEBIN_DIR/tasks-axi"
   out=$(FM_FAKE_V2_AUTOSUBMIT=busy FM_FAKE_V2_SIDECAR="$(realpath "$WT_DIR")" FM_FAKE_V2_SERVICE_PID=$$ FM_FAKE_V2_NATIVE="$CASE_DIR" FM_FAKE_V2_CANCEL=refused \
