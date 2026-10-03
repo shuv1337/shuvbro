@@ -67,17 +67,20 @@ test_shuvcode_node_launcher_prints_opencode_v2() {
   pass "fm-harness.sh: the shuvcode node launcher prints opencode-v2 on linux and macos shapes"
 }
 
-test_shared_service_is_not_a_session() {
+test_shared_service_is_the_runtime() {
+  # A shared-service lead's tools run under `shuvcode serve --service`, so the
+  # runtime is opencode-v2 there too. Session-lock ancestry still excludes the
+  # service; that contract is pinned in fm-session-lock-ancestry.test.sh.
   local out
   out=$(run_detect shuvcode 'shuvcode serve --service')
-  [ "$out" = unknown ] || fail "the shared shuvcode service must not identify as a session, got '$out'"
+  [ "$out" = opencode-v2 ] || fail "the shared shuvcode service must identify its runtime, got '$out'"
   out=$(run_detect shuvcode 'shuvcode serve --port 4096 --service')
-  [ "$out" = unknown ] || fail "a reordered shared-service flag must not identify as a session, got '$out'"
+  [ "$out" = opencode-v2 ] || fail "a reordered shared-service flag must identify its runtime, got '$out'"
   out=$(run_detect shuvcode 'shuvcode --service')
-  [ "$out" = unknown ] || fail "a top-level shared-service flag must not identify as a session, got '$out'"
+  [ "$out" = opencode-v2 ] || fail "a top-level shared-service flag must identify its runtime, got '$out'"
   out=$(run_detect shuvcode 'shuvcode serve --stdio --port 0')
   [ "$out" = opencode-v2 ] || fail "a standalone shuvcode server must identify as its session, got '$out'"
-  pass "fm-harness.sh: shared service is rejected while standalone server is accepted"
+  pass "fm-harness.sh: shared service and standalone server both identify the opencode-v2 runtime"
 }
 
 test_v1_opencode_still_prints_opencode() {
@@ -216,7 +219,7 @@ SH
 
 test_shuvcode_binary_prints_opencode_v2
 test_shuvcode_node_launcher_prints_opencode_v2
-test_shared_service_is_not_a_session
+test_shared_service_is_the_runtime
 test_v1_opencode_still_prints_opencode
 test_opencode2_beta_is_returned_unknown
 test_ambient_opencode_markers_change_nothing

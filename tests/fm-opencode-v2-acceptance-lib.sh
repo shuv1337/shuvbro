@@ -307,5 +307,6 @@ v2_tui() {  # <dir> <spec-json> <out> [spec-file-name]
 # Background form for concurrent owners; sets V2_TUI_PID.
 v2_tui_bg() {  # <dir> <spec-json> <out> <spec-file-name>
   v2_tui "$@" &
+  # shellcheck disable=SC2034 # Read by the acceptance tests that source this lib.
   V2_TUI_PID=$!
 }

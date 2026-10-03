@@ -509,6 +509,14 @@ esac
 exit 0
 SH
   chmod +x "$fakebin/tmux"
+  # The pre-dispatch capability probe runs the qualified shuvcode, so no case
+  # may depend on whether this host has one installed.
+  cat > "$fakebin/shuvcode" <<'SH'
+#!/usr/bin/env bash
+case "${1:-}" in --version) echo 'shuvcode v2.0.22-shuv.1'; exit 0 ;; --help) echo '--server --session --auto'; exit 0 ;; esac
+exit 93
+SH
+  chmod +x "$fakebin/shuvcode"
 }
 
 run_opencode_v2_spawn() {  # <id> [fm-spawn args...]
