@@ -882,7 +882,25 @@ RELAUNCH_REPLACEMENT_WT=
 CONFIG_INHERIT_LOCK=
 CONFIG_INHERIT_LOCK_HELD=0
 
+OPENCODE_V2_CANCEL_DONE=0
+OPENCODE_V2_CANCEL_NOTE=
+# An opencode-v2 prompt is admitted on the shared service before the pane
+# handshake, so pane death is not stopped execution. Every post-launch failure
+# cancels the exact recorded session once; returns 1 with a note if unproved.
+opencode_v2_cancel_admitted() {
+  local sidecar cancel
+  [ -n "${STATE_REAL:-}" ] && [ "$OPENCODE_V2_CANCEL_DONE" = 0 ] || return 0
+  sidecar="$STATE_REAL/$ID.opencode-v2-session.json"
+  [ -e "$sidecar" ] || [ -L "$sidecar" ] || return 0
+  OPENCODE_V2_CANCEL_DONE=1
+  cancel=$(fm_control_v2_interrupt "$STATE_REAL" "$ID" "${WT:-}" 2>&1) && return 0
+  OPENCODE_V2_CANCEL_NOTE="native worker cancellation unproved: ${cancel//$'\n'/ }"
+  return 1
+}
+
 spawn_fresh_commit_rollback() {
+  opencode_v2_cancel_admitted \
+    || echo "error: task $ID's $OPENCODE_V2_CANCEL_NOTE; the shared service may still execute it in ${WT:-its worktree}" >&2
   if fm_backlog_atomic_transition rollback "$STATE/$ID.meta" \
       "$FM_ROOT/bin/fm-busy-event.sh" "$STATE" "$ID" "${BUSY_GEN:-}"; then
     SPAWN_FRESH_COMMIT_PENDING=0
@@ -1655,6 +1673,12 @@ esac
 
 if [ "$HARNESS" = opencode-v2 ] && [ "$V2_CAPABILITY_PROBED" -ne 1 ]; then
   node "$FM_ROOT/bin/fm-opencode-v2-capability.mjs" "$FM_ROOT" >/dev/null || exit 1
+fi
+# The launch helper remains the authority; this refuses before any window so the
+# caller sees the exact lead-endpoint diagnostic instead of a pane timeout.
+if [ "$HARNESS" = opencode-v2 ] && [ -d "$STATE" ]; then
+  V2_LEAD_ENDPOINT=$(node "$FM_ROOT/bin/fm-opencode-v2-owner.mjs" lead-endpoint "$(cd "$STATE" && pwd -P)") || exit 1
+  [ -z "$V2_LEAD_ENDPOINT" ] || node "$FM_ROOT/bin/fm-opencode-v2-owner.mjs" service "$V2_LEAD_ENDPOINT" >/dev/null || exit 1
 fi
 
 # muse and gemini are verified as CREWMATE/SCOUT adapters only. A secondmate is
@@ -3149,15 +3173,10 @@ opencode_v2_submit_prefill() {
 }
 
 # Same orphan hazard as rovo: a launched --auto worker with no published task
-# record must not outlive a failed spawn. Its prompt was admitted on the shared
-# service, so pane death alone is not stopped execution.
+# record must not outlive a failed spawn.
 opencode_v2_spawn_fail() {  # <detail>
-  local detail=$1 cancel
-  if [ -e "$STATE_REAL/$ID.opencode-v2-session.json" ] || [ -L "$STATE_REAL/$ID.opencode-v2-session.json" ]; then
-    if ! cancel=$(fm_control_v2_interrupt "$STATE_REAL" "$ID" "$WT" 2>&1); then
-      detail="$detail; native worker cancellation unproved: ${cancel//$'\n'/ }"
-    fi
-  fi
+  local detail=$1
+  opencode_v2_cancel_admitted || detail="$detail; $OPENCODE_V2_CANCEL_NOTE"
   printf 'failed: %s\n' "$detail" >> "$STATE/$ID.status"
   echo "error: $detail; inspect window $T" >&2
   rovo_endpoint_cleanup

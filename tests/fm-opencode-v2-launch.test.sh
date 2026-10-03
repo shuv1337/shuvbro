@@ -161,11 +161,11 @@ done
 
 # A lead activated on a named registration freezes that endpoint in its home's
 # owner record. Workers dispatched from that home follow it, never the default.
-owner_record() {  # <owner-pid> <owner-start> <service-url>
+owner_record() {  # <owner-pid> <owner-start> <service-url> [lifecycle]
   local service
   service=$(node "$ROOT/bin/fm-opencode-v2-owner.mjs" identity "$$")
-  jq -cn --argjson service "$service" --arg pid "$1" --arg start "$2" --arg url "$3" --arg state "$(realpath "$TMP_ROOT")" \
-    '{version:1,sessionID:"ses_lead",claimID:("a"*48),root:$state,home:$state,state:$state,config:$state,ownerPID:($pid|tonumber),ownerStart:$start,hostBootID:$service.boot,servicePID:$service.pid,serviceStart:$service.start,serviceURL:$url,lifecycle:"active"}' \
+  jq -cn --argjson service "$service" --arg pid "$1" --arg start "$2" --arg url "$3" --arg lifecycle "${4:-active}" --arg state "$(realpath "$TMP_ROOT")" \
+    '{version:1,sessionID:"ses_lead",claimID:("a"*48),root:$state,home:$state,state:$state,config:$state,ownerPID:($pid|tonumber),ownerStart:$start,hostBootID:$service.boot,servicePID:$service.pid,serviceStart:$service.start,serviceURL:$url,lifecycle:$lifecycle}' \
     > "$TMP_ROOT/.opencode-v2-owner.json"
   chmod 600 "$TMP_ROOT/.opencode-v2-owner.json"
   printf '%s\n' "$1" > "$TMP_ROOT/.lock"
@@ -212,3 +212,11 @@ fi
 assert_contains "$(cat "$TMP_ROOT/lead-noncanonical")" 'not a live canonical claim' 'noncanonical lead owner record lacked an actionable refusal'
 [ ! -s "$TEST_LOG" ] || fail 'noncanonical lead owner record created a worker'
 pass "stale or noncanonical lead owner records refuse worker dispatch without a default fallback"
+
+owner_record "$dead" 1 http://127.0.0.1:23456 retired
+: > "$TEST_LOG"; : > "$TEST_LOG.servers"; rm -f "$TEST_RECORD"
+(cd "$TEST_WORK" && "$ROOT/bin/fm-opencode-v2-launch.sh" --model fixture/test-model --prompt 'exact worker brief' --session-record "$TEST_RECORD" < "$TMP_ROOT/input") \
+  || fail 'a retired lead owner record blocked worker dispatch on the default service'
+jq -e '.serviceURL=="http://127.0.0.1:12345"' "$TEST_RECORD" >/dev/null || fail 'retired lead worker did not use the default service'
+[ -f "$TMP_ROOT/.opencode-v2-owner.json" ] || fail 'worker dispatch removed the retained retired owner record'
+pass "a retired lead owner record keeps the default service and is retained"

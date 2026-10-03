@@ -754,32 +754,38 @@ test_opencode_v2_unsubmitted_brief_fails_loudly() {
 # The launch helper admits the worker prompt on the shared service before the
 # pane handshake, so a failed spawn must cancel that exact session before it
 # closes the window, and must say so when cancellation is not proven.
-test_opencode_v2_spawn_failure_cancels_admitted_session() {
-  local mode id out status
-  for mode in confirmed refused; do
-    id="profile-v2-cancel-$mode"
-    opencode_v2_launch_case "$id" "$id"
-    mkdir -p "$CASE_DIR/native-state"
-    jq -cn --argjson pid "$$" '{pid:$pid,url:"http://127.0.0.1:12345",password:"fixture"}' > "$CASE_DIR/native-state/service.json"
-    chmod 600 "$CASE_DIR/native-state/service.json"
-    cat > "$FAKEBIN_DIR/shuvcode" <<'SH'
+# Shared-service stand-in for an admitted worker session: interrupt is logged
+# in the pane-ops order and either cancels or is refused (FM_FAKE_V2_CANCEL).
+make_opencode_v2_native_service() {
+  mkdir -p "$CASE_DIR/native-state"
+  jq -cn --argjson pid "$$" '{pid:$pid,url:"http://127.0.0.1:12345",password:"fixture"}' > "$CASE_DIR/native-state/service.json"
+  chmod 600 "$CASE_DIR/native-state/service.json"
+  cat > "$FAKEBIN_DIR/shuvcode" <<'SH'
 #!/usr/bin/env bash
 set -eu
 case "$1" in --version) echo 'shuvcode v2.0.22-shuv.1'; exit 0 ;; --help) echo '--server --session --auto'; exit 0 ;; esac
 if [ "$1" = debug ]; then echo "state $FM_FAKE_V2_NATIVE/native-state"; exit 0; fi
 [ "$1" = api ] && [ "$2" = --server ] && [ "$3" = http://127.0.0.1:12345 ] && [ "$OPENCODE_PASSWORD" = fixture ] || exit 92
 case "$4" in
-  server.info) jq -cn --argjson pid "$FM_FAKE_V2_SERVICE_PID" '{pid:$pid}' ;;
-  session.get) jq -cn --arg wt "$FM_FAKE_V2_SIDECAR" '{data:{id:"ses_spawned",location:{directory:$wt},model:{providerID:"fixture",id:"echo"}}}' ;;
-  session.active) if [ -e "$FM_FAKE_V2_NATIVE/cancelled" ]; then echo '{"data":{}}'; else echo '{"data":{"ses_spawned":{"type":"running"}}}'; fi ;;
-  session.interrupt)
-    printf 'interrupt\n' >> "$FM_FAKE_V2_STATE.ops"
-    [ "$FM_FAKE_V2_CANCEL" = confirmed ] || exit 17
-    : > "$FM_FAKE_V2_NATIVE/cancelled"; echo '{"interrupted":true}' ;;
-  *) exit 93 ;;
+server.info) jq -cn --argjson pid "$FM_FAKE_V2_SERVICE_PID" '{pid:$pid}' ;;
+session.get) jq -cn --arg wt "$FM_FAKE_V2_SIDECAR" '{data:{id:"ses_spawned",location:{directory:$wt},model:{providerID:"fixture",id:"echo"}}}' ;;
+session.active) if [ -e "$FM_FAKE_V2_NATIVE/cancelled" ]; then echo '{"data":{}}'; else echo '{"data":{"ses_spawned":{"type":"running"}}}'; fi ;;
+session.interrupt)
+  printf 'interrupt\n' >> "$FM_FAKE_V2_STATE.ops"
+  [ "$FM_FAKE_V2_CANCEL" = confirmed ] || exit 17
+  : > "$FM_FAKE_V2_NATIVE/cancelled"; echo '{"interrupted":true}' ;;
+*) exit 93 ;;
 esac
 SH
-    chmod +x "$FAKEBIN_DIR/shuvcode"
+  chmod +x "$FAKEBIN_DIR/shuvcode"
+}
+
+test_opencode_v2_spawn_failure_cancels_admitted_session() {
+  local mode id out status
+  for mode in confirmed refused; do
+    id="profile-v2-cancel-$mode"
+    opencode_v2_launch_case "$id" "$id"
+    make_opencode_v2_native_service
     out=$(FM_FAKE_V2_TUI=no FM_FAKE_V2_SIDECAR="$(realpath "$WT_DIR")" FM_FAKE_V2_SERVICE_PID=$$ FM_FAKE_V2_NATIVE="$CASE_DIR" FM_FAKE_V2_CANCEL="$mode" \
       run_opencode_v2_spawn "$id" --model opencode/space-bunny-free)
     status=$?
@@ -796,6 +802,48 @@ SH
     fi
   done
   pass "opencode-v2 spawn failure interrupts the admitted native session before closing its window and reports unproved cancellation"
+}
+
+# A post-launch fresh-commit rollback (here the backlog In-flight transition)
+# removes the task record, so it must cancel the admitted session the same way.
+test_opencode_v2_rollback_cancels_admitted_session() {
+  local id=profile-v2-rollback-z14 out status real
+  opencode_v2_launch_case profile-v2-rollback "$id"
+  make_opencode_v2_native_service
+  printf '%s\n' 'backend = "markdown"' '' '[markdown]' 'path = "data/backlog.md"' > "$HOME_DIR/.tasks.toml"
+  printf '%s\n' '# Backlog' '' '## In flight' '' '## Queued' '' '## Done' > "$HOME_DIR/data/backlog.md"
+  tasks-axi add "$id" "item for $id" --kind ship --file "$HOME_DIR/data/backlog.md" >/dev/null
+  real=$(command -v tasks-axi)
+  printf '#!/usr/bin/env bash\n[ "${1:-}" != start ] || { echo "error: backlog is unwritable" >&2; exit 1; }\nexec %q "$@"\n' "$real" > "$FAKEBIN_DIR/tasks-axi"
+  chmod +x "$FAKEBIN_DIR/tasks-axi"
+  out=$(FM_FAKE_V2_AUTOSUBMIT=busy FM_FAKE_V2_SIDECAR="$(realpath "$WT_DIR")" FM_FAKE_V2_SERVICE_PID=$$ FM_FAKE_V2_NATIVE="$CASE_DIR" FM_FAKE_V2_CANCEL=refused \
+    run_opencode_v2_spawn "$id" --model opencode/space-bunny-free)
+  status=$?
+  [ "$status" -ne 0 ] || fail "a failed backlog transition must fail the spawn: $out"
+  assert_contains "$out" "could not be moved to In flight" "fixture: the backlog transition did not fail"
+  [ "$(cat "$CASE_DIR/v2.state.ops" 2>/dev/null)" = interrupt ] \
+    || fail "the rollback did not interrupt the admitted native session exactly once: $(cat "$CASE_DIR/v2.state.ops" 2>/dev/null)"
+  assert_contains "$out" "native worker cancellation unproved" "the rollback omitted the unproved cancellation"
+  pass "opencode-v2 fresh-commit rollback interrupts the admitted native session and reports unproved cancellation"
+}
+
+# A stale lead owner record in the dispatching home refuses before any window,
+# and the caller sees the owner library's exact diagnostic.
+test_opencode_v2_stale_lead_refuses_before_window() {
+  local id=profile-v2-stale-lead-z15 out status birth state
+  opencode_v2_launch_case profile-v2-stale-lead "$id"
+  state=$(realpath "$HOME_DIR/state")
+  birth=$(PATH="$FAKEBIN_DIR:$PATH" node "$ROOT/bin/fm-opencode-v2-owner.mjs" identity "$$")
+  ( umask 077; jq -cn --argjson b "$birth" --arg s "$state" \
+    '{version:1,sessionID:"ses_lead",claimID:("a"*48),root:$s,home:$s,state:$s,config:$s,ownerPID:$b.pid,ownerStart:"1",hostBootID:$b.boot,servicePID:$b.pid,serviceStart:$b.start,serviceURL:"http://127.0.0.1:12345",lifecycle:"active"}' \
+    > "$state/.opencode-v2-owner.json" )
+  out=$(run_opencode_v2_spawn "$id" --model opencode/space-bunny-free)
+  status=$?
+  [ "$status" -ne 0 ] || fail "a stale lead owner record dispatched a worker: $out"
+  assert_contains "$out" "not a live canonical claim" "the spawn caller did not see the lead refusal"
+  assert_not_contains "$(cat "$LAUNCH_LOG")" fm-opencode-v2-launch.sh "a refused lead still typed a worker launch"
+  assert_absent "$HOME_DIR/state/$id.meta" "a refused lead published a task record"
+  pass "opencode-v2 spawn refuses a stale lead owner record before any window with the exact diagnostic"
 }
 
 test_opencode_v2_auto_submitted_brief() {
@@ -1654,6 +1702,8 @@ test_opencode_v2_spawn_submits_the_prefilled_brief
 test_opencode_v2_unsubmitted_brief_fails_loudly
 test_opencode_v2_auto_submitted_brief
 test_opencode_v2_spawn_failure_cancels_admitted_session
+test_opencode_v2_rollback_cancels_admitted_session
+test_opencode_v2_stale_lead_refuses_before_window
 test_opencode_worker_keeps_tracked_plugins_package_json
 test_codex_threads_model_and_effort
 test_codex_omits_invalid_max_effort

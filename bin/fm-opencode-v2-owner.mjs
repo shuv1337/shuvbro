@@ -180,7 +180,8 @@ export function canonical(value, requireLock = true) {
 }
 
 // A home with a V2 lead owner record dispatches workers only on that lead's
-// frozen endpoint. No owner record keeps the default managed registration.
+// frozen endpoint. No owner record, or a retired one, keeps the default managed
+// registration.
 export function leadEndpoint(state) {
   const home = fs.realpathSync(state);
   let value;
@@ -188,6 +189,7 @@ export function leadEndpoint(state) {
   catch (error) { if (error.code === "ENOENT") return undefined; throw leadRefusal(error); }
   try {
     if (value.state !== home) throw new Error("owner record belongs to another state directory");
+    if (value.lifecycle === "retired") return undefined;
     canonical(live(value));
   } catch (error) { throw leadRefusal(error); }
   return value.serviceURL;
