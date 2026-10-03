@@ -498,6 +498,14 @@ if session_start && wait_until 160 acks_above "$a0" && wait_until 20 one_supervi
 else
   live_fail "after relaunch: lock=$(cat "$PRIMARY/state/.lock" 2>/dev/null) owner=$(field ownerPID) watchers=$(watchers) acks+=$(( $(acks) - a0 ))"
 fi
+# Every disruption above self-heals: across the whole run (kills, reloads,
+# relaunch) the lead must never be asked to repair monitoring manually.
+lead_failures=$(failure_ids "$LEAD" | count)
+if [ -s "$LAB/export.$LEAD.json" ] && [ "$lead_failures" = 0 ]; then
+  pass "the lead received zero WATCHER FAILURE prompts across the whole run ($(wc -c < "$LAB/export.$LEAD.json")-byte export read completely)"
+else
+  live_fail "the lead received $lead_failures WATCHER FAILURE prompts across self-healing disruptions"
+fi
 
 # --- private serve --stdio lead -----------------------------------------------------------
 if [ "${FM_V2_SUCC_PRIVATE:-1}" = 1 ]; then
