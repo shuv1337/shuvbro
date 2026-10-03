@@ -11,24 +11,37 @@ import { createHash, randomUUID } from "node:crypto";
 const slot = Symbol.for("firstmate.native.v2.tui.coordinator");
 
 export function createFailureNotice(report, surface, { now = () => performance.now(), bound = 30000, interval = 5000 } = {}) {
-  let episode, lastNotice = -Infinity;
+  let episode, lastNotice = -Infinity, inFlight = false;
+  const makeEpisode = () => ({ id: randomUUID(), since: now(), notified: false, surfaced: new Set(), pending: new Set(), attempted: new Set(), records: new Map() });
   function tick() {
     if (!episode) return;
     if (!episode.notified && now() - episode.since >= bound) {
       episode.pending.add(episode.reason);
       episode.notified = true;
     }
-    if (!episode.pending.size || now() - lastNotice < interval) return;
-    const reason = episode.pending.values().next().value;
-    episode.pending.delete(reason);
-    episode.surfaced.add(reason);
+    if (inFlight || !episode.pending.size || now() - lastNotice < interval) return;
+    const key = episode.pending.values().next().value;
+    const current = episode, saved = current.records.get(key), first = !current.attempted.has(key);
+    const reason = saved ? saved.text.split("\n\n").slice(1).join("\n\n") : key;
+    current.attempted.add(key);
     lastNotice = now();
-    surface(reason, { episode: episode.id });
+    const finish = admitted => {
+      current.pending.delete(key);
+      if (admitted === true) { current.surfaced.add(key); current.records.delete(key); }
+      else current.pending.add(key);
+    };
+    try {
+      const result = surface(reason, { episode: current.id, first, record: saved });
+      if (result?.then) {
+        inFlight = true;
+        void result.then(finish, error => { finish(false); report("V2 repair notice delivery remains pending: " + error.message); }).finally(() => { inFlight = false; });
+      } else finish(result);
+    } catch (error) { finish(false); report("V2 repair notice delivery remains pending: " + error.message); }
   }
   return {
     failure(reason, { permanent = false } = {}) {
       report(reason);
-      episode ||= { id: randomUUID(), since: now(), notified: false, surfaced: new Set(), pending: new Set() };
+      episode ||= makeEpisode();
       episode.reason = reason;
       if (permanent && !episode.surfaced.has(reason)) {
         episode.pending.add(reason);
@@ -36,7 +49,14 @@ export function createFailureNotice(report, surface, { now = () => performance.n
       }
       tick();
     },
-    recovered() { episode = undefined; },
+    recovered() { if (!inFlight && !episode?.pending.size) episode = undefined; },
+    restore(value) {
+      const reason = value.text.split("\n\n").slice(1).join("\n\n");
+      episode ||= makeEpisode();
+      const prior = episode.records.get(reason);
+      const key = episode.surfaced.has(reason) || prior && prior.id !== value.id ? value.id : reason;
+      if (!episode.surfaced.has(key)) { episode.notified = true; episode.pending.add(key); episode.records.set(key, value); }
+    },
     tick,
   };
 }
@@ -178,14 +198,12 @@ export default { id: "firstmate.native.v2", async setup(ctx) {
     lastFailure = reason;
     console.error(reason);
     writePrivate(`${record.state}/.opencode-v2-failure.json`, { version: 1, sessionID: record.sessionID, claimID: record.claimID, reason: String(reason).slice(0, 12000) });
-   }, (reason, notice) => {
-    if (stopped) return;
+    }, async (reason, notice) => {
+     if (stopped) return false;
     const text = String(reason).slice(0, 4000);
-    try { ctx.ui.toast?.show({ variant: "error", message: "Firstmate watcher failure: " + text }); } catch (error) { console.error("V2 failure toast: " + error.message); }
-    void (async () => {
+     if (notice.first) { try { ctx.ui.toast?.show({ variant: "error", message: "Firstmate watcher failure: " + text }); } catch (error) { console.error("V2 failure toast: " + error.message); } }
       const prompt = await encodeFirstmateOperationalInput(record.root, "watcher", `WATCHER FAILURE - native V2 supervision reported a failure; drain queued wakes with bin/fm-wake-drain.sh, inspect this reason, and probe recovery manually with bin/fm-watch-arm.sh if continuity is not restored.\n\n${text}`);
-      await noticeJournal.deliver(noticeJournal.prepare(prompt, "failure:" + record.claimID + ":" + notice.episode + ":" + createHash("sha256").update(text).digest("hex")));
-    })().catch(error => console.error("V2 failure prompt: " + error.message));
+       return await noticeJournal.deliver(notice.record || noticeJournal.prepare(prompt, "failure:" + record.claimID + ":" + notice.episode + ":" + createHash("sha256").update(text).digest("hex")));
    });
    const failure = (reason, detail) => { if (!stopped) notices.failure(reason, detail); };
    const failureFromError = error => failure(error.message, { permanent: error.nonRecoverable === true });
@@ -202,7 +220,8 @@ export default { id: "firstmate.native.v2", async setup(ctx) {
     catch { return false; }
   };
    const journal = createAdmissionJournal(paths, record.sessionID, input => ctx.client.session.prompt(input, { signal: AbortSignal.any([abort.signal, AbortSignal.timeout(10000)]) }), failure, { valid: validClaim, signal: abort.signal });
-   const noticeJournal = createAdmissionJournal(paths, record.sessionID, input => ctx.client.session.prompt(input, { signal: AbortSignal.any([abort.signal, AbortSignal.timeout(10000)]) }), reason => console.error("V2 failure notice admission: " + reason), {
+    const noticeJournal = createAdmissionJournal(paths, record.sessionID, input => ctx.client.session.prompt(input, { signal: AbortSignal.any([abort.signal, AbortSignal.timeout(10000)]) }), reason => failure("V2 repair notice delivery remains pending: " + reason), {
+      failureClaim: record.claimID,
      signal: abort.signal,
      valid: () => {
        try {
@@ -244,7 +263,7 @@ export default { id: "firstmate.native.v2", async setup(ctx) {
       await coordinator.resumePending(record.sessionID);
       const pending = journal.pending().filter(value => value.kind === "wake" || value.kind === "startup:" + record.claimID);
       if (pending.length) failure("V2 retained admission remains undelivered; automatic recovery is continuing");
-      else if (["armed", "existing", "not-needed"].includes(armStatus)) notices.recovered();
+       else if (!coordinator.hasUnpreparedWake() && ["armed", "existing", "not-needed"].includes(armStatus)) notices.recovered();
     })();
     try { await reconcileInFlight; } finally { reconcileInFlight = null; }
   }
@@ -263,7 +282,12 @@ export default { id: "firstmate.native.v2", async setup(ctx) {
   } catch (error) { failureFromError(error); }
 
    if (stopped) return cleanup;
-   timer = setInterval(() => { void reconcile().catch(failureFromError).finally(() => notices.tick()); }, 2000);
+    timer = setInterval(() => { void reconcile().catch(failureFromError).finally(() => {
+      try {
+        for (const pending of noticeJournal.pending()) if (pending.kind.startsWith("failure:" + record.claimID + ":")) notices.restore(pending);
+      } catch (error) { failure("V2 repair notice journal reconciliation failed: " + error.message, { permanent: true }); }
+      notices.tick();
+    }); }, 2000);
   timer.unref();
   void (async () => {
     try {

@@ -424,6 +424,10 @@ for notice in transient persistent; do
   out=$(env ROOT="$ROOT" LAB="$TMP_ROOT/notice-$notice" node "$ROOT/tests/fixtures/fm-opencode-v2-provider-host.mjs" "--notice-$notice" 2>&1) || fail "$notice failure notice regression: $out"
   pass "$out"
 done
+for review in prepare prepare-empty prepare-generation rejected timeout wrong-id invalid reload-pending prune; do
+  out=$(env ROOT="$ROOT" LAB="$TMP_ROOT/review-$review" node "$ROOT/tests/fixtures/fm-opencode-v2-provider-host.mjs" "--review-$review" 2>&1) || fail "$review PR review regression: $out"
+  pass "$out"
+done
 
 out=$(env ROOT="$ROOT" LAB="$TMP_ROOT/real-recovery" node "$ROOT/tests/fixtures/fm-opencode-v2-real-recovery.mjs" 2>&1) || fail "real native recovery regression: $out"
 pass "$out"
