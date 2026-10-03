@@ -19,11 +19,18 @@
 #     refuses, interrupt cancels the exact session with resume=false;
 #   - gone incarnation with a live successor: the successor's answer decides;
 #     an executing session is never reported stopped, teardown refuses, and
-#     interrupt cancels it on the successor with resume=false; an idle session
-#     tears down after consulting the successor;
-#   - gone incarnation with no live successor: status, teardown and interrupt
-#     refuse with a diagnostic naming the possible resume; only discard
-#     (explicit --force) proceeds, printing that caveat.
+#     interrupt cancels it on the successor with resume=false; once that
+#     cancellation is confirmed, ordinary teardown succeeds. For an idle
+#     successor session, shuvcode documents interrupting an idle session as a
+#     no-op rather than a terminal release of a durable claim, so an
+#     interrupted:false answer is not cancellation proof: ordinary teardown
+#     refuses naming a retry or --force, always after consulting the successor,
+#     and an explicit discard proceeds with the caveat;
+#   - gone incarnation with no live successor: status may only answer an honest
+#     unknown (executing null, cancellation unconfirmed), never "stopped";
+#     teardown and interrupt refuse with a diagnostic naming the possible
+#     resume; only discard (explicit --force) proceeds, printing that caveat.
+# Any native interrupt anywhere must target the exact session with resume=false.
 set -u
 
 # shellcheck source=tests/fm-opencode-v2-acceptance-lib.sh
@@ -87,6 +94,9 @@ reconcile() {  # <action>
   ERR=$(cat "$err")
 }
 
+# Every logged interrupt targets the exact session with resume=false.
+interrupts_exact() { ! grep " session.interrupt " "$CASE/api.log" | grep -qv "sessionID=$SID.*resume=false"; }
+
 api_calls() {  # <service-pid> <operation>: calls that service answered for the exact session
   grep -c "^$1 $2 .*sessionID=$SID" "$CASE/api.log" 2>/dev/null || true
 }
@@ -138,18 +148,32 @@ test_successor_resumes_executing_worker() {
   [ "$(grep -c "^$SUCCESSOR session.interrupt .*sessionID=$SID.*resume=false" "$CASE/api.log")" -ge 1 ] \
     || miss "interrupt did not cancel the exact session on the successor with resume=false (rc=$RC out=$OUT)"
   ! still_executing || miss "the worker still executes on the successor after an interrupt reported $OUT"
-  finish "worker restart: a live successor's resumed turn is reported executing, refuses teardown and is interrupted there with resume=false"
+  # After a confirmed cancellation the ordinary cleanup must be able to finish.
+  reconcile teardown
+  { [ "$RC" = 0 ] && printf '%s' "$OUT" | jq -e '.executing == false' >/dev/null; } \
+    || miss "ordinary teardown still refused after the successor confirmed cancellation: rc=$RC err=$ERR"
+  interrupts_exact || miss "an interrupt did not target the exact session with resume=false"
+  finish "worker restart: a live successor's resumed turn is reported executing, refuses teardown, is interrupted there with resume=false, then tears down"
 }
 
-test_successor_idle_worker_tears_down() {
+test_successor_idle_needs_proof_or_discard() {
   v2_require_native successor-idle || return $?
   worker_case successor-idle
   restart_at_same_endpoint
+  reconcile status
+  { [ "$RC" = 0 ] && printf '%s' "$OUT" | jq -e '.executing == false' >/dev/null; } || miss "status did not report the successor's idle answer: rc=$RC out=$OUT err=$ERR"
+  [ "$(api_calls "$SUCCESSOR" session.get)" -ge 1 ] || miss "status concluded without consulting the live successor"
   reconcile teardown
-  { [ "$RC" = 0 ] && printf '%s' "$OUT" | jq -e '.executing == false' >/dev/null; } || miss "teardown refused an idle worker on a live successor: rc=$RC err=$ERR"
-  [ "$(api_calls "$SUCCESSOR" session.get)" -ge 1 ] || miss "teardown concluded stopped without consulting the live successor"
-  [ "$(grep -c " session.interrupt " "$CASE/api.log")" = 0 ] || miss "teardown interrupted an idle worker"
-  finish "worker restart: an idle worker tears down after the live successor confirms it is not executing"
+  if [ "$RC" = 0 ]; then
+    miss "ordinary teardown accepted an idle interrupt answer as cancellation proof ($OUT)"
+  elif ! printf '%s' "$ERR" | grep -qiE 'retry|--force'; then
+    miss "the idle-successor refusal names neither a retry nor --force: $ERR"
+  fi
+  interrupts_exact || miss "an interrupt did not target the exact session with resume=false"
+  reconcile discard
+  [ "$RC" = 0 ] || miss "explicit discard was refused for an idle successor session: $ERR"
+  printf '%s' "$ERR$OUT" | grep -qiE 'resume|unconfirmed' || miss "discard printed no caveat that cancellation is unconfirmed"
+  finish "worker restart: an idle successor answer refuses ordinary teardown without terminal proof (retry or --force), and an explicit discard proceeds with the caveat"
 }
 
 no_successor_case() {  # <case> <stop|unregister>
@@ -158,7 +182,13 @@ no_successor_case() {  # <case> <stop|unregister>
   stop_first_service
   [ "$2" = stop ] || rm -f "$V2_NATIVE_STATE/service.json"
   local action
-  for action in status teardown interrupt; do
+  # status is read-only: it may answer, but only an honest unknown.
+  reconcile status
+  if [ "$RC" = 0 ]; then
+    printf '%s' "$OUT" | jq -e '.executing == null and .cancellation == "unconfirmed"' >/dev/null \
+      || miss "status answered something other than an honest unknown without any live service ($OUT)"
+  fi
+  for action in teardown interrupt; do
     reconcile "$action"
     if [ "$RC" = 0 ]; then
       miss "$action concluded without any live service ($OUT)"
@@ -175,7 +205,7 @@ no_successor_case() {  # <case> <stop|unregister>
 test_no_successor_refuses_unless_discarded() {
   v2_require_native no-successor || return $?
   no_successor_case no-successor stop
-  finish "worker restart: with the service down, status, teardown and interrupt refuse naming the possible resume; discard proceeds with the caveat"
+  finish "worker restart: with the service down, status answers only an honest unknown, teardown and interrupt refuse naming the possible resume, and discard proceeds with the caveat"
 }
 
 test_unregistered_endpoint_refuses_unless_discarded() {
@@ -187,6 +217,6 @@ test_unregistered_endpoint_refuses_unless_discarded() {
 v2_run_cases \
   test_same_incarnation_control \
   test_successor_resumes_executing_worker \
-  test_successor_idle_worker_tears_down \
+  test_successor_idle_needs_proof_or_discard \
   test_no_successor_refuses_unless_discarded \
   test_unregistered_endpoint_refuses_unless_discarded
