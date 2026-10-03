@@ -153,6 +153,16 @@ if (process.argv.includes("--notice-transient") || process.argv.includes("--noti
     const terminal = createFailureNotice(() => {}, reason => immediate.push(reason), { now: () => 0 });
     terminal.failure("retry exhaustion", { permanent: true }); terminal.failure("retry exhaustion", { permanent: true });
     assert.deepEqual(immediate, ["retry exhaustion"]);
+    let rateClock = 0;
+    const flood = [], identities = [];
+    const limited = createFailureNotice(() => {}, (reason, detail) => { flood.push(reason); identities.push(detail.episode); }, { now: () => rateClock });
+    for (let i = 0; i < 20; i++) limited.failure(`permanent ${i}`, { permanent: true });
+    assert.equal(flood.length, 1, "permanent flood exceeded the initial rate budget");
+    rateClock = 4999; limited.tick(); assert.equal(flood.length, 1);
+    for (let i = 1; i < 20; i++) { rateClock = i * 5000; limited.tick(); assert.equal(flood.length, i + 1); }
+    assert.deepEqual(flood, Array.from({ length: 20 }, (_, i) => `permanent ${i}`), "rate limiting dropped an actionable failure");
+    limited.recovered(); rateClock += 5000; limited.failure("permanent 0", { permanent: true });
+    assert.equal(flood.length, 21); assert.notEqual(identities[0], identities[20]);
     console.log(`${persistent ? "persistent" : "transient"} unverifiable successor: private diagnostic retained, ${persistent ? "one failure prompt at 30s" : "no failure prompt"}, confirmed wake delivered exactly once`);
   } finally { await coordinator?.cleanup(); clearInterval(keepAlive); }
   process.exit(0);

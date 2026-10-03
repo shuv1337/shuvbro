@@ -6,30 +6,40 @@ import { eventSessionID, isIdleEvent } from "../lib/fm-plugin-v2.js";
 import { runProcess } from "../lib/fm-plugin-common.js";
 import { encodeFirstmateOperationalInput } from "../lib/fm-operational-input.js";
 import { existsSync } from "node:fs";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 const slot = Symbol.for("firstmate.native.v2.tui.coordinator");
 
-export function createFailureNotice(report, surface, { now = () => performance.now(), bound = 30000 } = {}) {
-  let episode;
+export function createFailureNotice(report, surface, { now = () => performance.now(), bound = 30000, interval = 5000 } = {}) {
+  let episode, lastNotice = -Infinity;
   function tick() {
-    if (!episode || episode.notified || now() - episode.since < bound) return;
-    episode.notified = true;
-    surface(episode.reason);
+    if (!episode) return;
+    if (!episode.notified && now() - episode.since >= bound) {
+      episode.pending.add(episode.reason);
+      episode.notified = true;
+    }
+    if (!episode.pending.size || now() - lastNotice < interval) return;
+    const reason = episode.pending.values().next().value;
+    episode.pending.delete(reason);
+    episode.surfaced.add(reason);
+    lastNotice = now();
+    surface(reason, { episode: episode.id });
   }
   return {
     failure(reason, { permanent = false } = {}) {
       report(reason);
-      episode ||= { since: now(), notified: false };
+      episode ||= { id: randomUUID(), since: now(), notified: false, surfaced: new Set(), pending: new Set() };
       episode.reason = reason;
-      if (permanent && !episode.notified) { episode.notified = true; surface(reason); }
-      else tick();
+      if (permanent && !episode.surfaced.has(reason)) {
+        episode.pending.add(reason);
+        episode.notified = true;
+      }
+      tick();
     },
     recovered() { episode = undefined; },
     tick,
   };
 }
-const FAILURE_PROMPT_LIMIT = 8;
 
 export async function supervisionNeeded(record, env = helperEnvironment(record)) {
   if (existsSync(`${record.state}/.afk`)) return false;
@@ -162,22 +172,19 @@ export default { id: "firstmate.native.v2", async setup(ctx) {
    const paths = { root: record.root, home: record.home, state: record.state, config: record.config };
   let reconcileInFlight;
   let lastFailure = "";
-  const surfaced = new Set();
    const notices = createFailureNotice(reason => {
     if (stopped) return;
     if (lastFailure === reason) return;
     lastFailure = reason;
     console.error(reason);
     writePrivate(`${record.state}/.opencode-v2-failure.json`, { version: 1, sessionID: record.sessionID, claimID: record.claimID, reason: String(reason).slice(0, 12000) });
-   }, reason => {
+   }, (reason, notice) => {
     if (stopped) return;
     const text = String(reason).slice(0, 4000);
-    if (surfaced.has(text) || surfaced.size >= FAILURE_PROMPT_LIMIT) return;
-    surfaced.add(text);
     try { ctx.ui.toast?.show({ variant: "error", message: "Firstmate watcher failure: " + text }); } catch (error) { console.error("V2 failure toast: " + error.message); }
     void (async () => {
       const prompt = await encodeFirstmateOperationalInput(record.root, "watcher", `WATCHER FAILURE - native V2 supervision reported a failure; drain queued wakes with bin/fm-wake-drain.sh, inspect this reason, and probe recovery manually with bin/fm-watch-arm.sh if continuity is not restored.\n\n${text}`);
-      await journal.deliver(journal.prepare(prompt, "failure:" + record.claimID + ":" + createHash("sha256").update(text).digest("hex")));
+      await noticeJournal.deliver(noticeJournal.prepare(prompt, "failure:" + record.claimID + ":" + notice.episode + ":" + createHash("sha256").update(text).digest("hex")));
     })().catch(error => console.error("V2 failure prompt: " + error.message));
    });
    const failure = (reason, detail) => { if (!stopped) notices.failure(reason, detail); };
@@ -194,7 +201,17 @@ export default { id: "firstmate.native.v2", async setup(ctx) {
     try { const value = live(readRegistration(record.sessionID)); canonical(value, false); return !stopped && value.claimID === record.claimID && value.ownerPID === process.pid; }
     catch { return false; }
   };
-  const journal = createAdmissionJournal(paths, record.sessionID, input => ctx.client.session.prompt(input, { signal: AbortSignal.any([abort.signal, AbortSignal.timeout(10000)]) }), failure, { valid: validClaim, signal: abort.signal });
+   const journal = createAdmissionJournal(paths, record.sessionID, input => ctx.client.session.prompt(input, { signal: AbortSignal.any([abort.signal, AbortSignal.timeout(10000)]) }), failure, { valid: validClaim, signal: abort.signal });
+   const noticeJournal = createAdmissionJournal(paths, record.sessionID, input => ctx.client.session.prompt(input, { signal: AbortSignal.any([abort.signal, AbortSignal.timeout(10000)]) }), reason => console.error("V2 failure notice admission: " + reason), {
+     signal: abort.signal,
+     valid: () => {
+       try {
+         const value = canonical(readRegistration(record.sessionID), false), owner = identity(process.pid);
+         return !stopped && value.lifecycle !== "retired" && value.ownerPID === process.pid && owner.start === value.ownerStart && owner.boot === value.hostBootID &&
+           ["claimID", "ownerPID", "ownerStart", "hostBootID", "sessionID", "root", "home", "state", "config", "serviceURL"].every(key => value[key] === record[key]);
+       } catch { return false; }
+     },
+   });
    const coordinatorOptions = { owns, admission: journal, failure, needs: () => supervisionNeeded(record), processIdentity: identity };
    coordinator = createWatchArmCoordinator(paths, () => {}, coordinatorOptions);
   globalThis[slot] = coordinator;

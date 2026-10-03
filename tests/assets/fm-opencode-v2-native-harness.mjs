@@ -236,6 +236,7 @@ async function tuiRole([codeRoot, socketFile, specFile, outFile]) {
   const ids = new Set();
   let rejectPrompts = spec.rejectPrompts || 0;
   let outageUntil = 0;
+  let outageAttemptStart = 0;
   let lostAcks = spec.lostAckPrompts || 0;
   const events = [];
   let notify = null;
@@ -245,10 +246,18 @@ async function tuiRole([codeRoot, socketFile, specFile, outFile]) {
   // captured instead of scheduled, so a case can tell an event-triggered
   // reconcile from the timer fallback and fire the fallback explicitly.
   const timers = [];
-  if (spec.manualTimer) {
+  let noticeClock = 0;
+  if (spec.manualNoticeClock) Object.defineProperty(performance, "now", { value: () => noticeClock });
+  if (spec.manualTimer || spec.captureTimer) {
     const realSetInterval = globalThis.setInterval, realClearInterval = globalThis.clearInterval;
     globalThis.setInterval = (fn, ms, ...rest) => {
       if (ms !== 2000) return realSetInterval(fn, ms, ...rest);
+      if (!spec.manualTimer) {
+        const handle = realSetInterval(fn, ms, ...rest);
+        handle.fn = fn;
+        timers.push(handle);
+        return handle;
+      }
       const handle = { manual: true, fn, unref() { return handle; }, ref() { return handle; } };
       timers.push(handle);
       return handle;
@@ -348,9 +357,17 @@ async function tuiRole([codeRoot, socketFile, specFile, outFile]) {
     else if (step.do === "shell") Object.assign(entry, await request(socket(), { op: "shell", sessionID: step.sessionID || spec.sessionID, command: step.command, extraEnv: step.extraEnv }, 60000));
     else if (step.do === "observer-push") Object.assign(entry, await request(socket(), { op: "environment", sessionID: spec.sessionID, variables: step.variables }));
     else if (step.do === "write") writeFileSync(step.path, step.text);
-    else if (step.do === "outage") { outageUntil = Date.now() + step.ms; entry.until = outageUntil; }
+    else if (step.do === "outage") { outageUntil = Date.now() + step.ms; outageAttemptStart = record.prompts.length; entry.until = outageUntil; }
+    else if (step.do === "advance-notice-clock") { noticeClock += step.ms; entry.clock = noticeClock; }
+    else if (step.do === "notice-count") {
+      entry.count = record.admitted.filter(a => a.text.includes("WATCHER FAILURE")).length;
+      entry.toasts = (record.toasts || []).filter(a => a.variant === "error").length;
+    }
     else if (step.do === "stream-error") { streamBroken = true; notify?.(); }
-    else if (step.do === "tick") { entry.timers = timers.length; for (const t of [...timers]) t.fn(); await sleep(50); }
+    else if (step.do === "tick") {
+      entry.timers = timers.length;
+      for (let i = 0; i < (step.count || 1); i++) { for (const t of [...timers]) t.fn(); await sleep(50); }
+    }
     else if (step.do === "wait") {
       // Bounded readiness polling; entry.ok records whether the condition held.
       const deadline = Date.now() + (step.timeoutMs || 20000);
@@ -360,7 +377,12 @@ async function tuiRole([codeRoot, socketFile, specFile, outFile]) {
         if (step.until === "lifecycle") { try { return owner.readRegistration(spec.sessionID).lifecycle === step.value; } catch { return false; } }
         if (step.until === "prompted") return record.prompts.filter((a) => new RegExp(step.match || ".").test(a.text)).length >= (step.count || 1);
         if (step.until === "admitted") return record.admitted.filter((a) => new RegExp(step.match || ".").test(a.text)).length >= (step.count || 1);
+        if (step.until === "outage-attempt") return record.prompts.slice(outageAttemptStart).some(a => new RegExp(spec.faultMatch || ".").test(a.text));
         if (step.until === "file") return existsSync(step.path);
+        if (step.until === "diagnostic") {
+          try { return new RegExp(step.match).test(JSON.parse(readFileSync(`${spec.state}/.opencode-v2-failure.json`, "utf8")).reason); }
+          catch { return false; }
+        }
         if (step.until === "lock") { try { return readFileSync(`${spec.state}/.lock`, "utf8").trim() === String(process.pid); } catch { return false; } }
         if (step.until === "shell-ok") return (await request(socket(), { op: "shell", sessionID: step.sessionID || spec.sessionID, command: step.command, extraEnv: step.extraEnv }, 60000)).code === 0;
         throw new Error("unknown wait condition " + step.until);

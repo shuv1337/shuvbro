@@ -84,6 +84,74 @@ step_ok() {  # <out> <index> <label>
   jq -e --argjson i "$2" '.steps[$i].ok == true' "$1" >/dev/null || fail "$3: $(jq -c --argjson i "$2" '{step: .steps[$i], failures}' "$1")"
 }
 
+notice_count() { jq '[.admitted[] | select(.text | contains("WATCHER FAILURE"))] | length' "$1"; }
+
+test_notice_episodes() {
+  tui_case notice-episodes 1
+  local out="$CASE/out.json" steps
+  steps=$(jq -nc --argjson a "$(owned_and_armed "$(lock_step)")" --arg s "$HOME_DIR/state" '
+    $a + [range(1;11) as $i |
+      {do:"outage",ms:600000},
+      {do:"write",path:($s + "/notice.status"),text:([range(1;$i+1) | "done: notice " + tostring + "\n"] | join(""))},
+      {do:"wait",until:"outage-attempt",timeoutMs:20000},{do:"sleep",ms:3000},
+      {do:"wait",until:"diagnostic",match:"undelivered|admission",timeoutMs:20000},
+      {do:"advance-notice-clock",ms:31000},
+      {do:"wait",until:"admitted",match:"WATCHER FAILURE",count:$i,timeoutMs:10000},
+      {do:"outage",ms:0},
+      {do:"wait",until:"admitted",match:"WATCHER FIRED",count:$i,timeoutMs:20000},
+      {do:"sleep",ms:3000}]')
+  v2_tui "$CASE" "$(spec "$(jq -nc --argjson s "$steps" '{manualNoticeClock:true,faultMatch:"WATCHER FIRED",steps:$s}')")" "$out"
+  jq -e 'all(.steps[] | select(.step=="wait"); .ok)' "$out" >/dev/null || fail "notice episode positive control failed: $(jq -c '.steps' "$out")"
+  [ "$(notice_count "$out")" = 10 ] || fail "ten recovered stalls must produce ten notices, not lifetime suppression"
+  [ "$(wake_admissions "$out")" = 10 ] || fail "episode test did not deliver all ten wakes"
+  jq -e '[.toasts[] | select(.variant=="error")] | length==10' "$out" >/dev/null || fail "episode toast count differs"
+  pass "real TUI setup: ten recovered persistent stalls produce ten notices and wakes, beyond the old lifetime cap"
+}
+
+test_notice_permanent_after_stall() {
+  tui_case notice-permanent 1
+  local out="$CASE/out.json" steps
+  steps=$(jq -nc --argjson a "$(owned_and_armed "$(lock_step)")" --arg s "$HOME_DIR/state" '
+    $a + [{do:"outage",ms:600000},{do:"write",path:($s+"/notice.status"),text:"done: stalled\n"},
+    {do:"wait",until:"diagnostic",match:"undelivered|admission",timeoutMs:20000},
+    {do:"advance-notice-clock",ms:31000},{do:"wait",until:"admitted",match:"WATCHER FAILURE",timeoutMs:10000},
+    {do:"restart-service"},{do:"wait",until:"diagnostic",match:"stale.*rebind",timeoutMs:10000},
+    {do:"tick",count:100},{do:"notice-count"},{do:"advance-notice-clock",ms:5000},
+    {do:"wait",until:"admitted",match:"WATCHER FAILURE.*",count:2,timeoutMs:10000},
+    {do:"advance-notice-clock",ms:60000},{do:"tick",count:100}]')
+  v2_tui "$CASE" "$(spec "$(jq -nc --argjson s "$steps" '{manualNoticeClock:true,captureTimer:true,faultMatch:"WATCHER FIRED",steps:$s}')")" "$out"
+  jq -e 'all(.steps[] | select(.step=="wait"); .ok)' "$out" >/dev/null || fail "permanent failure positive control failed: $(jq -c '.steps' "$out")"
+  [ "$(notice_count "$out")" = 2 ] || fail "permanent rebind notice suppressed or repeated"
+  jq -e 'all(.steps[] | select(.step=="notice-count"); .count==1 and .toasts==1)' "$out" >/dev/null || fail "notice rate limit did not defer the permanent notice"
+  jq -e '[.admitted[] | select(.text|contains("WATCHER FAILURE"))][1].text | contains("rebind")' "$out" >/dev/null || fail "missing actionable rebind notice"
+  jq -e '[.toasts[] | select(.variant=="error")] | length==2' "$out" >/dev/null || fail "rebind toast suppressed or repeated"
+  jq -e 'all(.steps[] | select(.step=="tick"); .timers>0)' "$out" >/dev/null || fail "notice flood did not drive the actual reconcile timer"
+  pass "real TUI setup: stale proof after a stall surfaces its rebind notice once despite repeated failing ticks"
+}
+
+test_notice_transient() {
+  tui_case notice-transient 1
+  local out="$CASE/out.json" steps
+  steps=$(jq -nc --argjson a "$(owned_and_armed "$(lock_step)")" --arg s "$HOME_DIR/state" '
+    $a + [{do:"outage",ms:600000},{do:"write",path:($s+"/notice.status"),text:"done: transient\n"},
+    {do:"wait",until:"diagnostic",match:"undelivered|admission",timeoutMs:20000},
+    {do:"advance-notice-clock",ms:29000},{do:"sleep",ms:3000},{do:"outage",ms:0},
+    {do:"wait",until:"admitted",match:"WATCHER FIRED",timeoutMs:20000},{do:"sleep",ms:3000},
+    {do:"advance-notice-clock",ms:60000},{do:"sleep",ms:3000}]')
+  v2_tui "$CASE" "$(spec "$(jq -nc --argjson s "$steps" '{manualNoticeClock:true,faultMatch:"WATCHER FIRED",steps:$s}')")" "$out"
+  jq -e 'all(.steps[] | select(.step=="wait"); .ok)' "$out" >/dev/null || fail "transient positive control failed"
+  [ "$(wake_admissions "$out")" = 1 ] && [ "$(notice_count "$out")" = 0 ] || fail "transient failure prompted or lost its wake"
+  jq -e '[.toasts[]? | select(.variant=="error")] | length==0' "$out" >/dev/null || fail "transient error toast"
+  pass "real TUI setup: recovered sub-30-second stall retains diagnostic but never prompts or toasts"
+}
+
+if [ "${FM_V2_NOTICE_ONLY:-0}" = 1 ]; then
+  test_notice_episodes
+  test_notice_permanent_after_stall
+  test_notice_transient
+  exit 0
+fi
+
 # --- activation, inertness, reload --------------------------------------------
 
 # Positive control for everything below: activation publishes the claim and
@@ -281,12 +349,9 @@ test_stream_loss_falls_back_to_timer_and_recovers_a_wake() {
   [ "$(wake_admissions "$out")" = 1 ] || fail "expected exactly one wake admission after stream loss: $(jq -c '.admitted' "$out")"
   [ "$(jq '[.admitted[] | select(.text | test("WATCHER FAILURE") | not)] | length' "$out")" = 2 ] || fail "stream loss produced prompts beyond the startup nudge and the one wake: $(jq -c '.admitted' "$out")"
   jq -e '[.failures[] | select(test("event stream"))] | length >= 1' "$out" >/dev/null || fail "stream loss was not reported as a bounded diagnostic"
-  jq -e '[.admitted[] | select(.text | test("WATCHER FAILURE")) | select((.text | test("event stream interrupted")) and .delivery == "queue" and .sessionID == "ses_lead")] | length == 1' "$out" >/dev/null \
-    || fail "stream loss was not queued exactly once to the exact lead session: $(jq -c '[.prompts[] | select(.text | test("WATCHER FAILURE"))]' "$out")"
-  [ "$(jq '[.prompts[] | select(.text | test("WATCHER FAILURE"))] | length' "$out")" = 1 ] || fail "the failure prompt repeated: $(jq -c '.prompts' "$out")"
-  jq -e '[.toasts[]? | select(.variant == "error" and (.message | test("event stream interrupted")))] | length == 1' "$out" >/dev/null \
-    || fail "stream loss was not shown once in the TUI: $(jq -c '.toasts' "$out")"
-  pass "tui: after stream loss the failure is toasted and queued once to the lead, the timer fallback arms and a genuine wake is admitted once"
+   [ "$(notice_count "$out")" = 0 ] || fail "self-healing stream loss prompted manual repair"
+   jq -e '[.toasts[]? | select(.variant == "error")] | length == 0' "$out" >/dev/null || fail "self-healing stream loss produced an error toast"
+   pass "tui: stream loss retains a diagnostic without a repair notice; timer fallback arms and a genuine wake is admitted once"
 }
 
 # Interrupted turn: no self-generated continuation. Positive control in the same
@@ -636,6 +701,9 @@ EOF2
 }
 
 v2_run_cases \
+  test_notice_episodes \
+  test_notice_permanent_after_stall \
+  test_notice_transient \
   test_activation_publishes_and_nudges_once_without_events \
   test_inactive_tui_stays_inert \
   test_copied_activation_is_inert_in_another_process \

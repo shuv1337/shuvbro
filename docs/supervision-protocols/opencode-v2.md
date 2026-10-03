@@ -26,8 +26,10 @@ When this session owns supervision and away mode is not active:
    Subsequent attempts continue with capped backoff while ownership remains valid; confirmed canonical queue acknowledgement retires the obsolete transport obligation without reporting it as admitted.
 6. Ordinary wake: do not ask the model to re-arm because continuity is plugin-owned.
 7. Unexpected child close enters bounded exponential retry; transient failures immediately update the private diagnostic but do not request manual repair.
-   A failure or retained admission unresolved for 30 seconds surfaces a bounded, deduplicated toast and operational prompt on the next two-second reconciliation tick; retry exhaustion, invalid ownership/service proof or inability to journal a wake surfaces immediately.
-   Verified recovery clears the notice episode without clearing the diagnostic or consuming canonical wake rows.
+   A failure or retained admission unresolved for 30 seconds becomes eligible for a toast and operational prompt on the next two-second reconciliation tick; retry exhaustion, invalid ownership/service proof or inability to journal a wake becomes eligible immediately, even after an earlier stall notice.
+   Notices are rate-limited to one per five seconds; distinct actionable reasons queue rather than being dropped, with exact-text deduplication scoped to the failure episode and no lifetime cap.
+   Verified recovery clears the episode and its queued notices without clearing the diagnostic or consuming canonical wake rows; a later failure can notify again with a fresh admission identity.
+   Repair notices may reach the frozen lead session while its service proof is stale only if the canonical registration still proves this same TUI process, claim, paths and endpoint; this notice-only exception never rebinds ownership or admits a wake.
    An interrupted model turn alone never schedules continuation; a later durable fleet wake may resume supervision.
 8. Failure or missing cycle only: if the plugin reports a watcher failure, drain queued wakes, inspect the failure text, and use `bin/fm-watch-arm.sh` manually only as a short recovery probe.
 9. Never use shell `&` for watcher supervision.
