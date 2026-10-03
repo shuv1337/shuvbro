@@ -15,7 +15,15 @@
 # default session. Teardown always runs through the helper, which verifies
 # the default-session tripwire and the lab's removal.
 #
-# Owner integration knobs (defaults are a stand-in owner script):
+# Qualification requires the REAL owner: the live runner's leg F
+# (tests/fm-opencode-v2-shared-service-live.test.sh) sets every owner knob below
+# to the activated shuvcode TUI, its .lock, registry and watcher. Without those
+# knobs this script refuses, unless FM_V2_HERDR_TRANSPORT_SMOKE=1 selects the
+# built-in stand-in owner as a Herdr transport smoke
+# (tests/fm-opencode-v2-herdr-transport-smoke-live.test.sh); that smoke proves
+# only the lab/attach/detach plumbing and is refused under FM_V2_ACCEPT_STRICT=1.
+#
+# Owner integration knobs (stand-in defaults apply only to the transport smoke):
 #   FM_V2_HERDR_OWNER_CMD    command typed into the lab pane to start the owner;
 #                            later the real shuvcode TUI launch helper
 #   FM_V2_HERDR_OWNER_PID_CMD   prints the live owner pid (later: cat <state>/.lock)
@@ -36,7 +44,23 @@ set -u
 
 # shellcheck source=tests/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
-fm_live_gate opt-in FM_OPENCODE_V2_HERDR_LIVE herdr termctrl jq
+
+# Fixture boundary: no ambient native session identity or activation, and a
+# token-only registry namespace for any production helper this run reaches.
+unset OPENCODE_SESSION_ID FM_V2_ACTIVATION
+export FM_V2_REGISTRY_NAMESPACE="${FM_V2_REGISTRY_NAMESPACE:-v2iso$$}"
+case "$FM_V2_REGISTRY_NAMESPACE" in default) echo "not ok - refusing the default registry namespace" >&2; exit 1 ;; esac
+fm_live_gate opt-in FM_OPENCODE_V2_HERDR_LIVE,FM_OPENCODE_V2_HERDR_SMOKE_LIVE herdr termctrl jq
+REAL_KNOBS=1
+for knob in FM_V2_HERDR_OWNER_CMD FM_V2_HERDR_OWNER_PID_CMD FM_V2_HERDR_SENTINEL_CMD FM_V2_HERDR_RETIRED_CMD FM_V2_HERDR_EXEC_CMD; do
+  [ -n "${!knob:-}" ] || REAL_KNOBS=0
+done
+if [ "$REAL_KNOBS" = 0 ]; then
+  [ "${FM_V2_HERDR_TRANSPORT_SMOKE:-0}" = 1 ] \
+    || fail "the Herdr owner leg needs the real owner knobs (run leg F of tests/fm-opencode-v2-shared-service-live.test.sh) or FM_V2_HERDR_TRANSPORT_SMOKE=1 for the stand-in transport smoke"
+  [ "${FM_V2_ACCEPT_STRICT:-0}" != 1 ] \
+    || fail "strict qualification refuses the stand-in owner: the transport smoke is not product evidence"
+fi
 [ -r /proc/self/stat ] || { printf 'skip: live: /proc process-start tokens are required\n'; exit 0; }
 
 HELPER=${HERDR_LAB_HELPER:-$ROOT/bin/fm-herdr-lab.sh}
@@ -52,6 +76,7 @@ SESSION=
 PROVISIONED=0
 CLIENT=v2herdr$$
 EXEC_PID=
+EXEC_TOKEN=
 FAILED=0
 export TERMCTRL_RUNTIME_DIR="$LAB/tc"
 mkdir -p "$TERMCTRL_RUNTIME_DIR"
@@ -66,7 +91,11 @@ lab() { helper run "$SESSION" "$@"; }
 cleanup() {
   local status=$?
   termctrl stop "$CLIENT" >/dev/null 2>&1 || true
-  [ -z "$EXEC_PID" ] || kill "$EXEC_PID" 2>/dev/null || true
+  # Signal the execution process only if it is still the lab-owned one.
+  if [ -n "$EXEC_PID" ] && [ "$(start_token "$EXEC_PID" 2>/dev/null)" = "${EXEC_TOKEN:-x}" ] \
+    && tr '\0' ' ' < "/proc/$EXEC_PID/cmdline" 2>/dev/null | grep -qF "$LAB"; then
+    kill "$EXEC_PID" 2>/dev/null || true
+  fi
   if [ "$PROVISIONED" = 1 ]; then
     if ! helper teardown "$SESSION"; then
       printf 'not ok - lab teardown through the helper failed for %s\n' "$SESSION" >&2
@@ -167,6 +196,8 @@ PANE=$(printf '%s' "$WS" | jq -r '.result.root_pane.pane_id // empty')
 EXEC_PID=$(LAB=$LAB bash -c "$EXEC_CMD" | tail -1)
 if [ -z "$EXEC_PID" ] || ! kill -0 "$EXEC_PID" 2>/dev/null; then fail "stand-in shared execution did not start"; fi
 EXEC_TOKEN=$(start_token "$EXEC_PID")
+tr '\0' ' ' < "/proc/$EXEC_PID/cmdline" 2>/dev/null | grep -qF "$LAB" \
+  || fail "the shared-execution pid $EXEC_PID is not lab-owned: $(tr '\0' ' ' < "/proc/$EXEC_PID/cmdline" 2>/dev/null)"
 
 lab pane run "$PANE" "$OWNER_CMD" >/dev/null || fail "could not start the owner in lab pane $PANE"
 wait_for "${FM_V2_HERDR_OWNER_READY_TRIES:-100}" sentinel_live || fail "the owner never published its live supervision sentinel"

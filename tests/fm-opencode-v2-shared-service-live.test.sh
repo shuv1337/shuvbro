@@ -129,7 +129,10 @@ http.createServer((req, res) => {
     const userText = lastUser ? text(lastUser.content) : "";
     // The startup nudge from a real activated TUI maps to the minimal canonical
     // ownership step (MOCK_STARTUP_CMD), so the lead acquires its home lock.
+    // A watcher wake maps to the canonical handling step (MOCK_WAKE_CMD: real
+    // drain plus generation-bound acknowledgement, recorded per success).
     const match = /RUN: ([^\n]+)/.exec(userText)
+      || (process.env.MOCK_WAKE_CMD && userText.includes("WATCHER FIRED") ? [null, process.env.MOCK_WAKE_CMD] : null)
       || (process.env.MOCK_STARTUP_CMD && userText.includes("bin/fm-session-start.sh") ? [null, process.env.MOCK_STARTUP_CMD] : null);
     const tools = (parsed.tools || []).map((t) => t.function?.name);
     appendFileSync(log, JSON.stringify({ messages: messages.length, lastIsTool, run: match ? match[1] : null }) + "\n");
@@ -148,7 +151,9 @@ http.createServer((req, res) => {
   });
 }).listen(Number(port), "127.0.0.1");
 EOF
-MOCK_STARTUP_CMD='bash bin/fm-lock.sh' node "$LAB/mock.mjs" "$MOCK_PORT" "$LAB/mock.log" >/dev/null 2>&1 &
+# shellcheck disable=SC2016 # expanded by the lead model shell
+MOCK_WAKE_CMD='err=$(bin/fm-wake-drain.sh 2>&1 >/dev/null); seq=$(printf "%s\n" "$err" | sed -n "s/^WAKE_ACK_REQUIRED:.*--ack-through \([0-9][0-9]*\) --recovery-generation .*/\1/p"); gen=$(printf "%s\n" "$err" | sed -n "s/^WAKE_ACK_REQUIRED:.*--recovery-generation \([A-Za-z0-9._-][A-Za-z0-9._-]*\)$/\1/p"); [ -n "$seq" ] && [ -n "$gen" ] && bin/fm-wake-drain.sh --ack-through "$seq" --recovery-generation "$gen" && printf "acked %s %s\n" "$seq" "$(date +%s%N)" >> '"$LAB"'/handled.log'
+MOCK_STARTUP_CMD='bash bin/fm-lock.sh' MOCK_WAKE_CMD="$MOCK_WAKE_CMD" node "$LAB/mock.mjs" "$MOCK_PORT" "$LAB/mock.log" >/dev/null 2>&1 &
 MOCK_PID=$!
 
 mkdir -p "$LAB/xdg/config/shuvcode"
@@ -216,6 +221,13 @@ run_in_session() {  # <session-id> <command> [unused]
   return 1
 }
 
+# The exact-session terminal evidence for one tool call: its recorded status and
+# error message in that session's transcript.
+tool_state() {  # <session-id> <command>
+  jq -c --arg c "$2" '[.data.messages[]? | select(.type == "assistant") | .content[]? | select(.type == "tool" and .state.input.command == $c) | .state] | last | {status, error: (.error.message // null)}' \
+    "$LAB/transcript-$1.json" 2>/dev/null
+}
+
 # --- phase 2: plugin inventory ----------------------------------------------
 PRIMARY="$LAB/primary"
 make_live_primary "$PRIMARY"
@@ -265,8 +277,10 @@ if [ -e "$LAB/marker-unrelated" ]; then pass "live phase 3: an unrelated root se
 else live_fail "live guard scope: an unrelated root session at the primary was refused lead-only policy"; fi
 if [ -e "$LAB/marker-child" ]; then pass "live phase 3: a child carrying the inherited marker ran the protected command"
 else live_fail "live guard scope: a child with an inherited marker was refused lead-only policy"; fi
-if [ ! -e "$LAB/marker-lead" ]; then pass "live phase 3: the exact-marked lead's protected command was blocked before execution"
-else live_fail "live guard scope: the exact-marked lead's protected command executed"; fi
+lead_state=$(tool_state "$LEAD" "$PROTECT_PREFIX $LAB/marker-lead")
+if [ ! -e "$LAB/marker-lead" ] && printf '%s' "$lead_state" | jq -e '.status == "error" and (.error | test("rebind"))' >/dev/null; then
+  pass "live phase 3: the exact-marked unregistered lead's command was refused with the stale-scope rebind diagnostic before execution"
+else live_fail "live guard scope: exact-marked unregistered lead: marker=$([ -e "$LAB/marker-lead" ] && echo present || echo absent) tool=$lead_state"; fi
 
 # --- phase 4: model-shell identity on the shared service ---------------------
 # Probed in the unrelated root session: an exact-marked lead without a valid
@@ -316,6 +330,7 @@ lead_active() {  # <primary> <home> <session>
 }
 lead_command() {  # <primary> <home> <session>: the activation launch as argv
   printf '%s\n' "${ISO[@]}" FM_HOME="$2" FM_STATE_OVERRIDE="$2/state" FM_CONFIG_OVERRIDE="$2/config" \
+    FM_POLL=1 FM_SIGNAL_GRACE=0 FM_HEARTBEAT=999999 FM_CHECK_INTERVAL=999999 \
     FM_V2_REGISTRY_NAMESPACE="$FM_V2_REGISTRY_NAMESPACE" bash "$1/bin/fm-opencode-v2-primary.sh" --session "$3" --native-binary "$SC"
 }
 launch_lead() {  # <term> <primary> <home> <session>
@@ -345,12 +360,18 @@ if wait_until 120 lead_active "$PRIMARY" "$HOME_A" "$LEAD_A"; then
     *) live_fail "registered owner pid $OWNER_A is not the native UI binary: $(ps -o args= -p "$OWNER_A")" ;;
   esac
   [ "$OWNER_A" != "$SERVICE_PID" ] || live_fail ".lock names the shared service"
-  run_in_session "$LEAD_A" "cd projects/x && touch $LAB/reg-deny" || true
   run_in_session "$LEAD_A" "touch $LAB/reg-allow" || true
-  if [ ! -e "$LAB/reg-deny" ] && [ -e "$LAB/reg-allow" ]; then
-    pass "live leg A: the registered lead's protected command was blocked and its allowed command ran"
+  allow_state=$(tool_state "$LEAD_A" "touch $LAB/reg-allow")
+  run_in_session "$LEAD_A" "cd projects/x && touch $LAB/reg-deny" || true
+  deny_state=$(tool_state "$LEAD_A" "cd projects/x && touch $LAB/reg-deny")
+  run_in_session "$LEAD_A" "echo ok; bin/fm-watch-arm.sh --restart &" || true
+  arm_state=$(tool_state "$LEAD_A" "echo ok; bin/fm-watch-arm.sh --restart &")
+  if [ -e "$LAB/reg-allow" ] && printf '%s' "$allow_state" | jq -e '.status == "completed"' >/dev/null \
+    && [ ! -e "$LAB/reg-deny" ] && printf '%s' "$deny_state" | jq -e '.status == "error" and (.error | test("^\\[persistent-cd\\] "))' >/dev/null \
+    && printf '%s' "$arm_state" | jq -e '.status == "error" and (.error | test("^\\[watcher-background\\] "))' >/dev/null; then
+    pass "live leg A: in one lead session the allowed command completed, cd was rejected as [persistent-cd] and the backgrounded arm as [watcher-background], before execution"
   else
-    live_fail "registered lead guard: deny-marker=$([ -e "$LAB/reg-deny" ] && echo present || echo absent) allow-marker=$([ -e "$LAB/reg-allow" ] && echo present || echo absent)"
+    live_fail "registered lead guard: allow=$allow_state marker=$([ -e "$LAB/reg-allow" ] && echo present || echo absent) deny=$deny_state deny-marker=$([ -e "$LAB/reg-deny" ] && echo present || echo absent) arm=$arm_state"
   fi
 else
   live_fail "lead A never became active: record=$(owner "$PRIMARY" read "$LEAD_A") lock=$(cat "$HOME_A/state/.lock" 2>/dev/null) failure=$(cat "$HOME_A/state/.opencode-v2-failure.json" 2>/dev/null)"
@@ -421,6 +442,40 @@ else
   live_fail "observer leg: lock=$(cat "$LAB/observer-lock" 2>/dev/null) claim=$(record_field "$PRIMARY" "$LEAD_A" claimID) owner=$(record_field "$PRIMARY" "$LEAD_A" ownerPID)"
 fi
 termctrl stop observer >/dev/null 2>&1 || true
+fi
+
+# Leg G: queued wakes from two real workers, one while the lead is busy and one
+# while it is idle. Each worker's real turn appends a status line to a task the
+# lead supervises; the lead's watcher wakes it; the wake is admitted queued and
+# handled exactly once through the real drain/ack (counted by successful
+# canonical acknowledgements, not text).
+if leg G && [ -n "${W1:-}" ] && [ -n "${W2:-}" ]; then
+  printf 'kind=ship\n' > "$HOME_A/state/t2.meta"
+  : > "$LAB/handled.log"
+  api post "/api/session/$LEAD_A/prompt" "$(jq -nc --arg t "RUN: sleep 12; touch $LAB/busy-done" '{text: $t, delivery: "queue"}')" >/dev/null
+  sleep 2
+  run_in_session "$W1" "printf 'done: w1 finished\\n' >> $HOME_A/state/t1.status" || true
+  acks() { grep -c '^acked ' "$LAB/handled.log" 2>/dev/null || echo 0; }
+  one_ack() { [ "$(acks)" -ge 1 ]; }
+  wait_until 120 one_ack || live_fail "the busy-lead wake was never handled"
+  busy_done=no
+  [ -e "$LAB/busy-done" ] && busy_done=yes
+  first_ack_ns=$(awk '/^acked /{print $3; exit}' "$LAB/handled.log")
+  done_ns=$(date -r "$LAB/busy-done" +%s%N 2>/dev/null || echo 0)
+  sleep 3
+  run_in_session "$W2" "printf 'done: w2 finished\\n' >> $HOME_A/state/t2.status" || true
+  two_acks() { [ "$(acks)" -ge 2 ]; }
+  wait_until 60 two_acks || live_fail "the idle-lead wake was never handled"
+  sleep 4
+  api get "/api/experimental/session/$LEAD_A/export" > "$LAB/transcript-$LEAD_A.json" 2>/dev/null || true
+  wake_msgs=$(jq '[.data.messages[]? | select(.type == "user" and (.text | test("WATCHER FIRED")))] | length' "$LAB/transcript-$LEAD_A.json")
+  if [ "$busy_done" = yes ] && [ "$(acks)" = 2 ] && [ "$wake_msgs" = 2 ] && [ -n "$first_ack_ns" ] && [ "$first_ack_ns" -ge "$done_ns" ]; then
+    pass "live leg G: a wake raised while the lead was busy was queued and handled after its turn, an idle-lead wake was handled promptly; two wakes, two canonical acks, no duplicate execution"
+  else
+    live_fail "busy/idle wakes: busy-done=$busy_done acks=$(acks) wake-prompts=$wake_msgs first-ack=$first_ack_ns busy-turn-end=$done_ns handled=$(tr '\n' ';' < "$LAB/handled.log")"
+  fi
+elif leg G; then
+  live_fail "leg G needs the two workers from leg C"
 fi
 
 # Leg E: service restart, then the same owner's /firstmate-rebind.

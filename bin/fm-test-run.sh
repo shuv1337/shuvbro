@@ -330,6 +330,7 @@ family_for_basename() {
     fm-herdr-version-floor-live-e2e.test.sh|\
     fm-opencode-primary-live-e2e.test.sh|fm-opencode-v2-worker-live-e2e.test.sh|fm-pi-branch-live-e2e.test.sh|\
     fm-opencode-v2-shared-service-live.test.sh|fm-opencode-v2-herdr-detach-live.test.sh|\
+    fm-opencode-v2-herdr-transport-smoke-live.test.sh|\
     fm-pi-branch-responsiveness-live-e2e.test.sh|\
     fm-pi-primary-live-e2e.test.sh|fm-pi-codex-native.test.sh|fm-omp-primary-live-e2e.test.sh|\
     fm-sessionstart-hook-live-e2e.test.sh|fm-sessionstart-instruction-refresh-live-e2e.test.sh|\
@@ -660,6 +661,7 @@ tests/fm-on.test.sh 34087
 tests/fm-opencode-primary-live-e2e.test.sh 21
 tests/fm-opencode-v2-guard-acceptance.test.sh 45000
 tests/fm-opencode-v2-herdr-detach-live.test.sh 20
+tests/fm-opencode-v2-herdr-transport-smoke-live.test.sh 20
 tests/fm-opencode-v2-launch.test.sh 15000
 tests/fm-opencode-v2-ownership-acceptance.test.sh 40000
 tests/fm-opencode-v2-plugin.test.sh 60000
