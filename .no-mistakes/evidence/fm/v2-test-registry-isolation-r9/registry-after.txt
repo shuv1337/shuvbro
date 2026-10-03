@@ -1,0 +1,2 @@
+/home/shuv/.local/state/shuvbro/opencode-v2
+/home/shuv/.local/state/shuvbro/opencode-v2/default

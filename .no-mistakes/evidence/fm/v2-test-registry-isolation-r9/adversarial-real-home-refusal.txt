@@ -1,0 +1,12 @@
+tests/fixtures/fm-opencode-v2-provider-host.mjs ns=unset rc=1 :: refusing unset/default V2 test registry namespace
+tests/fixtures/fm-opencode-v2-provider-host.mjs ns=default rc=1 :: refusing unset/default V2 test registry namespace
+tests/fixtures/fm-opencode-v2-provider-host.mjs ns=../x rc=1 :: refusing invalid V2 test registry namespace
+tests/fixtures/fm-opencode-v2-real-recovery.mjs ns=unset rc=1 :: refusing unset/default V2 test registry namespace
+tests/fixtures/fm-opencode-v2-real-recovery.mjs ns=default rc=1 :: refusing unset/default V2 test registry namespace
+tests/fixtures/fm-opencode-v2-real-recovery.mjs ns=../x rc=1 :: refusing invalid V2 test registry namespace
+tests/assets/fm-opencode-v2-native-harness.mjs ns=unset rc=1 :: refusing unset/default V2 test registry namespace
+tests/assets/fm-opencode-v2-native-harness.mjs ns=default rc=1 :: refusing unset/default V2 test registry namespace
+tests/assets/fm-opencode-v2-native-harness.mjs ns=../x rc=1 :: refusing invalid V2 test registry namespace
+real registry listing: default
+real registry unchanged (mtime/listing hash identical)
+no lab dir created

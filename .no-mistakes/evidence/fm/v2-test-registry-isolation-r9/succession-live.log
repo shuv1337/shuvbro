@@ -1,0 +1,18 @@
+ok - session start makes native .lock the activated TUI process PID (424357)
+ok - first arm: one watcher, no turn-end-guard prompt, first wake acknowledged
+ok - native TUI entry completed setup
+ok - steady succession: 10 wakes, each one journaled message ID and one canonical ack, one watcher, fresh beacon, empty queue, zero failure prompts
+tests/fm-opencode-v2-acceptance-lib.sh: line 100: /proc/506165/cmdline: No such file or directory
+ok - the watcher SIGTERM mid-idle recovers (1 no-row resurface) and the next wake is handled once
+tests/fm-opencode-v2-acceptance-lib.sh: line 100: /proc/526174/cmdline: No such file or directory
+ok - the watcher SIGKILL mid-idle recovers (1 no-row resurface) and the next wake is handled once
+ok - the arm SIGTERM mid-idle recovers (1 no-row resurface) and the next wake is handled once
+ok - an arm SIGKILL with a surviving watcher does not strand the next wake
+ok - subdirectory, unrelated and child sessions neither take over the watcher nor receive wakes
+ok - a server package reload leaves the TUI process, its claim and its watcher lifetime intact and delivery continues
+ok - a TUI plugin reload keeps the same TUI process and immutable claim, sets up again and delivers the next wake
+ok - the documented rebind owner command is reachable in the TUI
+ok - TUI exit retires the claim and supervision while the shared service keeps running
+ok - a relaunched TUI re-owns .lock, re-arms after session start and handles the held and later wakes
+ok - the lead received zero WATCHER FAILURE prompts across the whole run (57337-byte export read completely)
+ok - a lead against a private server is refused at activation

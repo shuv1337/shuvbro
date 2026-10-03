@@ -1,0 +1,7 @@
+Sat Oct  3 03:33:45 PM PDT 2026
+total 0
+drwx------ 1 shuv shuv 14 Oct  3 15:33 .
+drwx------ 1 shuv shuv 22 Oct  2 15:13 ..
+drwx------ 1 shuv shuv  0 Oct  3 08:34 default
+/home/shuv/.local/state/shuvbro/opencode-v2 1791066811.4261030050 14
+/home/shuv/.local/state/shuvbro/opencode-v2/default 1791041677.1494162510 0

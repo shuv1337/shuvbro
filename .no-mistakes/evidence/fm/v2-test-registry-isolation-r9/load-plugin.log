@@ -1,0 +1,39 @@
+ok - positive OS-user-home redirect and standalone refusal preserve scratch default even when HOME differs
+ok - inherited native identity is stripped at common setup; lock-path access trace touches neither real registry nor scratch default
+tests/fm-opencode-v2-acceptance-lib.sh: line 100: /proc/787721/cmdline: No such file or directory
+tests/fm-opencode-v2-acceptance-lib.sh: line 100: /proc/795043/cmdline: No such file or directory
+tests/fm-opencode-v2-acceptance-lib.sh: line 100: /proc/796721/cmdline: No such file or directory
+ok - fm-watch reproduction: old count=2 new count=1 for one parent plus subshell; genuine duplicate=2 and fails stable singleton check
+tests/fm-opencode-v2-acceptance-lib.sh: line 100: /proc/799360/cmdline: No such file or directory
+tests/fm-opencode-v2-acceptance-lib.sh: line 100: /proc/803492/cmdline: No such file or directory
+ok - fm-watch-arm reproduction: old count=2 new count=1 for one parent plus subshell; genuine duplicate=2 and fails stable singleton check
+ok - exact owner/guard/transport behaviors passed
+ok - V1 factories preserved; competing V2 entrypoints removed
+ok - persistent admission precedes handoff; confirmation precedes delivery; cleanup retires child
+not ok - endpoint/execution behavior: V2 task has no recorded native session; no busy record reports execution.
+V2 task has no recorded native session; no busy record reports execution.
+WARNING: forced discard without confirmed native cancellation: absent V2 session sidecar conflicts with busy record /tmp/fm-opencode-v2-plugin.50LTNd/endpoint/home/state/absent.busy-state; restore the binding and reconcile, or use explicit --force discard accepting possible resumed execution
+node:internal/modules/run_main:111
+    triggerUncaughtException(
+    ^
+
+AssertionError [ERR_ASSERTION]: The input did not match the regular expression /no terminal cancellation/. Input:
+
+'Error: cannot verify native service operation session.message.list'
+
+    at async file:///home/shuv/.no-mistakes/worktrees/8a7692f99431/01M41VVR49RQK6K27EGC2KJWF1/[eval1]:146:3 {
+  generatedMessage: true,
+  code: 'ERR_ASSERTION',
+  actual: Error: cannot verify native service operation session.message.list
+      at nativeAPI (file:///home/shuv/.no-mistakes/worktrees/8a7692f99431/01M41VVR49RQK6K27EGC2KJWF1/bin/fm-opencode-v2-owner.mjs:56:51)
+      at settledSuccessor (file:///home/shuv/.no-mistakes/worktrees/8a7692f99431/01M41VVR49RQK6K27EGC2KJWF1/bin/fm-opencode-v2-session.mjs:55:43)
+      at async Module.reconcileWorker (file:///home/shuv/.no-mistakes/worktrees/8a7692f99431/01M41VVR49RQK6K27EGC2KJWF1/bin/fm-opencode-v2-session.mjs:148:17)
+      at async waitForActual (node:assert:615:5)
+      at async strict.rejects (node:assert:738:25)
+      at async file:///home/shuv/.no-mistakes/worktrees/8a7692f99431/01M41VVR49RQK6K27EGC2KJWF1/[eval1]:146:3,
+  expected: /no terminal cancellation/,
+  operator: 'rejects',
+  diff: 'simple'
+}
+
+Node.js v26.10.0

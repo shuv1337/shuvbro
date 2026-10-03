@@ -1,0 +1,3 @@
+ok - helper contract: handoff confirmed before the lead acknowledges is accepted and the episode retires
+ok - helper contract: a handoff confirmed after the lead acknowledged is rejected, so confirmation must precede admission
+EXIT 0

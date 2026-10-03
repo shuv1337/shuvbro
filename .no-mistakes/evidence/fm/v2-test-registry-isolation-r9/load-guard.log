@@ -1,0 +1,20 @@
+ok - guard: a registered lead gets the classifier's deny code and its allowed case
+ok - guard: an unrelated root session at the lead's checkout stays outside lead policy
+ok - guard: a child carrying the lead's inherited marker stays outside lead policy
+ok - guard: a root session carrying another session's marker stays outside lead policy
+ok - guard: a worker task session stays outside lead policy
+ok - guard: a non-shell tool of the registered lead is not subject to the shell guards
+ok - guard: an exact marker without a record refuses with a rebind diagnostic, an unmarked root stays inert
+ok - guard: removing the native marker does not erase registry protection
+ok - guard: a retired registered lead keeps protective refusal until explicit rebind
+ok - guard: a registered lead under a different service incarnation refuses until republication
+ok - guard: the arm classifier allows an ordinary command and denies a backgrounded watcher with its typed code
+ok - guard: an arm classifier killed by a signal denies with the evaluation diagnostic while the cd classifier still decides
+ok - guard: a cd classifier killed by a signal denies with the evaluation diagnostic
+ok - guard: an arm classifier that hangs past the guard timeout denies with the evaluation diagnostic
+ok - guard: a cd classifier that hangs past the guard timeout denies with the evaluation diagnostic
+ok - guard: a malformed arm classifier verdict denies with the invalid-verdict diagnostic
+ok - guard: a malformed cd classifier verdict denies with the invalid-verdict diagnostic
+ok - guard: a broken guard runtime denies the registered lead with the runtime's diagnostic
+ok - guard: an unreadable registry refuses the marked lead and leaves unmarked roots inert
+ok - guard: a registered lead in a linked checkout keeps the cd guard

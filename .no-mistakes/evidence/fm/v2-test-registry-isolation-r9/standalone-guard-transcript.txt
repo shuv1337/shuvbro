@@ -1,0 +1,29 @@
+$ FM_V2_REGISTRY_NAMESPACE='default' node tests/fixtures/fm-opencode-v2-provider-host.mjs
+Error: refusing unset/default V2 test registry namespace
+exit=1
+$ FM_V2_REGISTRY_NAMESPACE='default' node tests/fixtures/fm-opencode-v2-real-recovery.mjs
+Error: refusing unset/default V2 test registry namespace
+exit=1
+$ FM_V2_REGISTRY_NAMESPACE='default' node tests/assets/fm-opencode-v2-native-harness.mjs
+Error: refusing unset/default V2 test registry namespace
+exit=1
+$ FM_V2_REGISTRY_NAMESPACE='' node tests/fixtures/fm-opencode-v2-provider-host.mjs
+Error: refusing unset/default V2 test registry namespace
+exit=1
+$ FM_V2_REGISTRY_NAMESPACE='' node tests/fixtures/fm-opencode-v2-real-recovery.mjs
+Error: refusing unset/default V2 test registry namespace
+exit=1
+$ FM_V2_REGISTRY_NAMESPACE='' node tests/assets/fm-opencode-v2-native-harness.mjs
+Error: refusing unset/default V2 test registry namespace
+exit=1
+$ FM_V2_REGISTRY_NAMESPACE='../x' node tests/fixtures/fm-opencode-v2-provider-host.mjs
+Error: refusing invalid V2 test registry namespace
+exit=1
+$ FM_V2_REGISTRY_NAMESPACE='../x' node tests/fixtures/fm-opencode-v2-real-recovery.mjs
+Error: refusing invalid V2 test registry namespace
+exit=1
+$ FM_V2_REGISTRY_NAMESPACE='../x' node tests/assets/fm-opencode-v2-native-harness.mjs
+Error: refusing invalid V2 test registry namespace
+exit=1
+--- files in scratch registry after (only the pre-seeded sentinel expected):
+<scratch-home>/.local/state/shuvbro/opencode-v2/default/s

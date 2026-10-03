@@ -1,0 +1,17 @@
+ok - capability probe refuses unqualified version, missing CLI and runtime; qualified stand-in is read-only
+ok - default worker shares service, records exact session/model, strips activation and admits before attachment
+ok - explicit worker shares service, records exact session/model, strips activation and admits before attachment
+ok - variant worker shares service, records exact session/model, strips activation and admits before attachment
+ok - configured worker shares service, records exact session/model, strips activation and admits before attachment
+ok - configured-object worker shares service, records exact session/model, strips activation and admits before attachment
+ok - remove task metadata before prompt admission refuses execution
+ok - replace task metadata before prompt admission refuses execution
+ok - configured default refuses rather than selecting an external catalog fallback
+ok - unavailable variant refuses before worker session creation
+ok - after-model registration disappearance refuses without default service auto-start
+ok - after-prompt registration disappearance refuses without default service auto-start
+ok - worker on a lead's named registration records, admits and interrupts on that service while a default service exists
+ok - missing lead registration refuses the worker instead of using the default service
+ok - stale or noncanonical lead owner records refuse worker dispatch without a default fallback
+ok - a retired lead owner record keeps the default service and is retained
+EXIT 0

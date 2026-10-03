@@ -1,0 +1,34 @@
+ok - real TUI setup: ten recovered persistent stalls produce ten notices and wakes, beyond the old lifetime cap
+ok - real TUI setup: stale proof after a stall surfaces its rebind notice once despite repeated failing ticks
+ok - real TUI setup: recovered sub-30-second stall retains diagnostic but never prompts or toasts
+ok - real TUI setup: lock acquired after more than 30 s of notice clock stays silent
+ok - real TUI setup: a self-healed startup admission failure before .lock never matures into a notice
+ok - real TUI setup: an undelivered startup admission still notifies once after the bound
+ok - real TUI setup: a failed startup helper proof notifies once immediately and is not cleared by later ticks
+ok - real TUI setup: ownership lost after being held notifies once after the 30 s bound
+ok - real TUI setup: a leftover earlier-claim startup entry does not block recovery or notify
+ok - real TUI setup: a failed explicit /firstmate-rebind is surfaced immediately
+ok - tui: activation registers the exact claim and marker and admits one queued startup nudge with no session events
+ok - tui: a TUI without activation never publishes, pushes, or prompts (contrast: activation case)
+ok - tui: an activation copied into another process is refused before any publication
+ok - tui: a subdirectory root is refused as owner and its events never drive the real lead
+ok - tui: a same-TUI reload reuses the claim and admits no second startup nudge
+ok - tui: a timed-out startup nudge helper is never silently dropped
+ok - tui: the routing push keeps the lead model shell's HOME and PATH alongside the frozen paths
+ok - tui: an observer's environment push displaces routing and the owner restores it within one reconcile
+ok - tui: stale proof refuses after a service restart until the owner's /firstmate-rebind republishes; helper and watcher recover
+ok - tui: a turn-end event (not the timer) arms exactly one watcher and produces no prompt
+ok - tui: stream loss retains a diagnostic without a repair notice; timer fallback arms and a genuine wake is admitted once
+ok - tui: an interrupted turn alone admits nothing, a later genuine durable wake is admitted once
+ok - tui: an outage-refused wake is admitted once under one id and text, queued, after the handoff, with rows durable and one watcher
+ok - tui: a same-owner reload during an outage reconciles the pending wake under its original id and text
+ok - tui: a lost admission receipt resolves to one admission under one id and text, with no pending diagnostic
+ok - tui: rejected wake admissions retry under one id and text through the real coordinator and admit once
+ok - tui: owner exit retires supervision and keeps the wake durable; the next explicit owner re-presents it once under its original id and text
+ok - tui: an owner that exits without its disposer retires its claim and its watcher stops
+ok - tui: an idle watcher SIGTERM keeps one live successor, delivers the no-row resurface once and the next real wake once
+ok - tui: the owner's service credential reaches neither the arm, the watcher nor a custom check (canary does)
+ok - tui: on one service a durable wake in home B reaches only lead B, and lead A ignores B's events
+ok - tui: after the real drain/ack the pending wake obligation is retired as acknowledged with no admission or repeated failure; a missing queue does not count
+ok - worker: after the worker latches busy, its child session's events neither clear it nor notify; its own terminal event does
+EXIT 0
