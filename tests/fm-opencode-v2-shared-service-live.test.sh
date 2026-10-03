@@ -155,7 +155,8 @@ http.createServer((req, res) => {
 EOF
 # shellcheck disable=SC2016 # expanded by the lead model shell
 MOCK_WAKE_CMD='err=$(bin/fm-wake-drain.sh 2>&1 >/dev/null); seq=$(printf "%s\n" "$err" | sed -n "s/^WAKE_ACK_REQUIRED:.*--ack-through \([0-9][0-9]*\) --recovery-generation .*/\1/p"); gen=$(printf "%s\n" "$err" | sed -n "s/^WAKE_ACK_REQUIRED:.*--recovery-generation \([A-Za-z0-9._-][A-Za-z0-9._-]*\)$/\1/p"); [ -n "$seq" ] && [ -n "$gen" ] && bin/fm-wake-drain.sh --ack-through "$seq" --recovery-generation "$gen" && printf "acked %s %s\n" "$seq" "$(date +%s%N)" >> '"$LAB"'/handled.log'
-MOCK_RESUME_CMD="date +%s%N >> $LAB/h.resumed; while :; do date +%s%N > $LAB/h.beat; sleep 0.3; done"
+# Worker H's resumed turn runs on; worker H2's resumed turn finishes by itself.
+MOCK_RESUME_CMD="case \"\$PWD\" in */worker-h2) date +%s%N >> $LAB/h2.resumed ;; *) date +%s%N >> $LAB/h.resumed; while :; do date +%s%N > $LAB/h.beat; sleep 0.3; done ;; esac"
 MOCK_STARTUP_CMD='bash bin/fm-lock.sh' MOCK_WAKE_CMD="$MOCK_WAKE_CMD" MOCK_RESUME_CMD="$MOCK_RESUME_CMD" node "$LAB/mock.mjs" "$MOCK_PORT" "$LAB/mock.log" >/dev/null 2>&1 &
 MOCK_PID=$!
 
@@ -234,6 +235,25 @@ tool_state() {  # <session-id> <command>
 # --- phase 2: plugin inventory ----------------------------------------------
 PRIMARY="$LAB/primary"
 make_live_primary "$PRIMARY"
+
+# Issue #1 pre-dispatch probe on the actual target: the installed executable
+# and the primary's real pinned runtime qualify; the same executable with a
+# code root lacking that runtime refuses with the actionable install step.
+probe=$( (cd "$LAB" && isolated node "$PRIMARY/bin/fm-opencode-v2-capability.mjs" "$PRIMARY") 2>&1)
+if printf '%s' "$probe" | jq -e --arg v "$VERSION" '.qualified == true and .version == $v' >/dev/null 2>&1; then
+  pass "live phase 1: the dispatch capability probe qualifies the installed $VERSION with the primary's pinned runtime"
+else
+  live_fail "the dispatch capability probe refused the installed target: $probe"
+fi
+mkdir -p "$LAB/no-runtime/.opencode/plugins"
+cp "$PRIMARY/.opencode/plugins/package.json" "$LAB/no-runtime/.opencode/plugins/package.json"
+if probe=$( (cd "$LAB" && isolated node "$PRIMARY/bin/fm-opencode-v2-capability.mjs" "$LAB/no-runtime") 2>&1); then
+  live_fail "the capability probe qualified a code root without the pinned runtime: $probe"
+elif printf '%s' "$probe" | grep -q 'npm ci --prefix .opencode/plugins'; then
+  pass "live phase 1: with the installed executable, a code root lacking the pinned runtime is refused with the install step"
+else
+  live_fail "the capability probe refused a runtime-less root without the actionable diagnostic: $probe"
+fi
 # The first request boots the location; local plugins finish loading after it.
 for _ in $(seq 1 50); do
   inventory=$(api get "/api/plugin?location[directory]=$PRIMARY")
@@ -582,6 +602,18 @@ if leg H; then
     "cd '$WDIR_H' && exec '$PRIMARY/bin/fm-opencode-v2-launch.sh' --model mock/echo --prompt 'RUN: while :; do date +%s%N > $LAB/h.beat; sleep 0.3; done' --session-record '$LAB/workers/worker-h.opencode-v2-session.json'" >/dev/null \
     || live_fail "could not start worker H"
   TERMS+=(worker-h)
+  WDIR_H2="$LAB/worker-h2"
+  mkdir -p "$WDIR_H2"
+  git init -q "$WDIR_H2"
+  WDIR_H2=$(cd -P "$WDIR_H2" && pwd -P)
+  worker_task worker-h2
+  termctrl start worker-h2 --cols 120 --rows 30 -- "${ISO[@]}" bash -c \
+    "cd '$WDIR_H2' && exec '$PRIMARY/bin/fm-opencode-v2-launch.sh' --model mock/echo --prompt 'RUN: date +%s%N > $LAB/h2.started; sleep 600' --session-record '$LAB/workers/worker-h2.opencode-v2-session.json'" >/dev/null \
+    || live_fail "could not start worker H2"
+  TERMS+=(worker-h2)
+  worker2_session() { (cd "$LAB" && isolated node "$PRIMARY/bin/fm-opencode-v2-session.mjs" "$1" "$LAB/workers/worker-h2.opencode-v2-session.json" "$WDIR_H2" 2>"$LAB/h2.$1.err"); }
+  h2_started() { [ -s "$LAB/h2.started" ] && [ -s "$LAB/workers/worker-h2.opencode-v2-session.json" ]; }
+  wait_until 120 h2_started || live_fail "worker H2 never started its turn"
   worker_session() { (cd "$LAB" && isolated node "$PRIMARY/bin/fm-opencode-v2-session.mjs" "$1" "$LAB/workers/worker-h.opencode-v2-session.json" "$WDIR_H" 2>"$LAB/h.$1.err"); }
   beating_since() { [ -s "$LAB/h.beat" ] && [ "$(cat "$LAB/h.beat")" -gt "$1" ]; }
   if ! wait_until 120 beating_since 0 || [ ! -s "$LAB/workers/worker-h.opencode-v2-session.json" ]; then
@@ -622,6 +654,35 @@ if leg H; then
         fi
       else
         live_fail "[F5-B1] interrupt reported $h_int but the resumed turn kept running"
+      fi
+      # Worker H2: its resumed turn finished by itself on the successor. While
+      # settlement is unproven ordinary teardown refuses; once the successor
+      # passes its settlement bound, ordinary teardown reconciles it as settled.
+      h2_resumed() { [ -s "$LAB/h2.resumed" ]; }
+      h2_idle() { worker2_session status | jq -e '.observedExecuting == false' >/dev/null 2>&1; }
+      if ! wait_until 120 h2_resumed || ! wait_until 60 h2_idle; then
+        live_fail "premise: worker H2's turn was not resumed and finished on the successor (resumed=$(cat "$LAB/h2.resumed" 2>/dev/null) status=$(worker2_session status))"
+      else
+        pass "live leg H: premise: the successor resumed worker H2's turn, which then finished"
+        if [ $(( $(date +%s%N) - restart_ns )) -lt 25000000000 ]; then
+          if worker2_session teardown >/dev/null; then
+            live_fail "[F7-M1] ordinary teardown accepted worker H2 before its successor settlement was provable"
+          elif grep -qiE 'retry|--force' "$LAB/h2.teardown.err"; then
+            pass "live leg H: before settlement is provable ordinary teardown refuses worker H2 naming a retry or --force"
+          else
+            live_fail "the unproven refusal for worker H2 named neither a retry nor --force: $(cat "$LAB/h2.teardown.err")"
+          fi
+        else
+          live_fail "fixture: worker H2 reached idle too late to observe the unproven refusal"
+        fi
+        settle_by=$(( restart_ns / 1000000000 + 35 ))
+        while [ "$(date +%s)" -lt "$settle_by" ]; do sleep 1; done
+        settled_h2() { h2_td=$(worker2_session teardown) && printf '%s' "$h2_td" | jq -e '.executing == false and .cancellation == "settled"' >/dev/null; }
+        if wait_until 20 settled_h2; then
+          pass "live leg H: once settlement is provable ordinary teardown reconciles worker H2 as settled ($h2_td)"
+        else
+          live_fail "[F7-M1] ordinary teardown still refused the settled worker H2: ${h2_td:-} $(cat "$LAB/h2.teardown.err")"
+        fi
       fi
     fi
   fi
