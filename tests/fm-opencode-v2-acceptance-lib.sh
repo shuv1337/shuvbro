@@ -92,6 +92,32 @@ v2_namespace() {  # <suffix>
 v2_start_token() { local stat; stat=$(cat "/proc/$1/stat" 2>/dev/null) || return 1; stat=${stat##*) }; printf '%s' "$stat" | awk '{print $20}'; }
 v2_track() { printf '%s %s\n' "$1" "$(v2_start_token "$1" || echo 0)" >> "$V2_STATE_DIR/pids"; }
 
+# As in the TUI suite's watchers_step, Bash command substitutions inherit
+# the script's command line but are not additional watcher/arm processes.
+v2_script_process_count() {  # <absolute script path>
+  local pid parent cmd parent_cmd stat n=0
+  while IFS= read -r pid; do
+    cmd=$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null) || continue
+    case "$cmd" in "bash $1 "*) ;; *) continue ;; esac
+    stat=$(cat "/proc/$pid/stat" 2>/dev/null) || continue
+    stat=${stat##*) }; parent=${stat#* }; parent=${parent%% *}
+    parent_cmd=$(tr '\0' ' ' < "/proc/$parent/cmdline" 2>/dev/null) || parent_cmd=''
+    [ "$cmd" = "$parent_cmd" ] && continue
+    n=$((n + 1))
+  done < <(pgrep -f '/bin/fm-watch(-arm)?\.sh( |$)' || true)
+  printf '%s\n' "$n"
+}
+
+v2_confirm_singleton() {  # <predicate command...>; three consecutive samples
+  local stable=0 _
+  for _ in $(seq 1 12); do
+    if "$@"; then stable=$((stable + 1)); else stable=0; fi
+    [ "$stable" -ge 3 ] && return 0
+    sleep 0.25
+  done
+  return 1
+}
+
 V2_TEARDOWN_FAILED=0
 v2_teardown() {
   local pid start ns dir live _

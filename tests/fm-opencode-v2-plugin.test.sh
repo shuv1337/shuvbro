@@ -74,6 +74,42 @@ test_inherited_lock_registry_boundary() {
 }
 test_inherited_lock_registry_boundary
 
+test_watcher_subshell_count() {
+  [ -d /proc/$$ ] || { printf 'skip: watcher process count regression requires procfs\n'; return; }
+  local script role pid second child ready _ old new
+  for role in fm-watch fm-watch-arm; do
+    script="$TMP_ROOT/count-$role/bin/$role.sh"
+    mkdir -p "$(dirname "$script")"
+    cat > "$script" <<'SH'
+while :; do
+  x=$(printf '%s\n' "$BASHPID" > "$1"; while [ ! -e "$2" ]; do sleep 0.1; done; printf y)
+done
+SH
+    ready="$TMP_ROOT/$role-child"
+    bash "$script" "$ready" "$TMP_ROOT/never-ready" & pid=$!
+    v2_track "$pid"
+    for _ in $(seq 1 100); do [ -s "$ready" ] && break; sleep 0.02; done
+    [ -s "$ready" ] || fail "count fixture did not start its command substitution"
+    child=$(cat "$ready"); v2_track "$child"
+    old=$(pgrep -f "^bash $script" | wc -l)
+    new=$(v2_script_process_count "$script")
+    [ "$old" = 2 ] && [ "$new" = 1 ] || fail "$role count reproduction expected old=2 new=1; got old=$old new=$new"
+    singleton_fixture() { [ "$(v2_script_process_count "$script")" = 1 ]; }
+    v2_confirm_singleton singleton_fixture || fail "one $role plus its command substitution failed singleton confirmation"
+    bash "$script" "$ready-second" "$TMP_ROOT/never-ready" & second=$!
+    v2_track "$second"
+    for _ in $(seq 1 100); do [ -s "$ready-second" ] && break; sleep 0.02; done
+    [ -s "$ready-second" ] || fail "second count fixture did not start"
+    v2_track "$(cat "$ready-second")"
+    [ "$(v2_script_process_count "$script")" = 2 ] || fail "real second $role was hidden"
+    if v2_confirm_singleton singleton_fixture; then fail "persistent duplicate $role passed singleton confirmation"; fi
+    kill "$pid" "$child" "$second" "$(cat "$ready-second")" 2>/dev/null || true
+    wait "$pid" "$second" 2>/dev/null || true
+    pass "$role reproduction: old count=2 new count=1 for one parent plus subshell; genuine duplicate=2 and fails stable singleton check"
+  done
+}
+test_watcher_subshell_count
+
 test_native_exact_owner_and_transport() {
   local out
   out=$(ROOT="$ROOT" LAB="$TMP_ROOT" node --input-type=module 2>&1 <<'JS'
