@@ -38,7 +38,7 @@ import { spawn } from "node:child_process";
 import { readFileSync, writeFileSync, existsSync, appendFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { pathToFileURL } from "node:url";
-import { assertTestRegistry, cleanupTestRegistry } from "./fm-opencode-v2-test-registry.mjs";
+import { assertTestRegistry, cleanupTestRegistry, managedTestRegistry, releaseTestRegistry } from "./fm-opencode-v2-test-registry.mjs";
 assertTestRegistry();
 
 const [role, ...args] = process.argv.slice(2);
@@ -194,7 +194,7 @@ async function serviceRole([codeRoot, socket, sessionsFile]) {
     });
   });
   srv.listen(socket, () => console.log(JSON.stringify({ ready: true, pid: process.pid })));
-  process.on("SIGTERM", () => { srv.close(); cleanupTestRegistry(codeRoot); process.exit(0); });
+  process.on("SIGTERM", () => { srv.close(); releaseTestRegistry(codeRoot); process.exit(0); });
 }
 
 async function ownerRole([codeRoot, socket, sessionID, root, home, state, config]) {
@@ -212,7 +212,13 @@ async function ownerRole([codeRoot, socket, sessionID, root, home, state, config
     try { console.log(JSON.stringify({ retired: owner.publish("retire", owner.readRegistration(sessionID)) })); }
     catch (error) { console.log(JSON.stringify({ retireError: String(error.message) })); }
   });
-  process.on("SIGTERM", () => { owner.publish("retire", owner.readRegistration(sessionID)); cleanupTestRegistry(codeRoot); process.exit(0); });
+  process.on("SIGTERM", () => {
+    if (!managedTestRegistry()) {
+      try { owner.publish("retire", owner.readRegistration(sessionID)); } catch {}
+      releaseTestRegistry(codeRoot);
+    }
+    process.exit(0);
+  });
   setInterval(() => {}, 1 << 30);
 }
 
