@@ -133,6 +133,8 @@ http.createServer((req, res) => {
     // drain plus generation-bound acknowledgement, recorded per success).
     const match = /RUN: ([^\n]+)/.exec(userText)
       || (process.env.MOCK_WAKE_CMD && userText.includes("WATCHER FIRED") ? [null, process.env.MOCK_WAKE_CMD] : null)
+      // shuvcode's restart continuation for a suspended turn (leg H).
+      || (process.env.MOCK_RESUME_CMD && /server restarted/i.test(userText) ? [null, process.env.MOCK_RESUME_CMD] : null)
       || (process.env.MOCK_STARTUP_CMD && userText.includes("bin/fm-session-start.sh") ? [null, process.env.MOCK_STARTUP_CMD] : null);
     const tools = (parsed.tools || []).map((t) => t.function?.name);
     appendFileSync(log, JSON.stringify({ messages: messages.length, lastIsTool, run: match ? match[1] : null }) + "\n");
@@ -153,7 +155,8 @@ http.createServer((req, res) => {
 EOF
 # shellcheck disable=SC2016 # expanded by the lead model shell
 MOCK_WAKE_CMD='err=$(bin/fm-wake-drain.sh 2>&1 >/dev/null); seq=$(printf "%s\n" "$err" | sed -n "s/^WAKE_ACK_REQUIRED:.*--ack-through \([0-9][0-9]*\) --recovery-generation .*/\1/p"); gen=$(printf "%s\n" "$err" | sed -n "s/^WAKE_ACK_REQUIRED:.*--recovery-generation \([A-Za-z0-9._-][A-Za-z0-9._-]*\)$/\1/p"); [ -n "$seq" ] && [ -n "$gen" ] && bin/fm-wake-drain.sh --ack-through "$seq" --recovery-generation "$gen" && printf "acked %s %s\n" "$seq" "$(date +%s%N)" >> '"$LAB"'/handled.log'
-MOCK_STARTUP_CMD='bash bin/fm-lock.sh' MOCK_WAKE_CMD="$MOCK_WAKE_CMD" node "$LAB/mock.mjs" "$MOCK_PORT" "$LAB/mock.log" >/dev/null 2>&1 &
+MOCK_RESUME_CMD="date +%s%N >> $LAB/h.resumed; while :; do date +%s%N > $LAB/h.beat; sleep 0.3; done"
+MOCK_STARTUP_CMD='bash bin/fm-lock.sh' MOCK_WAKE_CMD="$MOCK_WAKE_CMD" MOCK_RESUME_CMD="$MOCK_RESUME_CMD" node "$LAB/mock.mjs" "$MOCK_PORT" "$LAB/mock.log" >/dev/null 2>&1 &
 MOCK_PID=$!
 
 mkdir -p "$LAB/xdg/config/shuvcode"
@@ -555,6 +558,60 @@ elif [ "${FM_OPENCODE_V2_HERDR_LIVE:-0}" = 1 ]; then
 else
   printf 'pending - live leg F (Herdr detach/attach with the real owner): set FM_OPENCODE_V2_HERDR_LIVE=1\n'
   [ "${FM_V2_ACCEPT_STRICT:-0}" != 1 ] || live_fail "strict: Herdr leg not requested"
+fi
+
+# Leg H: a worker mid-turn when the service restarts (review F5-B1). shuvcode's
+# successor resumes the suspended turn, so the worker reconciliation helper
+# (teardown, control interrupt, descendant preflight) must consult the
+# successor at the frozen endpoint, never conclude "stopped" from the gone
+# incarnation, and interrupt the exact session there.
+if leg H; then
+  WDIR_H="$LAB/worker-h"
+  mkdir -p "$WDIR_H"
+  git init -q "$WDIR_H"
+  WDIR_H=$(cd -P "$WDIR_H" && pwd -P)
+  termctrl start worker-h --cols 120 --rows 30 -- "${ISO[@]}" bash -c \
+    "cd '$WDIR_H' && exec '$PRIMARY/bin/fm-opencode-v2-launch.sh' --model mock/echo --prompt 'RUN: while :; do date +%s%N > $LAB/h.beat; sleep 0.3; done' --session-record '$LAB/worker-h.json'" >/dev/null \
+    || live_fail "could not start worker H"
+  TERMS+=(worker-h)
+  worker_session() { (cd "$LAB" && isolated node "$PRIMARY/bin/fm-opencode-v2-session.mjs" "$1" "$LAB/worker-h.json" "$WDIR_H" 2>"$LAB/h.$1.err"); }
+  beating_since() { [ -s "$LAB/h.beat" ] && [ "$(cat "$LAB/h.beat")" -gt "$1" ]; }
+  if ! wait_until 120 beating_since 0 || [ ! -s "$LAB/worker-h.json" ]; then
+    live_fail "worker H never started its long turn"
+  else
+    h_status=$(worker_session status)
+    if printf '%s' "$h_status" | jq -e '.executing == true' >/dev/null; then
+      pass "live leg H: positive control: the mid-turn worker reports executing on its own service"
+    else
+      live_fail "positive control: mid-turn worker H not reported executing: $h_status $(cat "$LAB/h.status.err")"
+    fi
+    restart_ns=$(date +%s%N)
+    (cd "$LAB" && isolated FM_LIVE_MOCK_KEY=mock "$SC" service restart >/dev/null 2>&1) || live_fail "leg H service restart failed"
+    resumed() { [ -s "$LAB/h.resumed" ] && beating_since "$restart_ns"; }
+    if ! wait_until 120 resumed; then
+      live_fail "premise: the successor service did not resume worker H's suspended turn (resumed=$(cat "$LAB/h.resumed" 2>/dev/null) beat=$(cat "$LAB/h.beat" 2>/dev/null))"
+    else
+      pass "live leg H: premise: after the service restart the successor resumed worker H's suspended turn"
+      h_status=$(worker_session status)
+      if printf '%s' "$h_status" | jq -e '.executing == true' >/dev/null; then
+        pass "live leg H: the resumed worker is reported executing after the restart"
+      else
+        live_fail "[F5-B1] the resumed worker was reported $h_status after the restart"
+      fi
+      if worker_session teardown >/dev/null; then
+        live_fail "[F5-B1] teardown accepted the worker the successor is executing"
+      else
+        pass "live leg H: teardown refuses the resumed worker"
+      fi
+      h_int=$(worker_session interrupt)
+      stopped_since() { local t; t=$(cat "$LAB/h.beat"); sleep 2; [ "$(cat "$LAB/h.beat")" = "$t" ]; }
+      if wait_until 10 stopped_since; then
+        pass "live leg H: interrupt cancelled the resumed turn on the successor ($h_int)"
+      else
+        live_fail "[F5-B1] interrupt reported $h_int but the resumed turn kept running"
+      fi
+    fi
+  fi
 fi
 
 [ "$LIVE_FAILED" -eq 0 ] || { printf 'not ok - %s live qualification check(s) failed\n' "$LIVE_FAILED" >&2; exit 1; }
