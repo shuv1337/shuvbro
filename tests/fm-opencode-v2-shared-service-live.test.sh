@@ -614,6 +614,23 @@ if leg H; then
   worker2_session() { (cd "$LAB" && isolated node "$PRIMARY/bin/fm-opencode-v2-session.mjs" "$1" "$LAB/workers/worker-h2.opencode-v2-session.json" "$WDIR_H2" 2>"$LAB/h2.$1.err"); }
   h2_started() { [ -s "$LAB/h2.started" ] && [ -s "$LAB/workers/worker-h2.opencode-v2-session.json" ]; }
   wait_until 120 h2_started || live_fail "worker H2 never started its turn"
+  # Worker H3 finishes its turn before the restart (review F8-M1).
+  WDIR_H3="$LAB/worker-h3"
+  mkdir -p "$WDIR_H3"
+  git init -q "$WDIR_H3"
+  WDIR_H3=$(cd -P "$WDIR_H3" && pwd -P)
+  worker_task worker-h3
+  termctrl start worker-h3 --cols 120 --rows 30 -- "${ISO[@]}" bash -c \
+    "cd '$WDIR_H3' && exec '$PRIMARY/bin/fm-opencode-v2-launch.sh' --model mock/echo --prompt 'RUN: date +%s%N > $LAB/h3.done' --session-record '$LAB/workers/worker-h3.opencode-v2-session.json'" >/dev/null \
+    || live_fail "could not start worker H3"
+  TERMS+=(worker-h3)
+  worker3_session() { (cd "$LAB" && isolated node "$PRIMARY/bin/fm-opencode-v2-session.mjs" "$1" "$LAB/workers/worker-h3.opencode-v2-session.json" "$WDIR_H3" 2>"$LAB/h3.$1.err"); }
+  h3_idle() { [ -s "$LAB/h3.done" ] && worker3_session status | jq -e '.executing == false' >/dev/null 2>&1; }
+  if wait_until 120 h3_idle; then
+    pass "live leg H: positive control: worker H3 finished its turn before the restart and is idle on its own service"
+  else
+    live_fail "worker H3 did not finish its turn before the restart: done=$(cat "$LAB/h3.done" 2>/dev/null) status=$(worker3_session status)"
+  fi
   worker_session() { (cd "$LAB" && isolated node "$PRIMARY/bin/fm-opencode-v2-session.mjs" "$1" "$LAB/workers/worker-h.opencode-v2-session.json" "$WDIR_H" 2>"$LAB/h.$1.err"); }
   beating_since() { [ -s "$LAB/h.beat" ] && [ "$(cat "$LAB/h.beat")" -gt "$1" ]; }
   if ! wait_until 120 beating_since 0 || [ ! -s "$LAB/workers/worker-h.opencode-v2-session.json" ]; then
@@ -675,6 +692,17 @@ if leg H; then
         else
           live_fail "fixture: worker H2 reached idle too late to observe the unproven refusal"
         fi
+        if [ $(( $(date +%s%N) - restart_ns )) -lt 25000000000 ]; then
+          if worker3_session teardown >/dev/null; then
+            live_fail "[F8-M1] ordinary teardown accepted worker H3 before its successor settlement was provable"
+          elif grep -qiE 'retry|--force' "$LAB/h3.teardown.err"; then
+            pass "live leg H: before settlement is provable ordinary teardown refuses worker H3, idle before the restart"
+          else
+            live_fail "the unproven refusal for worker H3 named neither a retry nor --force: $(cat "$LAB/h3.teardown.err")"
+          fi
+        else
+          live_fail "fixture: too late to observe worker H3's unproven refusal"
+        fi
         settle_by=$(( restart_ns / 1000000000 + 35 ))
         while [ "$(date +%s)" -lt "$settle_by" ]; do sleep 1; done
         settled_h2() { h2_td=$(worker2_session teardown) && printf '%s' "$h2_td" | jq -e '.executing == false and .cancellation == "settled"' >/dev/null; }
@@ -682,6 +710,12 @@ if leg H; then
           pass "live leg H: once settlement is provable ordinary teardown reconciles worker H2 as settled ($h2_td)"
         else
           live_fail "[F7-M1] ordinary teardown still refused the settled worker H2: ${h2_td:-} $(cat "$LAB/h2.teardown.err")"
+        fi
+        settled_h3() { h3_td=$(worker3_session teardown) && printf '%s' "$h3_td" | jq -e '.executing == false and .cancellation == "settled"' >/dev/null; }
+        if wait_until 20 settled_h3; then
+          pass "live leg H: worker H3, idle before the restart, settles under ordinary teardown without --force ($h3_td)"
+        else
+          live_fail "[F8-M1] ordinary teardown still refused worker H3, idle before the restart: ${h3_td:-} $(cat "$LAB/h3.teardown.err")"
         fi
       fi
     fi
