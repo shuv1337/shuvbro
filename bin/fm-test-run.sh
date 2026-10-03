@@ -670,7 +670,7 @@ tests/fm-opencode-v2-shared-service-live.test.sh 20
 tests/fm-opencode-v2-succession-live.test.sh 20
 tests/fm-opencode-v2-tui-acceptance.test.sh 230000
 tests/fm-opencode-v2-wake-admission.test.sh 8000
-tests/fm-opencode-v2-worker-restart-acceptance.test.sh 8000
+tests/fm-opencode-v2-worker-restart-acceptance.test.sh 50000
 tests/fm-operational-input.test.sh 231
 tests/fm-peek-remote.test.sh 1018
 tests/fm-pending-reply-10.test.sh 4350
