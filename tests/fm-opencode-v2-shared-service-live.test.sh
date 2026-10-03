@@ -342,6 +342,12 @@ launch_lead() {  # <term> <primary> <home> <session>
   termctrl start "$1" --cols 140 --rows 40 -- "${argv[@]}" >/dev/null || return 1
   TERMS+=("$1")
 }
+# Workers are task-bound like fm-spawn's: <task>.opencode-v2-session.json beside
+# a safe <task>.meta, in a private directory no supervised home watches.
+worker_task() {  # <name>
+  [ -d "$LAB/workers" ] || mkdir -m 700 "$LAB/workers"
+  printf 'kind=ship\nharness=opencode-v2\n' > "$LAB/workers/$1.meta"
+}
 make_home() {  # <dir>: external home with one in-flight task record (supervision need)
   mkdir -p "$1/state" "$1/config" "$1/data"
   printf 'kind=ship\n' > "$1/state/t1.meta"
@@ -410,20 +416,21 @@ for w in 1 2; do
   WDIR="$LAB/worker-$w"
   mkdir -p "$WDIR"
   git init -q "$WDIR"
+  worker_task "worker-$w"
   model_arg="--model mock/echo"
   [ "$w" = 2 ] && model_arg=""
   termctrl start "worker-$w" --cols 120 --rows 30 -- "${ISO[@]}" bash -c \
-    "cd '$WDIR' && exec '$PRIMARY/bin/fm-opencode-v2-launch.sh' $model_arg --prompt 'RUN: touch $LAB/worker-$w-ran' --session-record '$LAB/worker-$w.json'" >/dev/null \
+    "cd '$WDIR' && exec '$PRIMARY/bin/fm-opencode-v2-launch.sh' $model_arg --prompt 'RUN: touch $LAB/worker-$w-ran' --session-record '$LAB/workers/worker-$w.opencode-v2-session.json'" >/dev/null \
     || live_fail "could not start worker $w"
   TERMS+=("worker-$w")
 done
 workers_ran() { [ -e "$LAB/worker-1-ran" ] && [ -e "$LAB/worker-2-ran" ]; }
 if wait_until 120 workers_ran; then
-  W1=$(jq -r .sessionID "$LAB/worker-1.json"); W2=$(jq -r .sessionID "$LAB/worker-2.json")
+  W1=$(jq -r .sessionID "$LAB/workers/worker-1.opencode-v2-session.json"); W2=$(jq -r .sessionID "$LAB/workers/worker-2.opencode-v2-session.json")
   [ "$W1" != "$W2" ] && [ -n "$W1" ] || live_fail "workers did not record distinct exact sessions"
   for w in 1 2; do
-    jq -e '.model.providerID == "mock" and .model.id == "echo"' "$LAB/worker-$w.json" >/dev/null \
-      || live_fail "worker $w ran on model $(jq -c .model "$LAB/worker-$w.json"), not the explicit/configured mock/echo"
+    jq -e '.model.providerID == "mock" and .model.id == "echo"' "$LAB/workers/worker-$w.opencode-v2-session.json" >/dev/null \
+      || live_fail "worker $w ran on model $(jq -c .model "$LAB/workers/worker-$w.opencode-v2-session.json"), not the explicit/configured mock/echo"
   done
   [ "$(jq -r .pid "$LAB/xdg/state/shuvcode/service.json")" = "$SERVICE_PID" ] || live_fail "a worker started another service"
   run_in_session "$W1" "FM_HOME=$HOME_A FM_STATE_OVERRIDE=$HOME_A/state FM_CONFIG_OVERRIDE=$HOME_A/config FM_ROOT_OVERRIDE=$PRIMARY OPENCODE_SESSION_ID=$LEAD_A bash $PRIMARY/bin/fm-lock.sh; echo rc=\$? > $LAB/worker-claim" || true
@@ -570,13 +577,14 @@ if leg H; then
   mkdir -p "$WDIR_H"
   git init -q "$WDIR_H"
   WDIR_H=$(cd -P "$WDIR_H" && pwd -P)
+  worker_task worker-h
   termctrl start worker-h --cols 120 --rows 30 -- "${ISO[@]}" bash -c \
-    "cd '$WDIR_H' && exec '$PRIMARY/bin/fm-opencode-v2-launch.sh' --model mock/echo --prompt 'RUN: while :; do date +%s%N > $LAB/h.beat; sleep 0.3; done' --session-record '$LAB/worker-h.json'" >/dev/null \
+    "cd '$WDIR_H' && exec '$PRIMARY/bin/fm-opencode-v2-launch.sh' --model mock/echo --prompt 'RUN: while :; do date +%s%N > $LAB/h.beat; sleep 0.3; done' --session-record '$LAB/workers/worker-h.opencode-v2-session.json'" >/dev/null \
     || live_fail "could not start worker H"
   TERMS+=(worker-h)
-  worker_session() { (cd "$LAB" && isolated node "$PRIMARY/bin/fm-opencode-v2-session.mjs" "$1" "$LAB/worker-h.json" "$WDIR_H" 2>"$LAB/h.$1.err"); }
+  worker_session() { (cd "$LAB" && isolated node "$PRIMARY/bin/fm-opencode-v2-session.mjs" "$1" "$LAB/workers/worker-h.opencode-v2-session.json" "$WDIR_H" 2>"$LAB/h.$1.err"); }
   beating_since() { [ -s "$LAB/h.beat" ] && [ "$(cat "$LAB/h.beat")" -gt "$1" ]; }
-  if ! wait_until 120 beating_since 0 || [ ! -s "$LAB/worker-h.json" ]; then
+  if ! wait_until 120 beating_since 0 || [ ! -s "$LAB/workers/worker-h.opencode-v2-session.json" ]; then
     live_fail "worker H never started its long turn"
   else
     h_status=$(worker_session status)
@@ -607,6 +615,11 @@ if leg H; then
       stopped_since() { local t; t=$(cat "$LAB/h.beat"); sleep 2; [ "$(cat "$LAB/h.beat")" = "$t" ]; }
       if wait_until 10 stopped_since; then
         pass "live leg H: interrupt cancelled the resumed turn on the successor ($h_int)"
+        if h_td=$(worker_session teardown) && printf '%s' "$h_td" | jq -e '.executing == false' >/dev/null; then
+          pass "live leg H: after the confirmed successor cancellation ordinary teardown reconciles the worker"
+        else
+          live_fail "after the confirmed cancellation ordinary teardown still refused: $h_td $(cat "$LAB/h.teardown.err")"
+        fi
       else
         live_fail "[F5-B1] interrupt reported $h_int but the resumed turn kept running"
       fi
