@@ -66,9 +66,18 @@ helper_step() { jq -nc --argjson p "{\"PATH\":\"$PATH\"}" '{do: "shell", command
 owned_and_armed() {  # <lock-step-json>: steps until the owner holds .lock and a watcher is live
   jq -nc --argjson l "$1" '[{do: "wait", until: "admitted", match: "fm-session-start"}, $l, {do: "wait", until: "lock"}, {do: "wait", until: "watcher"}]'
 }
-# Count fm-watch.sh processes serving this home (singleton evidence).
+# Count fm-watch.sh processes serving this home (singleton evidence). A forked
+# command-substitution subshell of a watcher shares its cmdline and environ,
+# so a process whose parent has the identical cmdline is not a watcher.
 watchers_step() {
-  jq -nc --arg s "$HOME_DIR/state" '{do: "shell", command: ("n=0; for p in $(pgrep -f \"/bin/fm-watch\\\\.sh( |$)\"); do tr \"\\\\0\" \"\\\\n\" < /proc/$p/environ 2>/dev/null | grep -qx \"FM_STATE_OVERRIDE=" + $s + "\" && n=$((n+1)); done; echo watchers=$n")}'
+  local cmd
+  cmd='n=0; for p in $(pgrep -f "/bin/fm-watch\.sh( |$)"); do
+  tr "\0" "\n" < /proc/$p/environ 2>/dev/null | grep -qx "FM_STATE_OVERRIDE=$1" || continue
+  pp=$(sed "s/.*) //" /proc/$p/stat 2>/dev/null | cut -d" " -f2)
+  [ -n "$pp" ] && [ "$(tr "\0" " " < /proc/$p/cmdline 2>/dev/null)" = "$(tr "\0" " " < /proc/$pp/cmdline 2>/dev/null)" ] && continue
+  n=$((n+1))
+done; echo watchers=$n'
+  jq -nc --arg c "$cmd" --arg s "$HOME_DIR/state" '{do: "shell", command: ("set -- " + ($s | @sh) + "; " + $c)}'
 }
 
 startup_admissions() { jq '[.admitted[] | select(.text | test("fm-session-start"))] | length' "$1"; }
