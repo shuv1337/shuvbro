@@ -171,7 +171,29 @@ async function tuiRole([codeRoot, socketFile, specFile, outFile]) {
   let lostAcks = spec.lostAckPrompts || 0;
   const events = [];
   let notify = null;
+  let streamBroken = false;
   const commands = new Map();
+  // Manual reconcile clock: the TUI's periodic reconcile (2 s interval) is
+  // captured instead of scheduled, so a case can tell an event-triggered
+  // reconcile from the timer fallback and fire the fallback explicitly.
+  const timers = [];
+  if (spec.manualTimer) {
+    const realSetInterval = globalThis.setInterval, realClearInterval = globalThis.clearInterval;
+    globalThis.setInterval = (fn, ms, ...rest) => {
+      if (ms !== 2000) return realSetInterval(fn, ms, ...rest);
+      const handle = { manual: true, fn, unref() { return handle; }, ref() { return handle; } };
+      timers.push(handle);
+      return handle;
+    };
+    globalThis.clearInterval = (handle) => {
+      if (handle?.manual) { const i = timers.indexOf(handle); if (i >= 0) timers.splice(i, 1); return; }
+      realClearInterval(handle);
+    };
+  }
+  const identityOf = (pid) => { try { const id = owner.identity(pid); return `${id.pid} ${id.start}`; } catch { return `${pid} 0`; } };
+  const watcherLive = () => {
+    try { const pid = Number(readFileSync(`${spec.state}/.watch.lock/pid`, "utf8").trim()); process.kill(pid, 0); return true; } catch { return false; }
+  };
   const ctx = {
     keymap: { layer(fn) { for (const command of fn().commands || []) commands.set(command.slash?.name || command.id, command); return () => {}; } },
     ui: { toast: { show(t) { record.toasts = [...(record.toasts || []), t]; } } },
@@ -193,11 +215,15 @@ async function tuiRole([codeRoot, socketFile, specFile, outFile]) {
           return (await request(socket(), { op: "environment", sessionID, variables })).variables;
         },
         async prompt(input) {
-          record.prompts.push({ ...input, at: Date.now() });
-          if (Date.now() < outageUntil) throw new Error("admission outage");
-          if (rejectPrompts > 0) { rejectPrompts -= 1; throw new Error("admission rejected"); }
+          const marker = spec.markerFile ? (() => { try { return readFileSync(spec.markerFile, "utf8").trim(); } catch { return null; } })() : undefined;
+          record.prompts.push({ ...input, at: Date.now(), marker, watcherLive: spec.state ? watcherLive() : undefined });
+          // Fault injection applies only to prompts matching spec.faultMatch
+          // (default: every prompt), e.g. watcher wakes but not the nudge.
+          const faulty = new RegExp(spec.faultMatch || ".").test(input.text);
+          if (faulty && Date.now() < outageUntil) throw new Error("admission outage");
+          if (faulty && rejectPrompts > 0) { rejectPrompts -= 1; throw new Error("admission rejected"); }
           if (!ids.has(input.id)) { ids.add(input.id); record.admitted.push({ ...input, at: Date.now() }); }
-          if (lostAcks > 0) { lostAcks -= 1; throw new Error("acknowledgement lost"); }
+          if (faulty && lostAcks > 0) { lostAcks -= 1; throw new Error("acknowledgement lost"); }
           return { id: input.id };
         },
       },
@@ -207,6 +233,7 @@ async function tuiRole([codeRoot, socketFile, specFile, outFile]) {
         subscribe({ signal } = {}) {
           return { async *[Symbol.asyncIterator]() {
             while (!signal?.aborted) {
+              if (streamBroken) throw new Error("native event stream lost");
               if (events.length) { yield events.shift(); continue; }
               await new Promise((resolve) => { notify = resolve; signal?.addEventListener("abort", resolve, { once: true }); });
             }
@@ -233,6 +260,27 @@ async function tuiRole([codeRoot, socketFile, specFile, outFile]) {
     else if (step.do === "observer-push") Object.assign(entry, await request(socket(), { op: "environment", sessionID: spec.sessionID, variables: step.variables }));
     else if (step.do === "write") writeFileSync(step.path, step.text);
     else if (step.do === "outage") { outageUntil = Date.now() + step.ms; entry.until = outageUntil; }
+    else if (step.do === "stream-error") { streamBroken = true; notify?.(); }
+    else if (step.do === "tick") { entry.timers = timers.length; for (const t of [...timers]) t.fn(); await sleep(50); }
+    else if (step.do === "wait") {
+      // Bounded readiness polling; entry.ok records whether the condition held.
+      const deadline = Date.now() + (step.timeoutMs || 20000);
+      const holds = async () => {
+        if (step.until === "watcher") return watcherLive();
+        if (step.until === "no-watcher") return !watcherLive();
+        if (step.until === "lifecycle") { try { return owner.readRegistration(spec.sessionID).lifecycle === step.value; } catch { return false; } }
+        if (step.until === "prompted") return record.prompts.filter((a) => new RegExp(step.match || ".").test(a.text)).length >= (step.count || 1);
+        if (step.until === "admitted") return record.admitted.filter((a) => new RegExp(step.match || ".").test(a.text)).length >= (step.count || 1);
+        if (step.until === "file") return existsSync(step.path);
+        if (step.until === "lock") { try { return readFileSync(`${spec.state}/.lock`, "utf8").trim() === String(process.pid); } catch { return false; } }
+        if (step.until === "shell-ok") return (await request(socket(), { op: "shell", sessionID: step.sessionID || spec.sessionID, command: step.command, extraEnv: step.extraEnv }, 60000)).code === 0;
+        throw new Error("unknown wait condition " + step.until);
+      };
+      let ok = false;
+      const started = Date.now();
+      while (Date.now() < deadline) { if (await holds()) { ok = true; break; } await sleep(step.pollMs || 200); }
+      Object.assign(entry, { until: step.until, ok, waitedMs: Date.now() - started });
+    }
     else if (step.do === "cleanup") { if (cleanup) { try { await cleanup(); entry.ok = true; } catch (error) { entry.threw = String(error.message); } cleanup = null; } }
     else if (step.do === "setup-again") {
       const again = await import(pathToFileURL(`${codeRoot}/.opencode/plugins/fm-native-v2/tui.js`).href + `?r=${Date.now()}`);
@@ -243,8 +291,13 @@ async function tuiRole([codeRoot, socketFile, specFile, outFile]) {
       const old = (await request(socket(), { op: "pid" })).pid;
       const next = socket() + ".r" + Date.now();
       const child = spawn(process.env.V2_SERVICE_EXEC || process.execPath, [process.argv[1], "service", codeRoot, next, spec.sessionsFile, "--service"], { detached: true, stdio: ["ignore", "pipe", "ignore"] });
-      if (spec.pidsFile) writeFileSync(spec.pidsFile, readFileSync(spec.pidsFile, "utf8") + child.pid + "\n");
-      await new Promise((resolve) => child.stdout.on("data", (c) => { if (String(c).includes('"ready":true')) resolve(); }));
+      await new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error("replacement service did not become ready within 20 s")), 20000);
+        child.on("error", (e) => { clearTimeout(timer); reject(e); });
+        child.on("exit", (code) => { clearTimeout(timer); reject(new Error("replacement service exited " + code)); });
+        child.stdout.on("data", (c) => { if (String(c).includes('"ready":true')) { clearTimeout(timer); resolve(); } });
+      }).catch((error) => { entry.error = String(error.message); });
+      if (spec.pidsFile) writeFileSync(spec.pidsFile, readFileSync(spec.pidsFile, "utf8") + identityOf(child.pid) + "\n");
       child.unref();
       writeFileSync(socketFile, next);
       try { process.kill(old, "SIGTERM"); } catch {}

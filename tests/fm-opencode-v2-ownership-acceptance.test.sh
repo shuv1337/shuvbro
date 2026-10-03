@@ -75,6 +75,24 @@ test_shell_without_session_identity_never_locks() {
   pass "ownership: a service shell without a session id never locks; the lead then locks for its owner, never the service pid"
 }
 
+# The helper's native shell-identity proof calls `shuvcode api`. Inside these
+# fixtures that must resolve to the stand-in's own transport (its pid and the
+# shells it spawned), never to the installed CLI or the operator's service.
+test_fixture_cli_reaches_only_the_stand_in() {
+  v2_require_native fixture-cli || return $?
+  registered fixture-cli
+  local out
+  out=$(v2_shell ses_lead 'command -v shuvcode; shuvcode api server.info; shuvcode api shell.list; shuvcode serve --service; echo "serve-rc=$?"')
+  printf '%s' "$out" | jq -e --arg sock "$V2_SOCKET" '.stdout | split("\n")[0] | startswith($sock + ".bin-")' >/dev/null \
+    || fail "model shells do not resolve shuvcode to the stand-in transport: $out"
+  printf '%s' "$out" | jq -e --argjson pid "$V2_SERVICE_PID" '.stdout | split("\n")[1] | fromjson | .pid == $pid' >/dev/null \
+    || fail "shuvcode api server.info did not report the stand-in service: $out"
+  printf '%s' "$out" | jq -e '.stdout | split("\n")[2] | fromjson | .data | map(select(.metadata.sessionID == "ses_lead" and .status == "running")) | length == 1' >/dev/null \
+    || fail "shuvcode api shell.list did not report exactly this running lead shell: $out"
+  printf '%s' "$out" | jq -e '.stdout | test("serve-rc=2")' >/dev/null || fail "the stand-in transport accepted a non-api command: $out"
+  pass "ownership: model shells reach only the stand-in's native transport, which reports its own pid and this exact running shell"
+}
+
 # M2: a non-lead shell on the same service that exports the lead's session id
 # and paths must not gain the lead's helper authority.
 test_spoofed_session_id_gains_no_authority() {
@@ -147,6 +165,7 @@ test_second_claim_on_live_session_is_refused() {
 
 v2_run_cases \
   test_registered_lead_shell_acquires_for_owner \
+  test_fixture_cli_reaches_only_the_stand_in \
   test_unregistered_session_is_refused \
   test_shell_without_session_identity_never_locks \
   test_spoofed_session_id_gains_no_authority \

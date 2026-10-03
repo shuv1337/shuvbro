@@ -18,8 +18,17 @@ set -u
 # shellcheck source=tests/wake-helpers.sh
 . "$(dirname "${BASH_SOURCE[0]}")/wake-helpers.sh"
 
-WATCH_ARM="$ROOT/bin/fm-watch-arm.sh"
-DRAIN="$ROOT/bin/fm-wake-drain.sh"
+# Fixture boundary: no ambient native session identity or activation, and a
+# token-only registry namespace for any production helper this run reaches.
+unset OPENCODE_SESSION_ID FM_V2_ACTIVATION
+export FM_V2_REGISTRY_NAMESPACE="${FM_V2_REGISTRY_NAMESPACE:-v2iso$$}"
+case "$FM_V2_REGISTRY_NAMESPACE" in default) echo "not ok - refusing the default registry namespace" >&2; exit 1 ;; esac
+
+# Cross-tree runs (FM_V2_TEST_CODE_ROOT) exercise that tree's recovery helpers,
+# matching the acceptance library's code-root selection.
+CODE_ROOT=$(cd -P "${FM_V2_TEST_CODE_ROOT:-$ROOT}" && pwd -P)
+WATCH_ARM="$CODE_ROOT/bin/fm-watch-arm.sh"
+DRAIN="$CODE_ROOT/bin/fm-wake-drain.sh"
 TMP_ROOT=$(fm_test_tmproot fm-opencode-v2-wake-admission)
 export NODE_NO_WARNINGS=1
 ARM_PID=

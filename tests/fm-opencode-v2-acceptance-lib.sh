@@ -30,6 +30,10 @@ V2_FAILED=0
 V2_STATE_DIR=$(mktemp -d "${TMPDIR:-/tmp}/fm-v2-accept.XXXXXX")
 V2_NS_BASE="v2t$$$RANDOM"
 export FM_V2_REGISTRY_NAMESPACE="${V2_NS_BASE}"
+# Fixture boundary: an ambient native session identity or activation (for
+# example from the developer's own shuvcode shell) must never reach production
+# helpers run by these fixtures.
+unset OPENCODE_SESSION_ID FM_V2_ACTIVATION OPENCODE OPENCODE_TERMINAL
 : > "$V2_STATE_DIR/pids"
 printf '%s\n' "$FM_V2_REGISTRY_NAMESPACE" > "$V2_STATE_DIR/namespaces"
 
@@ -61,7 +65,10 @@ v2_namespace() {  # <suffix>
   printf '%s\n' "$ns" >> "$V2_STATE_DIR/namespaces"
 }
 
-v2_track() { printf '%s\n' "$1" >> "$V2_STATE_DIR/pids"; }
+# Fixture processes are tracked by pid plus /proc start token, so teardown can
+# never signal a reused pid that no longer belongs to this run.
+v2_start_token() { local stat; stat=$(cat "/proc/$1/stat" 2>/dev/null) || return 1; stat=${stat##*) }; printf '%s' "$stat" | awk '{print $20}'; }
+v2_track() { printf '%s %s\n' "$1" "$(v2_start_token "$1" || echo 0)" >> "$V2_STATE_DIR/pids"; }
 
 # Every production call made by these fixtures must run in a test namespace.
 v2_assert_test_namespace() {
@@ -70,28 +77,51 @@ v2_assert_test_namespace() {
   esac
 }
 
+V2_TEARDOWN_FAILED=0
 v2_teardown() {
-  local pid ns dir
-  while IFS= read -r pid; do [ -n "$pid" ] && kill "$pid" 2>/dev/null; done < "$V2_STATE_DIR/pids"
-  sleep 0.3
-  while IFS= read -r pid; do [ -n "$pid" ] && kill -9 "$pid" 2>/dev/null; done < "$V2_STATE_DIR/pids"
+  local pid start ns dir live _
+  while read -r pid start; do
+    [ -n "$pid" ] && [ "$(v2_start_token "$pid")" = "$start" ] && kill "$pid" 2>/dev/null
+  done < "$V2_STATE_DIR/pids"
+  for _ in $(seq 1 30); do
+    live=0
+    while read -r pid start; do [ -n "$pid" ] && [ "$(v2_start_token "$pid")" = "$start" ] && live=1; done < "$V2_STATE_DIR/pids"
+    [ "$live" = 1 ] || break
+    sleep 0.1
+  done
+  while read -r pid start; do
+    if [ -n "$pid" ] && [ "$(v2_start_token "$pid")" = "$start" ]; then
+      printf 'note: fixture process %s survived TERM; killing\n' "$pid" >&2
+      kill -9 "$pid" 2>/dev/null
+      V2_TEARDOWN_FAILED=1
+    fi
+  done < "$V2_STATE_DIR/pids"
   if v2_native_ready; then
-    sort -u "$V2_STATE_DIR/namespaces" | while IFS= read -r ns; do
+    while IFS= read -r ns; do
       [ -n "$ns" ] && [ "$ns" != default ] || continue
       dir="$HOME/.local/state/shuvbro/opencode-v2/$ns"
       [ -d "$dir" ] || continue
       chmod 700 "$dir" 2>/dev/null
-      FM_V2_REGISTRY_NAMESPACE="$ns" "$V2_NODE_BIN" "$V2_CODE_ROOT/bin/fm-opencode-v2-owner.mjs" cleanup-test-namespace >/dev/null 2>&1 \
-        || printf 'note: test namespace %s cleanup refused\n' "$ns" >&2
-      # The owner command may already remove the namespace directory itself.
+      if ! FM_V2_REGISTRY_NAMESPACE="$ns" "$V2_NODE_BIN" "$V2_CODE_ROOT/bin/fm-opencode-v2-owner.mjs" cleanup-test-namespace >/dev/null 2>"$V2_STATE_DIR/cleanup.err"; then
+        # Retain the namespace as evidence and fail; never delete around the owner.
+        printf 'not ok - test namespace %s cleanup refused (retained): %s\n' "$ns" "$(cat "$V2_STATE_DIR/cleanup.err")" >&2
+        V2_TEARDOWN_FAILED=1
+        continue
+      fi
+      # The owner command removes the namespace directory when it is empty.
       [ -d "$dir" ] || continue
-      rm -f "$dir/.claims.lock/pid" 2>/dev/null; rmdir "$dir/.claims.lock" 2>/dev/null
       rmdir "$dir" 2>/dev/null || printf 'note: test namespace directory %s not empty after cleanup: %s\n' "$dir" "$(find "$dir" -mindepth 1 -maxdepth 1 -printf '%f ')" >&2
-    done
+    done < <(sort -u "$V2_STATE_DIR/namespaces")
   fi
   rm -rf "$V2_STATE_DIR"
 }
-v2_exit() { local status=$?; v2_teardown; fm_test_cleanup 2>/dev/null; exit "$status"; }
+v2_exit() {
+  local status=$?
+  v2_teardown
+  [ "$V2_TEARDOWN_FAILED" = 0 ] || [ "$status" -ne 0 ] || status=1
+  fm_test_cleanup 2>/dev/null
+  exit "$status"
+}
 trap v2_exit EXIT
 
 # Run each case in a subshell, counting failures and pendings separately.
@@ -215,14 +245,22 @@ v2_guard() {  # <session> <command> [tool] [env-json]
     '{op: "denyReason", env: $e, event: {tool: $t, sessionID: $s, id: "call_1", messageID: "msg_1", agent: "build", input: {command: $c}}}')"
 }
 
-# Classify a guard reply: allow | classifier:<code> | scope | evaluate | other.
+# Classify a guard reply by its reason:
+#   allow                 no lead policy applied
+#   classifier:<code>     a production classifier denied with its typed code
+#   scope                 protective refusal naming an explicit rebind
+#   evaluate-unavailable  a classifier exited abnormally (signal, timeout, crash)
+#   evaluate-invalid      a classifier returned a malformed verdict
+#   crash                 the guard itself threw (never an expected outcome)
+#   other                 any other reason (asserted by exact text where used)
 v2_guard_kind() {  # <reply-json>
   printf '%s' "$1" | jq -r '
-    if has("thrown") then "evaluate"
+    if has("thrown") then "crash"
     elif .reason == "" then "allow"
     elif (.reason | test("^\\[[A-Za-z0-9_-]+\\] ")) then "classifier:" + (.reason | capture("^\\[(?<c>[A-Za-z0-9_-]+)\\]").c)
     elif (.reason | test("rebind")) then "scope"
-    elif (.reason | test("could not evaluate|invalid verdict|unable to evaluate|timed out|signal")) then "evaluate"
+    elif (.reason | test("could not evaluate this command")) then "evaluate-unavailable"
+    elif (.reason | test("returned an invalid verdict")) then "evaluate-invalid"
     else "other" end'
 }
 
@@ -245,10 +283,16 @@ v2_lead_env() {  # <home>
 
 # Run the production TUI entry under a genuine activation for the driver's own
 # process. <spec> is JSON merged over the defaults; writes <out>.
-v2_tui() {  # <dir> <spec-json> <out>
-  local dir=$1
+v2_tui() {  # <dir> <spec-json> <out> [spec-file-name]
+  local dir=$1 specfile="$1/${4:-tui-spec.json}"
   v2_assert_test_namespace
   printf '%s' "$V2_SOCKET" > "$dir/socket"
-  jq -n --argjson s "$2" --arg sf "$dir/sessions.json" '{sessionsFile: $sf} + $s' > "$dir/tui-spec.json"
-  "$V2_NODE_BIN" "$V2_HARNESS" tui "$V2_CODE_ROOT" "$dir/socket" "$dir/tui-spec.json" "$3" > "$dir/tui.log" 2>&1
+  jq -n --argjson s "$2" --arg sf "$dir/sessions.json" '{sessionsFile: $sf} + $s' > "$specfile"
+  "$V2_NODE_BIN" "$V2_HARNESS" tui "$V2_CODE_ROOT" "$dir/socket" "$specfile" "$3" > "$specfile.log" 2>&1
+}
+
+# Background form for concurrent owners; sets V2_TUI_PID.
+v2_tui_bg() {  # <dir> <spec-json> <out> <spec-file-name>
+  v2_tui "$@" &
+  V2_TUI_PID=$!
 }
