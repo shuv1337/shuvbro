@@ -39,8 +39,9 @@ export function createFailureNotice(report, surface, { now = () => performance.n
     } catch (error) { finish(false); report("V2 repair notice delivery remains pending: " + error.message); }
   }
   return {
-    failure(reason, { permanent = false } = {}) {
-      report(reason);
+    failure(detail, { permanent = false } = {}) {
+      report(detail);
+      const reason = String(detail).slice(0, 4000);
       episode ||= makeEpisode();
       episode.reason = reason;
       if (permanent && !episode.surfaced.has(reason)) {

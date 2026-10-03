@@ -2,7 +2,7 @@
 // are real child processes; service APIs are local exact-session stand-ins.
 import assert from "node:assert/strict";
 import * as fs from "node:fs";
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 const source = process.env.ROOT, lab = process.env.LAB;
@@ -222,7 +222,7 @@ if (process.argv.some(value => value.startsWith("--review-"))) {
     const journal = createAdmissionJournal(paths, record.sessionID, async input => ({ id: input.id }));
     for (const episode of ["prior-a", "prior-b"]) reloadIDs.push(journal.prepare(text, "failure:" + record.claimID + ":" + episode + ":hash").id);
   }
-  let rejects = 8, savedSidecar, invalidated = false;
+  let rejects = mode === "timeout-long" ? 5 : 8, savedSidecar, invalidated = false;
   app.ui.toast.show = value => toasts.push(value);
   app.client.session.prompt = async input => {
     prompts.push(input);
@@ -234,8 +234,8 @@ if (process.argv.some(value => value.startsWith("--review-"))) {
         setTimeout(() => owner.writePrivate(state + "/.opencode-v2-owner.json", savedSidecar), 2500);
         throw new Error("fixture invalid ownership during notice admission");
       }
-      if ((mode === "rejected" || mode === "timeout") && rejects-- > 0) {
-        if (mode === "timeout") throw new DOMException("fixture repair prompt timed out", "TimeoutError");
+      if ((mode === "rejected" || mode === "timeout" || mode === "timeout-long") && rejects-- > 0) {
+        if (mode !== "rejected") throw new DOMException("fixture repair prompt timed out", "TimeoutError");
         throw new Error("fixture repair prompt rejected");
       }
       if (mode === "wrong-id" && rejects-- > 0) return { id: "msg_" + "0".repeat(64) };
@@ -255,14 +255,7 @@ if (process.argv.some(value => value.startsWith("--review-"))) {
     } else if (mode === "prune") {
       await commands[0].run();
       await until(() => admitted.some(value => value.text.includes("WATCHER FAILURE")), "prune control never admitted a real repair notice");
-      let makeJournal = createAdmissionJournal;
-      if (process.env.REVIEW_BASELINE_PRUNE === "1") {
-        const baseline = spawnSync("git", ["show", "871dd515cab714abb029a1b6326099d1950dfa16:.opencode/plugins/fm-native-v2/admission.js"], { cwd: source, encoding: "utf8" });
-        assert.equal(baseline.status, 0);
-        fs.writeFileSync(lab + "/baseline-admission.mjs", baseline.stdout.replace('"../../../bin/fm-opencode-v2-owner.mjs"', JSON.stringify(pathToFileURL(source + "/bin/fm-opencode-v2-owner.mjs").href)));
-        makeJournal = (await import(pathToFileURL(lab + "/baseline-admission.mjs"))).createAdmissionJournal;
-      }
-      const journal = makeJournal(paths, record.sessionID, async input => ({ id: input.id }), () => {}, { failureClaim: record.claimID });
+      const journal = createAdmissionJournal(paths, record.sessionID, async input => ({ id: input.id }), () => {}, { failureClaim: record.claimID });
       const abandoned = journal.prepare("old repair", "failure:retired-claim:episode:hash");
       const active = journal.prepare("active repair", "failure:" + record.claimID + ":active:hash");
       const dirs = fs.readdirSync(state + "/.opencode-v2-admissions");
@@ -295,6 +288,15 @@ if (process.argv.some(value => value.startsWith("--review-"))) {
       for (let i = 0; i < 200 && !admitted.some(value => value.text.includes("restore watcher continuity")); i++) await delay(50);
       assert.ok(admitted.some(value => value.text.includes("restore watcher continuity")), "restore failure was hidden by prepare error or later healthy arm");
       }
+    } else if (mode === "timeout-long") {
+      const long = "fixture long rebind failure " + "x".repeat(5000);
+      app.client.server.info = async () => { throw new Error(long); };
+      await commands[0].run();
+      for (let i = 0; i < 600 && !admitted.some(value => value.text.includes("fixture long rebind failure")); i++) await delay(50);
+      await delay(7000);
+      assert.equal(prompts.filter(value => value.text.includes("fixture long rebind failure")).length > 1, true, "long repair notice timeout injection was vacuous");
+      assert.equal(admitted.filter(value => value.text.includes("fixture long rebind failure")).length, 1, "long repair notice was admitted more than once");
+      assert.equal(toasts.filter(value => value.message.includes("fixture long rebind failure")).length, 1, "restored long repair notice raised a second toast");
     } else {
       await commands[0].run();
       for (let i = 0; i < 900 && !admitted.some(value => value.id === prompts.find(value => value.text.includes("WATCHER FAILURE"))?.id); i++) await delay(50);
