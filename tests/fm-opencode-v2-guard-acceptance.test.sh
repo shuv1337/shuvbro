@@ -12,7 +12,9 @@
 # Outcomes are classified by reason, never by "something failed":
 #   classifier:<code>  the production classifier denied ([persistent-cd], ...)
 #   scope              protective refusal naming an explicit rebind
-#   evaluate           the guard could not evaluate (timeout, crash, bad verdict)
+#   evaluate-unavailable / evaluate-invalid
+#                      one classifier could not produce a verdict, or a bad one
+#   crash              the guard itself threw: never an accepted outcome
 #   allow              no lead policy applied
 set -u
 
@@ -114,7 +116,7 @@ test_record_protects_when_marker_removed() {
   registered_lead marker-removed
   positive_control
   v2_session "$CASE" ses_lead "$LEAD_ROOT"
-  v2_expect_kind "registered lead with marker removed" "scope|classifier:persistent-cd" "$(v2_guard ses_lead "$PROTECTED")"
+  v2_expect_kind "registered lead with marker removed" scope "$(v2_guard ses_lead "$PROTECTED")"
   pass "guard: removing the native marker does not erase registry protection"
 }
 
@@ -136,50 +138,95 @@ test_stale_service_refuses() {
   pass "guard: a registered lead under a different service incarnation refuses until republication"
 }
 
-# B1: a classifier killed by the guard's timeout or by a signal must deny.
-break_classifiers() {  # <root> <node-body>
-  local f
-  for f in "$1"/bin/fm-*-command-policy.mjs; do printf '%s\n' "$2" > "$f"; done
+# Evaluator failures, one classifier at a time with the other intact. Every
+# case first proves a valid registered scope (classifier deny), then breaks
+# exactly one classifier and requires its specific bounded diagnostic; an
+# exception from the guard itself (kind crash) never satisfies these cases.
+CD_POLICY=fm-cd-command-policy.mjs
+ARM_POLICY=fm-arm-command-policy.mjs
+ARM_PROTECTED='echo ok; bin/fm-watch-arm.sh --restart &'
+
+# The cd classifier imports the arm classifier's module, so the arm file is
+# broken only when executed as the arm classifier itself: its exports stay
+# intact for the cd classifier.
+break_classifier() {  # <root> <policy-file> <node-body>
+  local file="$1/bin/$2" original shebang=''
+  original=$(cat "$file")
+  case "$original" in '#!'*) shebang=${original%%$'\n'*}; original=${original#*$'\n'} ;; esac
+  {
+    [ -z "$shebang" ] || printf '%s\n' "$shebang"
+    printf '%s\n' 'const { fileURLToPath: v2TestPath } = await import("node:url");'
+    printf 'if (process.argv[1] === v2TestPath(import.meta.url)) { %s; await new Promise(() => {}); }\n' "$3"
+    printf '%s\n' "$original"
+  } > "$file"
 }
 
-test_classifier_signal_death_denies() {
-  v2_require_native classifier-signal || return $?
-  registered_lead classifier-signal
+test_arm_classifier_allow_and_deny() {
+  v2_require_native arm-classifier || return $?
+  registered_lead arm-classifier
   positive_control
-  break_classifiers "$LEAD_ROOT" 'process.kill(process.pid, "SIGKILL");'
-  v2_expect_kind "classifier killed by a signal" "evaluate|scope" "$(v2_guard ses_lead "$ALLOWED")"
-  pass "guard: a classifier killed by a signal denies the registered lead"
+  v2_expect_kind "arm classifier allowed command" allow "$(v2_guard ses_lead 'echo ok')"
+  v2_expect_kind "arm classifier protected command" "classifier:watcher-background" "$(v2_guard ses_lead "$ARM_PROTECTED")"
+  pass "guard: the arm classifier allows an ordinary command and denies a backgrounded watcher with its typed code"
 }
 
-test_classifier_timeout_denies() {
-  v2_require_native classifier-timeout || return $?
-  registered_lead classifier-timeout
+evaluator_case() {  # <case> <policy-file> <node-body> <expected-kind>
+  registered_lead "$1"
   positive_control
-  break_classifiers "$LEAD_ROOT" 'setInterval(() => {}, 1000);'
-  v2_expect_kind "classifier that never returns" "evaluate|scope" "$(v2_guard ses_lead "$ALLOWED")"
-  pass "guard: a classifier that hangs past the guard timeout denies the registered lead"
+  break_classifier "$LEAD_ROOT" "$2" "$3"
+  v2_expect_kind "$1: ordinary command with $2 broken" "$4" "$(v2_guard ses_lead 'echo ok')"
 }
 
-test_broken_runtime_denies() {
+test_arm_classifier_signal_death_denies_with_cd_intact() {
+  v2_require_native arm-signal || return $?
+  evaluator_case arm-signal "$ARM_POLICY" 'process.kill(process.pid, "SIGKILL")' evaluate-unavailable
+  v2_expect_kind "cd classifier still intact" "classifier:persistent-cd" "$(v2_guard ses_lead "$PROTECTED")"
+  pass "guard: an arm classifier killed by a signal denies with the evaluation diagnostic while the cd classifier still decides"
+}
+
+test_cd_classifier_signal_death_denies() {
+  v2_require_native cd-signal || return $?
+  evaluator_case cd-signal "$CD_POLICY" 'process.kill(process.pid, "SIGKILL")' evaluate-unavailable
+  pass "guard: a cd classifier killed by a signal denies with the evaluation diagnostic"
+}
+
+test_arm_classifier_timeout_denies() {
+  v2_require_native arm-timeout || return $?
+  evaluator_case arm-timeout "$ARM_POLICY" 'setInterval(() => {}, 1000)' evaluate-unavailable
+  pass "guard: an arm classifier that hangs past the guard timeout denies with the evaluation diagnostic"
+}
+
+test_cd_classifier_timeout_denies() {
+  v2_require_native cd-timeout || return $?
+  evaluator_case cd-timeout "$CD_POLICY" 'setInterval(() => {}, 1000)' evaluate-unavailable
+  pass "guard: a cd classifier that hangs past the guard timeout denies with the evaluation diagnostic"
+}
+
+test_arm_classifier_invalid_verdict_denies() {
+  v2_require_native arm-verdict || return $?
+  evaluator_case arm-verdict "$ARM_POLICY" 'console.log("maybe"); process.exit(0)' evaluate-invalid
+  v2_expect_kind "cd classifier still intact" "classifier:persistent-cd" "$(v2_guard ses_lead "$PROTECTED")"
+  pass "guard: a malformed arm classifier verdict denies with the invalid-verdict diagnostic"
+}
+
+test_cd_classifier_invalid_verdict_denies() {
+  v2_require_native cd-verdict || return $?
+  evaluator_case cd-verdict "$CD_POLICY" 'console.log("maybe"); process.exit(0)' evaluate-invalid
+  pass "guard: a malformed cd classifier verdict denies with the invalid-verdict diagnostic"
+}
+
+test_broken_runtime_denies_with_its_diagnostic() {
   v2_require_native broken-runtime || return $?
   registered_lead broken-runtime
   positive_control
-  local fakebin
+  local fakebin reply
   fakebin=$(fm_fakebin "$CASE")
   printf '#!/usr/bin/env bash\necho "node: runtime unavailable" >&2\nexit 1\n' > "$fakebin/node"
   chmod +x "$fakebin/node"
-  v2_expect_kind "broken guard runtime" "evaluate|scope|other" \
-    "$(v2_guard ses_lead "$ALLOWED" shell "$(jq -nc --arg p "$fakebin:$PATH" '{PATH: $p}')")"
-  pass "guard: a broken guard runtime denies the registered lead instead of approving"
-}
-
-test_classifier_invalid_verdict_denies() {
-  v2_require_native classifier-verdict || return $?
-  registered_lead classifier-verdict
-  positive_control
-  break_classifiers "$LEAD_ROOT" 'console.log("maybe");'
-  v2_expect_kind "classifier with a malformed verdict" "evaluate" "$(v2_guard ses_lead "$ALLOWED")"
-  pass "guard: a malformed classifier verdict denies the registered lead"
+  reply=$(v2_guard ses_lead "echo ok" shell "$(jq -nc --arg p "$fakebin:$PATH" '{PATH: $p}')")
+  printf '%s' "$reply" | jq -e '.reason == "node: runtime unavailable"' >/dev/null \
+    || fail "a broken guard runtime did not deny with that runtime's own diagnostic: $reply"
+  pass "guard: a broken guard runtime denies the registered lead with the runtime's diagnostic"
 }
 
 # M4: an unreadable registry must not put every unmarked root under lead policy,
@@ -223,9 +270,13 @@ v2_run_cases \
   test_record_protects_when_marker_removed \
   test_retired_lead_refuses_until_rebind \
   test_stale_service_refuses \
-  test_classifier_signal_death_denies \
-  test_classifier_timeout_denies \
-  test_broken_runtime_denies \
-  test_classifier_invalid_verdict_denies \
+  test_arm_classifier_allow_and_deny \
+  test_arm_classifier_signal_death_denies_with_cd_intact \
+  test_cd_classifier_signal_death_denies \
+  test_arm_classifier_timeout_denies \
+  test_cd_classifier_timeout_denies \
+  test_arm_classifier_invalid_verdict_denies \
+  test_cd_classifier_invalid_verdict_denies \
+  test_broken_runtime_denies_with_its_diagnostic \
   test_registry_read_failure_inert_without_marker \
   test_linked_lead_checkout_is_guarded
