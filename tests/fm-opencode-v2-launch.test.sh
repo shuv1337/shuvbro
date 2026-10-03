@@ -46,7 +46,7 @@ case "$operation" in
     [ "${TEST_DROP_REGISTRY:-}" != after-model ] || rm -f "$TEST_NATIVE_STATE/service.json" ;;
   session.create)
     printf '%s\n' "$body" > "$TEST_CREATE"
-    jq -e --arg root "$TEST_WORK" '.location.directory==$root and .permissions==[{action:"*",resource:"*",effect:"allow"}]' <<< "$body" >/dev/null
+    jq -e --arg root "$TEST_WORK" '.location.directory==$root and (has("permissions")|not)' <<< "$body" >/dev/null
     echo created >> "$TEST_LOG"
     jq -cn --argjson body "$body" '{data:{id:"ses_worker_exact",location:$body.location,model:($body.model + {variant:($body.model.variant // "default")})}}' ;;
   session.prompt)

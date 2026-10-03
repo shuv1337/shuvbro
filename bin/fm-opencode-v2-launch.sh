@@ -73,7 +73,7 @@ case "$model_ref" in
     jq -e --arg variant "$variant" 'any(.variants[]?; .id==$variant)' <<< "$selected" >/dev/null || { echo 'error: requested native variant unavailable' >&2; exit 1; } ;;
 esac
 body=$(jq -cn --arg directory "$directory" --argjson selected "$selected" --arg variant "$variant" \
-  '{location:{directory:$directory},model:{providerID:$selected.providerID,id:$selected.id},permissions:[{action:"*",resource:"*",effect:"allow"}]} | if $variant!="" then .model.variant=$variant else . end')
+  '{location:{directory:$directory},model:{providerID:$selected.providerID,id:$selected.id}} | if $variant!="" then .model.variant=$variant else . end')
 response=$(api session.create --data "$body")
 if ! session=$(jq -er --argjson expected "$body" '.data | select(.parentID==null and .location.directory==$expected.location.directory and .model.providerID==$expected.model.providerID and .model.id==$expected.model.id and (.model.variant // "default")==($expected.model.variant // "default")) | .id | select(test("^ses_[A-Za-z0-9_-]+$"))' <<< "$response"); then
   echo 'error: native service did not create the requested exact worker session/model' >&2

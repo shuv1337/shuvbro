@@ -24,11 +24,13 @@ TARGET=firstmate:fm-v2-live
 OBSERVER=
 SERVICE_STARTED=0
 SERVICE_IDENTITY=
+# Resolve node before relocating XDG roots: a version-manager shim refuses its
+# config once its trust state is no longer visible.
+NODE_DIR=$(dirname "$(node -p process.execPath)")
+export PATH="$NODE_DIR:$PATH"
 export FM_V2_REGISTRY_NAMESPACE="test-worker-live-$$-$RANDOM"
 export XDG_CONFIG_HOME="$LAB/xdg/config" XDG_STATE_HOME="$LAB/xdg/state" XDG_DATA_HOME="$LAB/xdg/data" XDG_CACHE_HOME="$LAB/xdg/cache"
 unset OPENCODE_CONFIG_DIR OPENCODE_CONFIG_CONTENT OPENCODE_SESSION_ID FM_V2_ACTIVATION OPENCODE_PASSWORD OPENCODE_SERVER_PASSWORD
-NODE_DIR=$(dirname "$(node -p process.execPath)")
-export PATH="$NODE_DIR:$PATH"
 cleanup() {
   local status=$?
   if [ -n "$OBSERVER" ]; then

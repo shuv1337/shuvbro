@@ -410,6 +410,8 @@ test_claude_threads_model_and_effort() {
 #   FM_FAKE_V2_SUBMIT=no    every Enter on the pre-filled composer is swallowed
 #   FM_FAKE_V2_SWALLOW_FIRST=yes  only the first such Enter is swallowed
 #   FM_FAKE_V2_SIDECAR=<wt> the launch helper records an admitted worker session
+#   FM_FAKE_V2_PREFILL=yes  the launch helper only pre-fills the composer (the
+#                           older-release fallback) instead of auto-submitting
 make_opencode_v2_tmux() {
   local fakebin=$1
   cat > "$fakebin/tmux" <<'SH'
@@ -458,7 +460,7 @@ case "${1:-}" in
       *' Enter '*)
         case "$state" in
           launch-typed|launch-helper)
-            if [ "${FM_FAKE_V2_AUTOSUBMIT:-no}" != no ] || { [ "$state" = launch-helper ] && [ "${FM_FAKE_V2_TUI:-yes}" = yes ]; }; then
+            if [ "${FM_FAKE_V2_AUTOSUBMIT:-no}" != no ] || { [ "$state" = launch-helper ] && [ "${FM_FAKE_V2_TUI:-yes}" = yes ] && [ "${FM_FAKE_V2_PREFILL:-no}" = no ]; }; then
               printf 'submitted\n' > "$FM_FAKE_V2_STATE"
               state=busy event=session-execution-started
               if [ "${FM_FAKE_V2_AUTOSUBMIT:-no}" = finished ]; then
@@ -533,8 +535,10 @@ test_opencode_v2_launch_uses_auto_and_omits_model() {
   status=$?
   expect_code 0 "$status" "opencode-v2 ship spawn without a model should succeed: $out"
   launch=$(cat "$LAUNCH_LOG")
-  assert_contains "$launch" "shuvcode --standalone --auto --prompt" \
-    "opencode-v2 launch must isolate the worker server and auto-approve permissions"
+  assert_contains "$launch" "fm-opencode-v2-launch.sh' --session-record '" \
+    "opencode-v2 launch must use the shared-service launch helper with the task session sidecar"
+  assert_contains "$launch" "$id.opencode-v2-session.json' --prompt" \
+    "opencode-v2 launch without a model must record this task's exact session"
   assert_not_contains "$launch" "--model" \
     "opencode-v2 launch without a model must not pass --model"
   assert_not_contains "$launch" "--effort" \
@@ -548,8 +552,8 @@ test_opencode_v2_launch_uses_auto_and_omits_model() {
   status=$?
   expect_code 0 "$status" "opencode-v2 effort without a model should still launch: $out"
   launch=$(cat "$LAUNCH_LOG")
-  assert_contains "$launch" "shuvcode --standalone --auto --prompt" \
-    "effort without a provider/model must stay on the root command"
+  assert_contains "$launch" "$id.opencode-v2-session.json' --prompt" \
+    "effort without a provider/model must launch without a model reference"
   assert_not_contains "$launch" "--effort" \
     "opencode-v2 must not pass an --effort flag"
   assert_not_contains "$launch" "--model" \
@@ -561,7 +565,7 @@ test_opencode_v2_launch_uses_auto_and_omits_model() {
   status=$?
   expect_code 0 "$status" "opencode-v2 model spawn should succeed: $out"
   launch=$(cat "$LAUNCH_LOG")
-  assert_contains "$launch" "fm-opencode-v2-launch.sh' --model 'opencode/space-bunny-free' --prompt" \
+  assert_contains "$launch" "$id.opencode-v2-session.json' --model 'opencode/space-bunny-free' --prompt" \
     "opencode-v2 model must use the model-bound root launch helper"
   assert_not_contains "$launch" "--effort" \
     "opencode-v2 model launch must not pass --effort"
@@ -574,7 +578,7 @@ test_opencode_v2_launch_uses_auto_and_omits_model() {
   status=$?
   expect_code 0 "$status" "opencode-v2 model and effort spawn should succeed: $out"
   launch=$(cat "$LAUNCH_LOG")
-  assert_contains "$launch" "fm-opencode-v2-launch.sh' --model 'opencode/space-bunny-free#low' --prompt" \
+  assert_contains "$launch" "$id.opencode-v2-session.json' --model 'opencode/space-bunny-free#low' --prompt" \
     "opencode-v2 effort must be the #variant suffix of --model"
   assert_not_contains "$launch" "--effort" \
     "opencode-v2 must not pass --effort beside the variant"
@@ -602,105 +606,6 @@ test_opencode_v2_launch_uses_auto_and_omits_model() {
 }
 
 
-test_opencode_v2_session_launcher() {
-  local dir fakebin helper prompt model expected mode out status
-  dir="$TMP_ROOT/v2-session-launcher"
-  fakebin=$(fm_fakebin "$dir")
-  helper="$ROOT/bin/fm-opencode-v2-launch.sh"
-  mkdir -p "$dir/project"
-  cat > "$fakebin/shuvcode" <<'SH'
-#!/usr/bin/env bash
-set -eu
-case "$1" in
-  serve)
-    [ "$2" = --stdio ] && [ "$3" = --hostname ] && [ "$4" = 127.0.0.1 ] && [ "$5" = --port ] && [ "$6" = 0 ]
-    [ -n "${OPENCODE_PASSWORD:-}" ]
-    exec node "$V2_LAUNCH_LOG.server.js"
-    ;;
-  api)
-    [ "$2" = --server ] && [ "$3" = "$(cat "$V2_LAUNCH_LOG.url")" ]
-    [ "$4" = session.create ] && [ "$5" = --data ]
-    printf '%s' "$6" > "$V2_LAUNCH_LOG.request"
-    case "${V2_RESPONSE:-ok}" in
-      fail) exit 17 ;;
-      malformed) printf 'not JSON\n'; exit 0 ;;
-    esac
-    printf '%s' "$6" | jq --arg mode "${V2_RESPONSE:-ok}" '
-      {data:(. + {id:"ses_fixture"})}
-      | if $mode == "model" then .data.model.id="wrong"
-        elif $mode == "variant" then .data.model.variant="wrong"
-        elif $mode == "location" then .data.location.directory="/wrong"
-        elif $mode == "child" then .data.parentID="ses_parent"
-        elif $mode == "id" then .data.id=""
-        else . end'
-    ;;
-  *)
-    jq -cn '$ARGS.positional' --args -- "$@" > "$V2_LAUNCH_LOG.root"
-    [ "${V2_RESPONSE:-ok}" != tuifail ] || exit 17
-    ;;
-esac
-SH
-  cat > "$dir/log.server.js" <<'JS'
-const http = require("node:http");
-const fs = require("node:fs");
-const log = process.env.V2_LAUNCH_LOG;
-const expected = "Basic " + Buffer.from("opencode:" + process.env.OPENCODE_PASSWORD).toString("base64");
-const server = http.createServer((req, res) => {
-  if (req.headers.authorization !== expected || req.url !== "/api/model") {
-    res.writeHead(403).end(); return;
-  }
-  const cold = !fs.existsSync(log + ".catalog");
-  fs.writeFileSync(log + ".catalog", "settled");
-  const mode = process.env.V2_RESPONSE;
-  const model = {providerID:"provider", id:(process.env.V2_REFERENCE || "provider/model#low").split("#")[0].replace(/^provider\//, ""), variants:[{id:"low"},{id:"high"}]};
-  if (mode === "missing-variant") model.variants = [];
-  res.end(JSON.stringify({data: cold || mode === "missing-model" ? [] : [model]}));
-});
-server.listen(0, "127.0.0.1", () => {
-  const url = "http://127.0.0.1:" + server.address().port;
-  fs.writeFileSync(log + ".url", url);
-  process.stdout.write(JSON.stringify({url}) + "\n");
-});
-process.stdin.resume();
-process.stdin.on("end", () => server.close(() => fs.writeFileSync(log + ".closed", "closed")));
-JS
-  chmod +x "$fakebin/shuvcode"
-  prompt=$'literal brief with "quotes", $substitution and\nnewlines'
-  for model in 'provider/model' 'provider/nested/model#low' "provider/a'b\$(literal)#high"; do
-    rm -f "$dir/log.closed" "$dir/log.catalog"
-    out=$(cd "$dir/project" && V2_REFERENCE="$model" V2_LAUNCH_LOG="$dir/log" PATH="$fakebin:$PATH" \
-      "$helper" --model "$model" --prompt "$prompt" 2>&1)
-    expect_code 0 $? "model-bound root launcher failed: $out"
-    expected=$(jq -cn --arg prompt "$prompt" --arg url "$(cat "$dir/log.url")" '["--server",$url,"--auto","--session","ses_fixture","--prompt",$prompt]')
-    [ "$(cat "$dir/log.root")" = "$expected" ] || fail "root launch lost private server, auto, exact session, or literal brief"
-    assert_present "$dir/log.closed" "private server lease remained alive after TUI exit"
-    jq -e --arg dir "$dir/project" --arg ref "$model" '
-      .location.directory==$dir and .model.providerID=="provider"
-      and .model.id==($ref | split("#")[0] | sub("^provider/";""))
-      and (.model.variant // "")==($ref | split("#")[1] // "")
-    ' "$dir/log.request" >/dev/null || fail "session create did not preserve the requested model and location"
-  done
-  for mode in fail malformed model variant location child id missing-model missing-variant tuifail; do
-    rm -f "$dir/log.root" "$dir/log.closed" "$dir/log.request"
-    out=$(cd "$dir/project" && FM_OPENCODE_V2_CATALOG_POLLS=1 V2_RESPONSE="$mode" V2_LAUNCH_LOG="$dir/log" PATH="$fakebin:$PATH" \
-      "$helper" --model provider/model#low --prompt "$prompt" 2>&1)
-    status=$?
-    [ "$status" -ne 0 ] || fail "launcher accepted a failed or mismatched session: $mode"
-    assert_present "$dir/log.closed" "private server lease remained alive after refusal: $mode"
-    [ "$mode" = tuifail ] || assert_absent "$dir/log.root" "launcher started root after session refusal: $mode"
-    case "$mode" in
-      missing-*) assert_absent "$dir/log.request" "unavailable model/variant created a session" ;;
-    esac
-  done
-  for model in '/model' 'provider/' 'bare' 'provider/model#' 'provider/model#low#high'; do
-    rm -f "$dir/log.request" "$dir/log.root"
-    out=$(V2_LAUNCH_LOG="$dir/log" PATH="$fakebin:$PATH" "$helper" --model "$model" --prompt "$prompt" 2>&1)
-    expect_code 2 $? "launcher accepted malformed model $model: $out"
-    assert_absent "$dir/log.request" "malformed model created a session"
-    assert_absent "$dir/log.root" "malformed model started root"
-  done
-  pass "opencode-v2 launcher waits for its catalog, validates model/variant, preserves auto and literal prompt, and closes its lease on success or refusal"
-}
 
 # shuvcode's --prompt only pre-fills the composer, so a worker whose brief is
 # never submitted sits idle forever. The spawn must leave the pane with the
@@ -712,14 +617,14 @@ test_opencode_v2_spawn_submits_the_prefilled_brief() {
   read_case_record "$rec"
   make_opencode_v2_tmux "$FAKEBIN_DIR"
 
-  out=$(FM_FAKE_V2_SWALLOW_FIRST=yes run_opencode_v2_spawn "$id")
+  out=$(FM_FAKE_V2_PREFILL=yes FM_FAKE_V2_SWALLOW_FIRST=yes run_opencode_v2_spawn "$id")
   status=$?
   expect_code 0 "$status" "opencode-v2 spawn should submit its pre-filled brief: $out"
   [ "$(cat "$CASE_DIR/v2.state")" = submitted ] \
     || fail "opencode-v2 spawn left the launch brief unsubmitted in the composer"
   [ "$(wc -l < "$CASE_DIR/v2.state.enters")" -eq 2 ] \
     || fail "opencode-v2 spawn should retry a swallowed Enter exactly once, then stop"
-  [ "$(grep -c 'shuvcode --standalone' "$LAUNCH_LOG")" -eq 1 ] \
+  [ "$(grep -c 'fm-opencode-v2-launch.sh' "$LAUNCH_LOG")" -eq 1 ] \
     || fail "opencode-v2 spawn must never retype the launch"
   pass "opencode-v2 spawn submits the pre-filled brief and retries a swallowed Enter"
 }
@@ -731,7 +636,7 @@ test_opencode_v2_unsubmitted_brief_fails_loudly() {
   read_case_record "$rec"
   make_opencode_v2_tmux "$FAKEBIN_DIR"
 
-  out=$(FM_FAKE_V2_SUBMIT=no run_opencode_v2_spawn "$id")
+  out=$(FM_FAKE_V2_PREFILL=yes FM_FAKE_V2_SUBMIT=no run_opencode_v2_spawn "$id")
   status=$?
   [ "$status" -ne 0 ] || fail "a never-submitted opencode-v2 brief must fail the spawn: $out"
   assert_contains "$out" "pre-filled launch brief could not be submitted" \
@@ -1696,7 +1601,6 @@ test_active_dispatch_profile_allows_explicit_harness
 test_active_dispatch_profile_allows_positional_harness
 test_active_dispatch_profile_allows_raw_launch_command
 test_claude_threads_model_and_effort
-test_opencode_v2_session_launcher
 test_opencode_v2_launch_uses_auto_and_omits_model
 test_opencode_v2_spawn_submits_the_prefilled_brief
 test_opencode_v2_unsubmitted_brief_fails_loudly

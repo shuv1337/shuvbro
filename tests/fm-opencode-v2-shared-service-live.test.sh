@@ -493,7 +493,7 @@ if leg G && [ -n "${W1:-}" ] && [ -n "${W2:-}" ]; then
   api post "/api/session/$LEAD_A/prompt" "$(jq -nc --arg t "RUN: sleep 12; touch $LAB/busy-done" '{text: $t, delivery: "queue"}')" >/dev/null
   sleep 2
   run_in_session "$W1" "printf 'done: w1 finished\\n' >> $HOME_A/state/t1.status" || true
-  acks() { grep -c '^acked ' "$LAB/handled.log" 2>/dev/null || echo 0; }
+  acks() { local n; n=$(grep -c '^acked ' "$LAB/handled.log" 2>/dev/null); echo "${n:-0}"; }
   one_ack() { [ "$(acks)" -ge 1 ]; }
   wait_until 120 one_ack || live_fail "the busy-lead wake was never handled"
   busy_done=no
