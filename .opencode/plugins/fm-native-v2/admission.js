@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { readPrivate, writePrivate } from "../../../bin/fm-opencode-v2-owner.mjs";
@@ -40,7 +40,7 @@ export function createAdmissionJournal(paths, sessionID, admit, report = console
     try { queue = readFileSync(join(paths.state, ".wake-queue"), "utf8"); } catch { return false; }
     const current = new Set(queue.trim().split("\n").filter(Boolean).map(line => line.split("\t").slice(0, 2).join("\t")));
     if (value.rows.some(row => current.has(row))) return false;
-    save({ ...value, phase: "acknowledged" });
+    if (value.phase !== "acknowledged") save({ ...value, phase: "acknowledged" });
     return true;
   }
   async function attemptDelivery(value) {
@@ -75,11 +75,25 @@ export function createAdmissionJournal(paths, sessionID, admit, report = console
   }
   function pending() {
     if (!existsSync(dir)) return [];
-    return readdirSync(dir).filter(name => /^msg_[a-f0-9]{64}\.json$/.test(name)).map(name => validate(readPrivate(join(dir, name)))).filter(value => !["admitted", "acknowledged"].includes(value.phase) && !acknowledged(value));
+    const result = [];
+    for (const name of readdirSync(dir).filter(name => /^msg_[a-f0-9]{64}\.json$/.test(name))) {
+      const path = join(dir, name), value = validate(readPrivate(path));
+      // Keep claim startup deduplication and every unacknowledged wake. Only
+      // canonical ack makes an old terminal wake eligible for seven-day pruning.
+      const old = Date.now() - statSync(path).mtimeMs > 7 * 24 * 60 * 60 * 1000;
+      const acked = acknowledged(value);
+      if (value.kind === "wake" && acked && old) { unlinkSync(path); continue; }
+      if (!["admitted", "acknowledged"].includes(value.phase) && !acked) result.push(value);
+    }
+    return result;
   }
   return {
     prepare,
-    confirm: (value, recovery) => save({ ...value, context: { ...value.context, confirmedRecovery: recovery || null }, phase: value.phase === "admitted" ? "admitted" : "confirmed" }),
+    confirm: (value, recovery) => {
+      const phase = value.phase === "admitted" ? "admitted" : "confirmed";
+      if (value.phase === phase && JSON.stringify(value.context?.confirmedRecovery) === JSON.stringify(recovery || null)) return value;
+      return save({ ...value, context: { ...value.context, confirmedRecovery: recovery || null }, phase });
+    },
     deliver,
     pending, acknowledged,
   };

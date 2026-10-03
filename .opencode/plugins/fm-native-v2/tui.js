@@ -1,4 +1,4 @@
-import { identity, schema, publish, readRegistration, canonical, live, markerKey, writePrivate } from "../../../bin/fm-opencode-v2-owner.mjs";
+import { identity, schema, publish, readRegistration, canonical, live, markerKey, writePrivate, registeredService } from "../../../bin/fm-opencode-v2-owner.mjs";
 import { createWatchArmCoordinator } from "../lib/fm-watch-arm-v2.js";
 import { createAdmissionJournal } from "./admission.js";
 import { bindingRPC } from "./rpc.js";
@@ -17,18 +17,20 @@ export async function supervisionNeeded(paths) {
 
 export function helperEnvironment(record) {
   const env = { ...process.env, FM_HOME: record.home, FM_ROOT_OVERRIDE: record.root, FM_STATE_OVERRIDE: record.state, FM_CONFIG_OVERRIDE: record.config,
-    FM_V2_REGISTRY_NAMESPACE: process.env.FM_V2_REGISTRY_NAMESPACE || "default" };
+    FM_V2_REGISTRY_NAMESPACE: process.env.FM_V2_REGISTRY_NAMESPACE || "default", FM_V2_SERVICE_URL: record.serviceURL };
   for (const key of ["FM_V2_ACTIVATION", "OPENCODE_PASSWORD", "OPENCODE_SERVER_PASSWORD", "OPENCODE_SESSION_ID"]) delete env[key];
   return env;
 }
 
 export async function rebind(ctx, activation) {
   const current = readRegistration(activation.sessionID), own = identity(process.pid);
-  for (const field of ["ownerPID", "ownerStart", "hostBootID", "sessionID", "claimID", "root", "home", "state", "config"]) {
+  for (const field of ["ownerPID", "ownerStart", "hostBootID", "sessionID", "claimID", "root", "home", "state", "config", "serviceURL"]) {
     if (current[field] !== activation[field]) throw new Error("rebind is not this immutable TUI claim");
   }
   if (own.pid !== current.ownerPID || own.start !== current.ownerStart || own.boot !== current.hostBootID) throw new Error("rebind caller is not the exact TUI owner");
   const service = identity((await ctx.client.server.info()).pid);
+  const registered = registeredService(current.serviceURL);
+  if (service.pid !== registered.pid || service.start !== registered.start || service.boot !== registered.boot) throw new Error("rebind service is not the frozen registered endpoint");
   return activate(ctx, { ...current, servicePID: service.pid, serviceStart: service.start, lifecycle: "claimed" });
 }
 
@@ -66,7 +68,7 @@ export default { id: "firstmate.native.v2", async setup(ctx) {
   let activation = requested;
   try {
     const current = readRegistration(requested.sessionID);
-    if (["ownerPID", "ownerStart", "hostBootID", "sessionID", "claimID", "root", "home", "state", "config"].every(key => current[key] === requested[key])) activation = { ...current, lifecycle: "claimed" };
+    if (["ownerPID", "ownerStart", "hostBootID", "sessionID", "claimID", "root", "home", "state", "config", "serviceURL"].every(key => current[key] === requested[key])) activation = { ...current, lifecycle: "claimed" };
   } catch { /* activation itself still must pass full validation */ }
   const record = await activate(ctx, activation);
   const retireClaim = () => {

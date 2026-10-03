@@ -655,7 +655,7 @@ tests/fm-no-mistakes-required.test.sh 370
 tests/fm-omp-harness.test.sh 59969
 tests/fm-on.test.sh 34087
 tests/fm-opencode-primary-live-e2e.test.sh 21
-tests/fm-opencode-v2-plugin.test.sh 8000
+tests/fm-opencode-v2-plugin.test.sh 30000
 tests/fm-opencode-v2-launch.test.sh 8000
 tests/fm-operational-input.test.sh 231
 tests/fm-peek-remote.test.sh 1018
@@ -1310,7 +1310,7 @@ families_for_changed_path() {
     bin/fm-quota-choose.sh)
       printf '%s\n' "__script__:fm-quota-choose.test.sh"
       ;;
-    bin/fm-opencode-v2-owner.mjs|bin/fm-opencode-v2-primary.sh)
+    bin/fm-opencode-v2-owner.mjs|bin/fm-opencode-v2-primary.sh|bin/fm-opencode-v2-session.mjs)
       printf '%s\n' __script__:fm-opencode-v2-plugin.test.sh
       printf '%s\n' __script__:fm-session-lock-ancestry.test.sh
       printf '%s\n' __script__:fm-sessionstart-nudge.test.sh

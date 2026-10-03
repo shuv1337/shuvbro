@@ -9,18 +9,22 @@ cat > "$TMP_ROOT/bin/shuvcode" <<'SH'
 #!/usr/bin/env bash
 set -eu
 [ -z "${FM_V2_ACTIVATION:-}" ] && [ -z "${OPENCODE_SESSION_ID:-}" ] || exit 91
+if [ "$1" = debug ]; then printf 'state %s\n' "$TEST_NATIVE_STATE"; exit 0; fi
 if [ "$1" != api ]; then
   [ "$1" = --auto ] && [ "$2" = --session ] && [ "$3" = ses_worker_exact ] || exit 92
   printf '%s\n' attached >> "$TEST_LOG"
   exit 0
 fi
-operation=$2
-shift 2
+shift
+if [ "$1" = --server ]; then [ "$2" = http://127.0.0.1:12345 ] || exit 97; shift 2; fi
+operation=$1
+shift
 body='' param=''
 while [ "$#" -gt 0 ]; do
   case "$1" in --data) body=$2; shift 2 ;; --param) param=$2; shift 2 ;; *) exit 93 ;; esac
 done
 case "$operation" in
+  server.info) jq -cn --argjson pid "$TEST_SERVICE_PID" '{pid:$pid}' ;;
   model.list|model.default)
     [ "$param" = "location[directory]=$TEST_WORK" ] || exit 94
     if [ "$operation" = model.default ]; then
@@ -44,6 +48,10 @@ SH
 chmod +x "$TMP_ROOT/bin/shuvcode"
 export TEST_LOG="$TMP_ROOT/order" TEST_CREATE="$TMP_ROOT/create.json" TEST_RECORD="$TMP_ROOT/session.json" TEST_WORK="$TMP_ROOT/work"
 export PATH="$TMP_ROOT/bin:$PATH"
+export TEST_NATIVE_STATE="$TMP_ROOT/native-state" TEST_SERVICE_PID=$$
+mkdir -p "$TEST_NATIVE_STATE"
+jq -cn --argjson pid "$$" '{pid:$pid,url:"http://127.0.0.1:12345",password:"fixture"}' > "$TEST_NATIVE_STATE/service.json"
+chmod 600 "$TEST_NATIVE_STATE/service.json"
 export FM_V2_ACTIVATION='inherited-wrong-process' OPENCODE_SESSION_ID=ses_parent
 for model in default explicit variant; do
   : > "$TEST_LOG"

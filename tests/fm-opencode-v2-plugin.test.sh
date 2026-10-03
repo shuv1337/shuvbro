@@ -26,7 +26,7 @@ const home=process.env.LAB+'/external';
 fs.mkdirSync(home+'/state',{recursive:true,mode:0o700});
 fs.mkdirSync(home+'/config',{recursive:true,mode:0o700});
 const me=owner.identity(process.pid);
-const r={version:1,sessionID:'ses_native_exact',claimID:'a'.repeat(48),root:process.env.ROOT,home,state:home+'/state',config:home+'/config',ownerPID:me.pid,ownerStart:me.start,hostBootID:me.boot,servicePID:me.pid,serviceStart:me.start,lifecycle:'claimed'};
+const r={version:1,sessionID:'ses_native_exact',claimID:'a'.repeat(48),root:process.env.ROOT,home,state:home+'/state',config:home+'/config',ownerPID:me.pid,ownerStart:me.start,hostBootID:me.boot,servicePID:me.pid,serviceStart:me.start,serviceURL:'http://127.0.0.1:12345',lifecycle:'claimed'};
 assert.equal(await tui.supervisionNeeded(r),false);
 fs.writeFileSync(r.state+'/fixture.check.sh','');
 fs.writeFileSync(r.state+'/fixture.check-trust','');
@@ -39,7 +39,12 @@ let metadata={kept:'value'};
 const get=async({sessionID})=>({id:sessionID,location:{directory:r.root},metadata:sessionID===r.sessionID?metadata:{}});
 const ctx={client:{session:{get,update:async input=>{metadata=input.metadata;},environment:async input=>{assert.equal(input.variables.FM_HOME,home);}},server:{info:async()=>({pid:me.pid})},rpc:()=>({bindingStatus:input=>server.bindingStatus({get},input)})}};
 await tui.activate(ctx,r);
+fs.mkdirSync(home+'/native',{mode:0o700});fs.mkdirSync(home+'/bin',{mode:0o700});
+owner.writePrivate(home+'/native/service.json',{pid:me.pid,url:r.serviceURL,password:'fixture'});
+fs.writeFileSync(home+'/bin/shuvcode',`#!/bin/bash\nprintf 'state %s\\n' '${home}/native'\n`,{mode:0o700});
+process.env.PATH=home+'/bin:'+process.env.PATH;
 await tui.rebind(ctx,r);
+await assert.rejects(tui.rebind(ctx,{...r,serviceURL:'http://127.0.0.1:9999'}),/immutable/);
 assert.equal(tui.helperEnvironment(r).PATH,process.env.PATH);
 assert.equal(tui.helperEnvironment(r).HOME,process.env.HOME);
 assert.equal(tui.helperEnvironment(r).FM_V2_ACTIVATION,undefined);
@@ -100,7 +105,13 @@ assert.equal(fs.readFileSync(r.state+'/.wake-queue','utf8'),'100\t1\tsignal\ttas
 fs.appendFileSync(r.state+'/.wake-queue','101\t2\tsignal\ttask\tsecond\n');
 const failing=createAdmissionJournal(r,r.sessionID,async()=>{throw new Error('offline');},()=>{});
 const saved=failing.prepare('second wake');
-await assert.rejects(failing.deliver(failing.confirm(saved)));
+const confirmed=failing.confirm(saved);
+const journalPath=r.state+'/.opencode-v2-admissions/';
+const savedPath=journalPath+fs.readdirSync(journalPath,{recursive:true}).find(name=>name.endsWith(saved.id+'.json'));
+fs.utimesSync(savedPath,1,1);
+failing.confirm(confirmed);
+assert.equal(fs.statSync(savedPath).mtimeMs,1000);
+await assert.rejects(failing.deliver(confirmed));
 assert.equal(failing.pending().length,1);
 const reloaded=createAdmissionJournal(r,r.sessionID,async input=>{calls.push(input);return{id:input.id};},()=>{});
 const pending=reloaded.pending()[0];
@@ -114,6 +125,8 @@ const obsolete=reloaded.prepare('third original wake');
 fs.writeFileSync(r.state+'/.wake-queue','');
 assert.equal(reloaded.pending().length,0);
 assert.equal(reloaded.acknowledged(obsolete),true);
+const obsoletePath=journalPath+fs.readdirSync(journalPath,{recursive:true}).find(name=>name.endsWith(obsolete.id+'.json'));
+fs.utimesSync(obsoletePath,1,1);reloaded.pending();assert.equal(fs.existsSync(obsoletePath),false);
 const namespace=process.env.FM_V2_REGISTRY_NAMESPACE;
 process.env.FM_V2_REGISTRY_NAMESPACE='../unsafe';
 assert.equal((await server.guardScope({get},'ses_unrelated')).registered,false);
@@ -131,7 +144,7 @@ owner.publish('retire',r);
 owner.publish('cleanup-test-namespace',{});
 console.log('exact owner/guard/transport behaviors passed');
 JS
-  ) || { fail "native exact-owner contract: $out"; return; }
+  ) || fail "native exact-owner contract: $out"
   pass "$out"
 }
 
@@ -148,7 +161,7 @@ for(const [name,factory] of [['watch-arm','FmPrimaryWatchArm'],['turnend-guard',
 }
 console.log('V1 factories preserved; competing V2 entrypoints removed');
 JS
-  ) || { fail "$out"; return; }
+  ) || fail "$out"
   pass "$out"
 }
 
@@ -199,10 +212,89 @@ assert.throws(()=>process.kill(pid,0));
 assert.equal(fs.readFileSync(p.state+'/.wake-queue','utf8'),'100\t1\tsignal\ttask\tready\n');
 console.log('persistent admission precedes handoff; confirmation precedes delivery; cleanup retires child');
 JS
-  ) || { fail "$out"; return; }
+  ) || fail "$out"
   pass "$out"
 }
 
 test_native_exact_owner_and_transport
 test_v1_factories_preserved
 test_coordinator_persists_before_handoff
+
+test_frozen_endpoint_and_worker_execution() {
+  local out
+  out=$(ROOT="$ROOT" LAB="$TMP_ROOT/endpoint" node --input-type=module 2>&1 <<'JS'
+import assert from 'node:assert/strict';import fs from 'node:fs';import {spawn,spawnSync} from 'node:child_process';import {pathToFileURL} from 'node:url';
+const root=process.env.ROOT,lab=process.env.LAB;
+fs.mkdirSync(lab+'/bin',{recursive:true});fs.mkdirSync(lab+'/native',{recursive:true});fs.mkdirSync(lab+'/home/state',{recursive:true});fs.mkdirSync(lab+'/home/config',{recursive:true});
+const owner=await import(pathToFileURL(root+'/bin/fm-opencode-v2-owner.mjs'));
+const session=await import(pathToFileURL(root+'/bin/fm-opencode-v2-session.mjs'));
+const me=owner.identity(process.pid),endpoint='http://127.0.0.1:23456';
+process.env.FM_V2_REGISTRY_NAMESPACE='test-endpoint-'+process.pid;
+process.env.FIXTURE_STATE=lab+'/native';process.env.FIXTURE_PID=String(process.pid);process.env.FIXTURE_ROOT=root;process.env.FIXTURE_LOG=lab+'/api.log';process.env.FIXTURE_ACTIVE=lab+'/active';
+fs.writeFileSync(lab+'/native/service.json',JSON.stringify({pid:me.pid,url:endpoint,password:'private-fixture'}),{mode:0o600});
+fs.writeFileSync(lab+'/bin/shuvcode',`#!/usr/bin/env node
+const fs=require('fs'),a=process.argv.slice(2),e=process.env;
+if(a[0]==='debug'){console.log('state '+e.FIXTURE_STATE);process.exit(0)}
+if(a[0]!=='api'||a[1]!=='--server'||a[2]!=='${endpoint}'||e.OPENCODE_PASSWORD!=='private-fixture')process.exit(90);
+const op=a[3];fs.appendFileSync(e.FIXTURE_LOG,op+'\\n');
+const sid='ses_endpoint';
+if(op==='server.info')console.log(JSON.stringify({pid:Number(e.FIXTURE_PID)}));
+else if(op==='shell.list')console.log(JSON.stringify({data:[{pid:Number(e.FIXTURE_SHELL_PID),status:'running',cwd:e.FIXTURE_CWD||e.FIXTURE_ROOT,command:'fixture model tool',metadata:{sessionID:e.FIXTURE_META||sid}}]}));
+else if(op==='session.get')console.log(JSON.stringify({data:{id:e.FIXTURE_WRONG||sid,location:{directory:e.FIXTURE_ROOT},model:{providerID:'fixture',id:'echo'}}}));
+else if(op==='session.active')console.log(JSON.stringify({data:fs.existsSync(e.FIXTURE_ACTIVE)?{[sid]:{type:'running'}}:{}}));
+else if(op==='session.interrupt'){if(!a.includes('sessionID='+sid)||!a.includes('resume=false'))process.exit(91);fs.rmSync(e.FIXTURE_ACTIVE,{force:true});console.log('{"interrupted":true}')}
+else process.exit(92);
+`,{mode:0o700});
+process.env.PATH=lab+'/bin:'+process.env.PATH;
+const partial={version:1,sessionID:'ses_endpoint',claimID:'d'.repeat(48),root,home:lab+'/home',state:lab+'/home/state',config:lab+'/home/config',servicePID:me.pid,serviceStart:me.start,hostBootID:me.boot,serviceURL:endpoint,lifecycle:'claimed'};
+const child=spawn(process.execPath,['--input-type=module','-e',`import * as o from ${JSON.stringify(pathToFileURL(root+'/bin/fm-opencode-v2-owner.mjs').href)};const me=o.identity(process.pid);const r={...JSON.parse(process.env.RECORD),ownerPID:me.pid,ownerStart:me.start};o.publish('claim',r);console.log(JSON.stringify(r));setInterval(()=>{},10000);`],{env:{...process.env,RECORD:JSON.stringify(partial)},stdio:['ignore','pipe','pipe']});
+let r;
+try {
+ r=await new Promise((resolve,reject)=>{let text='';child.stdout.on('data',c=>{text+=c;if(text.includes('\n'))resolve(JSON.parse(text.trim()))});child.on('exit',()=>reject(new Error('owner fixture exited')));child.stderr.on('data',c=>reject(new Error(String(c))));});
+ fs.writeFileSync(r.state+'/.lock',String(r.ownerPID),{mode:0o600});
+ const env={...process.env,FM_HOME:r.home,FM_ROOT_OVERRIDE:root,FM_STATE_OVERRIDE:r.state,FM_CONFIG_OVERRIDE:r.config,OPENCODE_SESSION_ID:r.sessionID};
+ const helper=(extra={})=>spawnSync('bash',['-c','export FIXTURE_SHELL_PID=$$; node "$1/bin/fm-opencode-v2-owner.mjs" helper "$FM_STATE_OVERRIDE"','fixture',root],{encoding:'utf8',env:{...env,...extra}});
+ assert.equal(helper().status,0);
+ assert.notEqual(helper({FIXTURE_CWD:lab}).status,0);
+ assert.notEqual(helper({FIXTURE_META:'ses_worker'}).status,0);
+ assert.throws(()=>owner.registeredService('http://127.0.0.1:9999'),/unregistered/);
+ const primary=spawnSync(root+'/bin/fm-opencode-v2-primary.sh',['--session',r.sessionID,'--native-binary','/bin/true','--server','http://127.0.0.1:9999'],{encoding:'utf8',env:{...env,FM_HOME:r.home}});
+ assert.notEqual(primary.status,0);assert.match(primary.stderr,/unregistered/);
+ assert.throws(()=>owner.nativeAPI({...r,serviceURL:undefined},'server.info'),/endpoint/);
+ assert.throws(()=>owner.schema({...r,serviceURL:'http://user:secret@127.0.0.1:23456'}),/endpoint/);
+ assert.equal(owner.registeredService(endpoint).serviceURL,endpoint);
+ assert.throws(()=>owner.publish('claim',{...r,serviceURL:'http://127.0.0.1:9999'}),/conflicting/);
+ const worker=lab+'/worker.json';owner.writePrivate(worker,{version:1,sessionID:r.sessionID,location:{directory:root},model:{providerID:'fixture',id:'echo'},serviceURL:endpoint,servicePID:me.pid,serviceStart:me.start,hostBootID:me.boot});
+ fs.writeFileSync(process.env.FIXTURE_ACTIVE,'running');
+ assert.equal((await session.reconcileWorker('status',worker,root)).executing,true);
+ await assert.rejects(session.reconcileWorker('teardown',worker,root),/still executing/);
+ assert.equal((await session.reconcileWorker('interrupt',worker,root)).executing,false);
+ assert.equal((await session.reconcileWorker('teardown',worker,root)).executing,false);
+ fs.writeFileSync(process.env.FIXTURE_ACTIVE,'running');
+ assert.equal((await session.reconcileWorker('discard',worker,root)).executing,false);
+ process.env.FIXTURE_WRONG='ses_other';await assert.rejects(session.reconcileWorker('interrupt',worker,root),/identity/);delete process.env.FIXTURE_WRONG;
+ // Drive lifecycle executables too: a dead pane cannot suppress native
+ // cancellation, and executing work refuses cleanup before any return action.
+ const work=lab+'/work',state=r.state,task='native-worker';fs.mkdirSync(work);
+ process.env.FIXTURE_ROOT=work;
+ owner.writePrivate(state+'/'+task+'.opencode-v2-session.json',{...owner.readPrivate(worker),location:{directory:work}});
+ fs.writeFileSync(lab+'/bin/tmux','#!/bin/bash\nif [ "$1" = send-keys ]; then echo unsafe-pane-action >> "$FIXTURE_LOG"; fi\necho bash\n',{mode:0o700});
+ fs.writeFileSync(lab+'/bin/treehouse','#!/bin/bash\necho unsafe-return >> "$FIXTURE_LOG"\nexit 1\n',{mode:0o700});
+ fs.writeFileSync(r.config+'/backlog-backend','manual\n');fs.writeFileSync(state+'/.last-watcher-beat','');
+ const meta=spawnSync('bash',['-c','. "$1/tests/lib.sh"; fm_write_meta "$2/native-worker.meta" "window=firstmate:fm-native-worker" "endpoint_task_id=native-worker" "backend=tmux" "harness=opencode-v2" "kind=ship" "mode=local-only" "spawn_gen=native-test" "worktree=$3" "project=$3"','fixture',root,state,work],{encoding:'utf8',env:process.env});
+ assert.equal(meta.status,0,meta.stderr);
+ const lifecycleEnv={...process.env,FM_HOME:r.home,FM_ROOT_OVERRIDE:root,FM_STATE_OVERRIDE:state,FM_CONFIG_OVERRIDE:r.config};delete lifecycleEnv.OPENCODE_SESSION_ID;
+ fs.writeFileSync(process.env.FIXTURE_ACTIVE,'running');
+ const refuse=spawnSync(root+'/bin/fm-teardown.sh',[task],{encoding:'utf8',env:lifecycleEnv});
+ assert.notEqual(refuse.status,0);assert.match(refuse.stderr,/still executing/,refuse.stderr);assert.equal(fs.existsSync(work),true);
+ const cancel=spawnSync(root+'/bin/fm-control.sh',[task,'interrupt'],{encoding:'utf8',env:lifecycleEnv});
+ assert.equal(cancel.status,0,cancel.stderr);assert.match(cancel.stdout,/verified=native-session cancel=confirmed/);assert.equal(fs.existsSync(process.env.FIXTURE_ACTIVE),false);
+ assert.doesNotMatch(fs.readFileSync(process.env.FIXTURE_LOG,'utf8'),/unsafe-pane-action|unsafe-return/);
+ const log=fs.readFileSync(process.env.FIXTURE_LOG,'utf8');assert.match(log,/shell.list/);assert.equal(log.split('session.interrupt').length-1,3);
+ console.log('frozen registered endpoint, cwd/session divergence and exact worker execution/cancellation passed');
+} finally {child.kill();await new Promise(resolve=>child.on('close',resolve));owner.publish('cleanup-test-namespace',{});}
+JS
+  ) || fail "endpoint/execution behavior: $out"
+  pass "$out"
+}
+test_frozen_endpoint_and_worker_execution

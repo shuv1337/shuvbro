@@ -17,6 +17,44 @@ const idPattern = /^ses_[A-Za-z0-9_-]{1,160}$/;
 const claimPattern = /^[a-f0-9]{48}$/;
 export const markerKey = "firstmateV2Lead";
 
+export function serviceURL(value) {
+  if (typeof value !== "string" || value.length > 2048) throw new Error("invalid frozen service endpoint");
+  const url = new URL(value);
+  if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.pathname !== "/" || url.search || url.hash) throw new Error("invalid frozen service endpoint");
+  return url.origin;
+}
+
+// Credentials stay in the native managed registration, never in our proof.
+// Explicit endpoints must be locally registered; discovery never starts a service.
+export function registeredService(endpoint) {
+  const paths = spawnSync("shuvcode", ["debug", "paths"], { encoding: "utf8", timeout: 5000, maxBuffer: limit });
+  if (paths.status !== 0) throw new Error("cannot resolve native service registration");
+  const state = paths.stdout.match(/^state\s+(.+)$/m)?.[1]?.trim();
+  if (!state || !state.startsWith("/")) throw new Error("invalid native state path");
+  const requested = endpoint === undefined ? undefined : serviceURL(endpoint);
+  const names = requested ? fs.readdirSync(state).filter(name => /^service(?:-[A-Za-z0-9._-]+)?\.json$/.test(name)) : ["service.json"];
+  for (const name of names) {
+    let registration;
+    try { registration = readPrivate(join(state, name)); } catch (error) { if (error.code === "ENOENT") continue; throw error; }
+    if (requested && serviceURL(registration.url) !== requested) continue;
+    const process = identity(registration.pid);
+    if (typeof registration.password !== "string") throw new Error("invalid native service credential");
+    return { ...process, serviceURL: serviceURL(registration.url), password: registration.password };
+  }
+  throw new Error("unregistered native service endpoint; start/register the intended local shared service first");
+}
+
+export function nativeAPI(record, operation, parameters = []) {
+  if (serviceURL(record.serviceURL) !== record.serviceURL) throw new Error("invalid recorded native service endpoint");
+  const service = registeredService(record.serviceURL);
+  if (service.pid !== record.servicePID || service.start !== record.serviceStart || service.boot !== record.hostBootID) throw new Error("native endpoint registration is a different service incarnation");
+  const result = spawnSync("shuvcode", ["api", "--server", record.serviceURL, operation, ...parameters], {
+    env: { ...process.env, OPENCODE_PASSWORD: service.password }, encoding: "utf8", timeout: 10000, maxBuffer: 1024 * 1024,
+  });
+  if (result.status !== 0 || result.signal) throw new Error("cannot verify native service operation " + operation);
+  return JSON.parse(result.stdout);
+}
+
 export function identity(pid) {
   if (process.platform !== "linux" || !Number.isSafeInteger(Number(pid)) || Number(pid) < 2) throw new Error("V2 requires a local Linux process identity");
   const raw = fs.readFileSync(`/proc/${pid}/stat`, "utf8");
@@ -76,7 +114,7 @@ export function writePrivate(path, value) {
   try { readPrivate(path); } catch (error) { if (error.code !== "ENOENT") throw error; }
   const temporary = path + "." + randomBytes(12).toString("hex");
   const fd = fs.openSync(temporary, "wx", 0o600);
-  try { fs.writeFileSync(fd, encoded); fs.fsyncSync(fd); }
+  try { fs.fchmodSync(fd, 0o600); fs.writeFileSync(fd, encoded); fs.fsyncSync(fd); }
   finally { fs.closeSync(fd); }
   fs.renameSync(temporary, path);
   const dir = fs.openSync(dirname(path), "r");
@@ -84,7 +122,7 @@ export function writePrivate(path, value) {
 }
 
 export function schema(value) {
-  const keys = ["version", "sessionID", "claimID", "root", "home", "state", "config", "ownerPID", "ownerStart", "hostBootID", "servicePID", "serviceStart", "lifecycle"];
+  const keys = ["version", "sessionID", "claimID", "root", "home", "state", "config", "ownerPID", "ownerStart", "hostBootID", "servicePID", "serviceStart", "serviceURL", "lifecycle"];
   if (!value || typeof value !== "object" || Object.keys(value).length !== keys.length || keys.some(key => !(key in value))) throw new Error("invalid V2 record schema");
   if (value.version !== 1 || !idPattern.test(value.sessionID) || !claimPattern.test(value.claimID) || !["claimed", "active", "retired"].includes(value.lifecycle)) throw new Error("invalid V2 registration");
   for (const field of ["root", "home", "state", "config"]) {
@@ -93,6 +131,7 @@ export function schema(value) {
   for (const field of ["ownerPID", "servicePID"]) if (!Number.isSafeInteger(value[field]) || value[field] < 2) throw new Error("invalid process ID");
   for (const field of ["ownerStart", "serviceStart"]) if (!/^[0-9]{1,32}$/.test(value[field])) throw new Error("invalid process birth");
   if (!/^[a-f0-9-]{36}$/.test(value.hostBootID)) throw new Error("invalid host identity");
+  if (serviceURL(value.serviceURL) !== value.serviceURL) throw new Error("noncanonical frozen service endpoint");
   return value;
 }
 
@@ -150,14 +189,10 @@ export function helper(state, acquire = false) {
   canonical(value, !acquire);
   if (!ancestor(value.ownerPID)) {
     if (!ancestor(value.servicePID)) throw new Error("helper has neither exact service nor owner ancestry");
-    const api = operation => {
-      const result = spawnSync("shuvcode", ["api", operation, "--param", `location[directory]=${value.root}`], { encoding: "utf8", timeout: 5000, maxBuffer: 1024 * 1024 });
-      if (result.status !== 0 || result.signal) throw new Error("cannot verify native model shell identity");
-      return JSON.parse(result.stdout);
-    };
+    const api = operation => nativeAPI(value, operation, ["--param", `location[directory]=${value.root}`]);
     if (api("server.info").pid !== value.servicePID) throw new Error("native shell inventory belongs to a different service");
     const shells = api("shell.list").data;
-    if (!Array.isArray(shells) || !shells.some(shell => shell.status === "running" && shell.metadata?.sessionID === sessionID && Number.isSafeInteger(shell.pid) && ancestor(shell.pid))) throw new Error("native shell PID is not bound to the exact lead session; environment alone cannot adopt it");
+    if (!Array.isArray(shells) || !shells.some(shell => shell.status === "running" && shell.cwd === value.root && shell.metadata?.sessionID === sessionID && typeof shell.command === "string" && Number.isSafeInteger(shell.pid) && ancestor(shell.pid))) throw new Error("native shell PID/cwd is not attributed to the exact lead session; environment alone cannot adopt it");
   }
   return value.ownerPID;
 }
@@ -186,7 +221,7 @@ function mutate(action, value) {
     if (!candidate) continue;
     let alive = false;
     try { const found = identity(candidate.ownerPID); alive = found.start === candidate.ownerStart && found.boot === candidate.hostBootID; } catch { /* dead owner */ }
-    if (alive && ["claimID", "ownerPID", "ownerStart", "hostBootID", "sessionID", "root", "home", "state", "config"].some(field => candidate[field] !== value[field])) throw new Error("conflicting live V2 claim; observer cannot take over or change its frozen paths");
+    if (alive && ["claimID", "ownerPID", "ownerStart", "hostBootID", "sessionID", "root", "home", "state", "config", "serviceURL"].some(field => candidate[field] !== value[field])) throw new Error("conflicting live V2 claim; observer cannot take over or change its frozen paths");
   }
   if (!ancestor(value.ownerPID) || identity(value.ownerPID).start !== value.ownerStart) throw new Error("claim caller is not activated TUI");
   if (action === "retire") {
@@ -217,6 +252,11 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     const [action, arg, mode] = process.argv.slice(2);
     let result;
     if (action === "identity") result = identity(Number(arg));
+    else if (action === "service") {
+      const service = registeredService(arg);
+      result = { serviceURL: service.serviceURL, servicePID: service.pid, serviceStart: service.start, hostBootID: service.boot };
+      if (nativeAPI(result, "server.info").pid !== service.pid) throw new Error("registered endpoint is not the connected execution service");
+    }
     else if (action === "registry") result = registry();
     else if (action === "read") result = readRegistration(arg);
     else if (action === "probe") {

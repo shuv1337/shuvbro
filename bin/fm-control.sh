@@ -409,6 +409,11 @@ interrupt_cancel_claim() {
 # cancellation claim available after delivery.
 deliver_interrupt() {
   local cancel
+  if [ "$RECORDED_HARNESS" = opencode-v2 ]; then
+    fm_control_v2_interrupt "$STATE" "$ID" "$WT" >/dev/null || return $?
+    printf 'confirmed'
+    return 0
+  fi
   prepare_interrupt_ack
   send_interrupt_keys
   cancel=$(interrupt_cancel_claim)
@@ -448,6 +453,9 @@ retire_busy_incarnation() {
 # `already-stopped` or `stopped`.
 do_exit() {
   local state cmd verdict cancel interrupt_result=not-needed
+  if [ "$RECORDED_HARNESS" = opencode-v2 ]; then
+    fm_control_v2_interrupt "$STATE" "$ID" "$WT" >/dev/null || return $?
+  fi
   require_state_verified_backend exit
   state=$(agent_state)
   case "$state" in
@@ -858,6 +866,11 @@ do_relaunch() {
 
 case "$VERB" in
   interrupt)
+    if [ "$RECORDED_HARNESS" = opencode-v2 ]; then
+      fm_control_v2_interrupt "$STATE" "$ID" "$WT" >/dev/null || exit 1
+      echo "interrupt-delivered $ID harness=opencode-v2 backend=$BACKEND verified=native-session cancel=confirmed"
+      exit 0
+    fi
     state=$(agent_state)
     case "$state" in
       alive) ;;

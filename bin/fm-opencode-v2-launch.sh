@@ -4,7 +4,8 @@
 # An exact recorded session is created before prompt admission; no private
 # server/stdin lease is started or killed. --auto applies to this worker TUI.
 # FILE is the home-owned task session sidecar passed by fm-spawn, not an RPC
-# read target. It records the exact worker ID/model for busy-event attribution.
+# read target. It records exact worker ID/model plus the service incarnation and
+# endpoint for native execution reconciliation before interrupt/cleanup.
 set -euo pipefail
 model_ref='' prompt='' have_prompt=0 record=''
 while [ "$#" -gt 0 ]; do
@@ -19,6 +20,8 @@ while [ "$#" -gt 0 ]; do
 done
 [ "$have_prompt" -eq 1 ] && [ -n "$record" ] || exit 2
 unset FM_V2_ACTIVATION OPENCODE_SESSION_ID
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+service=$(node "$SCRIPT_DIR/fm-opencode-v2-owner.mjs" service)
 directory=$(pwd -P)
 catalog=$(mktemp "${TMPDIR:-/tmp}/fm-v2-catalog.XXXXXX")
 trap 'rm -f "$catalog"' EXIT
@@ -57,7 +60,7 @@ fi
 umask 077
 # Publish through an atomic single-link sidecar before any worker prompt.
 temporary=$(mktemp "${record}.XXXXXX")
-jq -c '.data | {version:1,sessionID:.id,location:.location,model:.model}' <<< "$response" > "$temporary"
+jq -c --argjson service "$service" '.data | {version:1,sessionID:.id,location:.location,model:.model} + $service' <<< "$response" > "$temporary"
 mv "$temporary" "$record"
 prompt_body=$(jq -cn --arg session "$session" --arg text "$prompt" '{sessionID:$session,text:$text,delivery:"queue"}')
 shuvcode api session.prompt --param "sessionID=$session" --data "$prompt_body" >/dev/null

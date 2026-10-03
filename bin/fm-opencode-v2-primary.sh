@@ -30,12 +30,11 @@ state=$(realpath "${FM_STATE_OVERRIDE:-$home/state}")
 config=$(realpath "${FM_CONFIG_OVERRIDE:-$home/config}")
 args=()
 [ -z "$server" ] || args=(--server "$server")
-service=$(shuvcode api "${args[@]}" server.info | jq -er '.pid')
+service_info=$(node "$SCRIPT_DIR/fm-opencode-v2-owner.mjs" service ${server:+"$server"})
 owner_info=$(node "$SCRIPT_DIR/fm-opencode-v2-owner.mjs" identity "$$")
-service_info=$(node "$SCRIPT_DIR/fm-opencode-v2-owner.mjs" identity "$service")
 claim=$(node -e 'console.log(require("node:crypto").randomBytes(24).toString("hex"))')
 FM_V2_ACTIVATION=$(jq -cn --arg session "$session" --arg claim "$claim" --arg root "$root" --arg home "$home" --arg state "$state" --arg config "$config" --argjson owner "$owner_info" --argjson service "$service_info" \
-  '{version:1,sessionID:$session,claimID:$claim,root:$root,home:$home,state:$state,config:$config,ownerPID:$owner.pid,ownerStart:$owner.start,hostBootID:$owner.boot,servicePID:$service.pid,serviceStart:$service.start,lifecycle:"claimed"}')
+  '{version:1,sessionID:$session,claimID:$claim,root:$root,home:$home,state:$state,config:$config,ownerPID:$owner.pid,ownerStart:$owner.start,hostBootID:$owner.boot,servicePID:$service.servicePID,serviceStart:$service.serviceStart,serviceURL:$service.serviceURL,lifecycle:"claimed"}')
 export FM_V2_ACTIVATION FM_HOME="$home" FM_ROOT_OVERRIDE="$root" FM_STATE_OVERRIDE="$state" FM_CONFIG_OVERRIDE="$config"
 unset OPENCODE_SESSION_ID
 cd "$root"

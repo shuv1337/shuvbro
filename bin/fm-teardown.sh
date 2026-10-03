@@ -933,6 +933,11 @@ ORCA_PATH_MATCH_VERIFIED=0
 CLEANUP_RECOVERY=$TEARDOWN_CLEANUP_RECOVERY
 
 KIND=$TEARDOWN_META_KIND
+if [ "$(fm_meta_get "$META" harness)" = opencode-v2 ]; then
+  v2_action=teardown
+  [ "$FORCE" != --force ] || v2_action=discard
+  node "$SCRIPT_DIR/fm-opencode-v2-session.mjs" "$v2_action" "$STATE/$ID.opencode-v2-session.json" "$WT" >/dev/null || exit 1
+fi
 EXPECTED_TREEHOUSE_PROJECT_LOCK=
 if [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ] \
    && is_treehouse_pool_slot "$PROJ" "$WT"; then
@@ -2925,6 +2930,9 @@ cleanup_firstmate_home_children() {
         "$child_wt/.opencode/plugins/fm-busy-state.js" \
         "$child_wt/.fm-grok-turnend" "$child_wt/.fm-kimi-turnend"
       if [ -n "$child_proj" ] && [ -d "$child_proj" ] && command -v treehouse >/dev/null 2>&1; then
+        if [ "$(fm_meta_get "$sub_state/$child_id.meta" harness)" = opencode-v2 ]; then
+          node "$SCRIPT_DIR/fm-opencode-v2-session.mjs" discard "$sub_state/$child_id.opencode-v2-session.json" "$child_wt" >/dev/null || return 1
+        fi
         if teardown_treehouse_return "$child_wt" "$child_proj" "child worktree"; then
           :
         else
@@ -3242,6 +3250,9 @@ elif [ -d "$WT" ] && [ "$KIND" != secondmate ]; then
   post_lock_cleanup_check=
   if [ "$FORCE" != "--force" ] && [ "$KIND" != scout ] && [ "$KIND" != secondmate ]; then
     post_lock_cleanup_check=validate_worktree_teardown_safety
+  fi
+  if [ "$(fm_meta_get "$META" harness)" = opencode-v2 ]; then
+    node "$SCRIPT_DIR/fm-opencode-v2-session.mjs" "$v2_action" "$STATE/$ID.opencode-v2-session.json" "$WT" >/dev/null || exit 1
   fi
   teardown_treehouse_return "$WT" "$PROJ" "worktree" "$post_lock_cleanup_check" || {
     echo "error: treehouse return failed for worktree $WT; teardown aborted" >&2
