@@ -1,6 +1,14 @@
-== --notice-transient
-transient unverifiable successor: private diagnostic retained, no failure prompt, confirmed wake delivered exactly once
-exit=0
-== --notice-persistent
-persistent unverifiable successor: private diagnostic retained, one failure prompt at 30s, confirmed wake delivered exactly once
-exit=0
+--notice-transient exit=0 :: transient unverifiable successor: private diagnostic retained, no failure prompt, confirmed wake delivered exactly once
+--notice-persistent exit=0 :: persistent unverifiable successor: private diagnostic retained, one failure prompt at 30s, confirmed wake delivered exactly once
+--review-timeout-long exit=0 :: V2 repair notice delivery remains pending: V2 queued admission remains pending: fixture repair prompt timed out
+V2 repair notice delivery remains pending: fixture repair prompt timed out
+review real-setup timeout-long passed
+--review-timeout exit=0 :: V2 repair notice delivery remains pending: fixture repair prompt timed out
+{"mode":"timeout","attempts":9,"admitted":1,"toasts":1}
+review real-setup timeout passed
+--review-prune exit=0 :: unregistered native service endpoint; start/register the intended local shared service first
+review real-setup prune passed
+--review-reload-pending exit=0 :: review real-setup reload-pending passed
+--review-rejected exit=0 :: V2 repair notice delivery remains pending: fixture repair prompt rejected
+{"mode":"rejected","attempts":9,"admitted":1,"toasts":1}
+review real-setup rejected passed

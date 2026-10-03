@@ -1,0 +1,14 @@
+ok - real TUI setup: ten recovered persistent stalls produce ten notices and wakes, beyond the old lifetime cap
+ok - real TUI setup: stale proof after a stall surfaces its rebind notice once despite repeated failing ticks
+ok - real TUI setup: recovered sub-30-second stall retains diagnostic but never prompts or toasts
+ok - real TUI setup: lock acquired after more than 30 s of notice clock stays silent
+ok - real TUI setup: a self-healed startup admission failure before .lock never matures into a notice
+ok - real TUI setup: an undelivered startup admission still notifies once after the bound
+ok - real TUI setup: a failed startup helper proof notifies once immediately and is not cleared by later ticks
+ok - real TUI setup: ownership lost after being held notifies once after the 30 s bound
+ok - real TUI setup: a leftover earlier-claim startup entry does not block recovery or notify
+ok - real TUI setup: a failed explicit /firstmate-rebind is surfaced immediately
+ok - tui: an outage-refused wake is admitted once under one id and text, queued, after the handoff, with rows durable and one watcher
+ok - tui: a lost admission receipt resolves to one admission under one id and text, with no pending diagnostic
+ok - tui: an idle watcher SIGTERM keeps one live successor, delivers the no-row resurface once and the next real wake once
+exit=0

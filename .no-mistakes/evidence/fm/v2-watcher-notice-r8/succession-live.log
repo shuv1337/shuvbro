@@ -1,4 +1,4 @@
-ok - session start makes native .lock the activated TUI process PID (3579350)
+ok - session start makes native .lock the activated TUI process PID (4142616)
 ok - first arm: one watcher, no turn-end-guard prompt, first wake acknowledged
 ok - native TUI entry completed setup
 ok - steady succession: 20 wakes, each one journaled message ID and one canonical ack, one watcher, fresh beacon, empty queue, zero failure prompts
@@ -12,5 +12,6 @@ ok - a TUI plugin reload keeps the same TUI process and immutable claim, sets up
 ok - the documented rebind owner command is reachable in the TUI
 ok - TUI exit retires the claim and supervision while the shared service keeps running
 ok - a relaunched TUI re-owns .lock, re-arms after session start and handles the held and later wakes
+ok - the lead received zero WATCHER FAILURE prompts across the whole run (75766-byte export read completely)
 ok - a lead against a private server is refused at activation
 exit=0
