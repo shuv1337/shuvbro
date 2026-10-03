@@ -52,7 +52,7 @@ function classifyArmClose(stdout, stderr, code, signal) {
 export function createWatchArmCoordinator(paths, deliverPrompt, options = {}) {
   const childEnv = () => {
     const env = { ...process.env, FM_HOME: paths.home, FM_STATE_OVERRIDE: paths.state, FM_ROOT_OVERRIDE: paths.root, FM_CONFIG_OVERRIDE: paths.config };
-    delete env.FM_V2_ACTIVATION;
+    for (const key of ["FM_V2_ACTIVATION", "OPENCODE_PASSWORD", "OPENCODE_SERVER_PASSWORD"]) delete env[key];
     return env;
   };
   const state = {
@@ -94,7 +94,7 @@ export function createWatchArmCoordinator(paths, deliverPrompt, options = {}) {
   }
 
   function handlingGeneration() {
-    try { return readFileSync(`${paths.state}/.watcher-down`, "utf8").trim().match(/^(?:pending|announced):handling:([A-Za-z0-9._-]+)$/)?.[1]; }
+    try { return readFileSync(`${paths.state}/.watcher-down`, "utf8").trim().match(/^(?:pending|announced):(?:handling|downtime):([A-Za-z0-9._-]+)$/)?.[1]; }
     catch { return undefined; }
   }
 
@@ -332,7 +332,7 @@ export function createWatchArmCoordinator(paths, deliverPrompt, options = {}) {
         if (!ready) return;
         try {
           const marker = readFileSync(`${paths.state}/.watcher-down`, "utf8").trim();
-          const generation = marker.match(/^(?:pending|announced):handling:([A-Za-z0-9._-]+)$/)?.[1];
+          const generation = marker.match(/^(?:pending|announced):(?:handling|downtime):([A-Za-z0-9._-]+)$/)?.[1];
           if (generation) state.armRecovery.set(armChild, { watcherPid: ready[1], generation });
         } catch { /* confirmation is required; missing evidence cannot admit */ }
       }
@@ -377,9 +377,8 @@ export function createWatchArmCoordinator(paths, deliverPrompt, options = {}) {
               const message = result.failure ? `${classification.message}\n\n${result.failure}` : classification.message;
               if (state.stopped) return;
               if (result.preparationError) {
-                // Ordinary retirement republishes downtime through the shared
-                // recovery owner. Do not reopen or edit its generation here.
-                if (!(await retireArm(state.child))) throw new Error("V2 journal preparation failed and its successor did not retire");
+                // Journal failure must not destroy restored continuity or mint
+                // a fresh downtime generation on every reconciliation tick.
                 throw new Error(result.preparationError);
               }
               if (options.admission && result.failure) throw new Error(result.failure);

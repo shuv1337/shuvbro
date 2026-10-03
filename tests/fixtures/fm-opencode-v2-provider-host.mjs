@@ -35,6 +35,7 @@ set -eu
 state="$FM_STATE_OVERRIDE"
 if [ "\${1:-}" = --handling-delivered ]; then
   kill -0 "$4" || exit 1
+  echo "pending:handling:$2" > "$state/.watcher-down"
   echo "confirm $2" >> "$state/order"
   exit 0
 fi
@@ -45,13 +46,16 @@ old=$(cat "$state/watcher.pid" 2>/dev/null || true); [ -z "$old" ] || kill -TERM
 sleep 1000 </dev/null >/dev/null 2>&1 & child=$!; echo "$child" > "$state/watcher.pid"
 trap 'kill -TERM "$child" 2>/dev/null || true; wait "$child" 2>/dev/null || true; exit 0' TERM INT HUP
 if [ -f "$state/recovery-mode" ] && [ "$count" = 2 ]; then
-  echo pending:handling:fixture-recovery > "$state/.watcher-down"
+  echo announced:downtime:fixture-recovery > "$state/.watcher-down"
   kill -TERM "$child"; wait "$child" 2>/dev/null || true
   echo 'check: rearm-resurface'
   exit 0
 fi
-echo pending:handling:fixture-recovery > "$state/.watcher-down"
-echo "watcher: started pid=$child (beacon fresh) recovery-generation=fixture-recovery"
+if [ -n "\${FM_WATCH_PREDECESSOR_ARM_PID:-}" ]; then
+  echo "watcher: started pid=$child (beacon fresh) recovery-generation=fixture-recovery"
+else
+  echo "watcher: started pid=$child (beacon fresh)"
+fi
 wait "$child"
 `, { mode: 0o700 });
   }
@@ -77,7 +81,7 @@ function host(failAt) {
       if (failAt === "slot") throw new Error("fixture slot registration failure");
       assert.equal(claim.append, "app");
       renders.push(claim.render);
-      return () => { unregisters++; renders.length = 0; commands = []; };
+      return () => { assert.equal(provider, false, "slot was disposed inside its own provider render"); unregisters++; renders.length = 0; commands = []; };
     }, toast: { show() {} } },
     client: {
       server: { info: async () => ({ pid: me.pid }) },

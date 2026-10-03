@@ -655,7 +655,7 @@ tests/fm-no-mistakes-required.test.sh 370
 tests/fm-omp-harness.test.sh 59969
 tests/fm-on.test.sh 34087
 tests/fm-opencode-primary-live-e2e.test.sh 21
-tests/fm-opencode-v2-plugin.test.sh 30000
+tests/fm-opencode-v2-plugin.test.sh 60000
 tests/fm-opencode-v2-launch.test.sh 15000
 tests/fm-operational-input.test.sh 231
 tests/fm-peek-remote.test.sh 1018
@@ -1485,7 +1485,7 @@ families_for_changed_path() {
       families_for_test_reference "$(basename "$path")" \
         || printf '%s\n' "__unmapped__:$path"
       ;;
-    tests/fixtures/fm-opencode-v2-provider-host.mjs)
+    tests/fixtures/fm-opencode-v2-provider-host.mjs|tests/fixtures/fm-opencode-v2-real-recovery.mjs)
       printf '%s\n' __script__:fm-opencode-v2-plugin.test.sh
       ;;
     tests/fixtures/*/*)

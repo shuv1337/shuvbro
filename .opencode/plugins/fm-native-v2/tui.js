@@ -8,9 +8,9 @@ import { existsSync } from "node:fs";
 
 const slot = Symbol.for("firstmate.native.v2.tui.coordinator");
 
-export async function supervisionNeeded(paths) {
+export async function supervisionNeeded(paths, env = helperEnvironment(paths)) {
   if (existsSync(`${paths.state}/.afk`)) return false;
-  const result = await runProcess("bash", ["-c", '. "$1/bin/fm-supervision-lib.sh" || exit 2; fm_supervision_status "$2" || exit 2; if [ "$FM_SUP_NEEDED" = true ] || [ "$FM_SUP_QUEUE_PENDING" = true ]; then echo needed; else echo idle; fi', "fm-native-v2", paths.root, paths.state], { cwd: paths.root, timeout: 10000 });
+  const result = await runProcess("bash", ["-c", '. "$1/bin/fm-supervision-lib.sh" || exit 2; fm_supervision_status "$2" || exit 2; if [ "$FM_SUP_NEEDED" = true ] || [ "$FM_SUP_QUEUE_PENDING" = true ]; then echo needed; else echo idle; fi', "fm-native-v2", paths.root, paths.state], { cwd: paths.root, env, timeout: 10000 });
   if (result.code !== 0 || !["needed", "idle"].includes(result.stdout.trim())) throw new Error("cannot evaluate canonical native supervision requirement");
   return result.stdout.trim() === "needed";
 }
@@ -125,7 +125,8 @@ export default { id: "firstmate.native.v2", async setup(ctx) {
        } }] }));
      } catch (error) {
        console.error("V2 command registration: " + error.message);
-       void cleanup().catch(error => console.error("V2 setup cleanup: " + error.message));
+       stopped = true;
+       queueMicrotask(() => { void cleanup().catch(error => console.error("V2 setup cleanup: " + error.message)); });
      }
      return null;
    } });
@@ -156,7 +157,7 @@ export default { id: "firstmate.native.v2", async setup(ctx) {
     catch { return false; }
   };
   const journal = createAdmissionJournal(paths, record.sessionID, input => ctx.client.session.prompt(input, { signal: AbortSignal.any([abort.signal, AbortSignal.timeout(10000)]) }), failure, { valid: validClaim, signal: abort.signal });
-   const coordinatorOptions = { owns, admission: journal, failure, needs: () => supervisionNeeded(paths), processIdentity: identity };
+   const coordinatorOptions = { owns, admission: journal, failure, needs: () => supervisionNeeded(paths, helperEnvironment(record)), processIdentity: identity };
    coordinator = createWatchArmCoordinator(paths, () => {}, coordinatorOptions);
   globalThis[slot] = coordinator;
   const env = { ...helperEnvironment(record), OPENCODE_SESSION_ID: record.sessionID };

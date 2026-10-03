@@ -88,11 +88,12 @@ export function createAdmissionJournal(paths, sessionID, admit, report = console
     const result = [];
     for (const name of readdirSync(dir).filter(name => /^msg_[a-f0-9]{64}\.json$/.test(name))) {
       const path = join(dir, name), value = validate(readPrivate(path));
-      // Keep claim startup deduplication and every unacknowledged wake. Only
-      // canonical ack makes an old terminal wake eligible for seven-day pruning.
+      // Keep claim startup deduplication and every unadmitted obligation. Old
+      // canonically acked row wakes and admitted no-row recoveries can expire.
       const old = Date.now() - statSync(path).mtimeMs > 7 * 24 * 60 * 60 * 1000;
       const acked = acknowledged(value);
-      if (value.kind === "wake" && acked && old) { unlinkSync(path); continue; }
+      const completedRecovery = value.rows.length === 0 && value.phase === "admitted";
+      if (value.kind === "wake" && (acked || completedRecovery) && old) { unlinkSync(path); continue; }
       if (!["admitted", "acknowledged"].includes(value.phase) && !acked) result.push(value);
     }
     return result;

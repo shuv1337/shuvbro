@@ -364,3 +364,6 @@ test_frozen_endpoint_and_worker_execution
 
 out=$(env ROOT="$ROOT" LAB="$TMP_ROOT/provider-host" node "$ROOT/tests/fixtures/fm-opencode-v2-provider-host.mjs" 2>&1) || fail "native provider/lifecycle regression: $out"
 pass "$out"
+
+out=$(env ROOT="$ROOT" LAB="$TMP_ROOT/real-recovery" node "$ROOT/tests/fixtures/fm-opencode-v2-real-recovery.mjs" 2>&1) || fail "real native recovery regression: $out"
+pass "$out"
