@@ -397,13 +397,17 @@ try {
   let age=31000,latest={type:'assistant',finish:'stop',time:{completed:Date.now()-500}},active={},waited=0;
   const deps={timing:()=>({age,started:Date.now()-age}),wait:async ms=>{assert.equal(ms,1000);waited++;},api:(_record,op,args)=>{
     if(op==='session.active') return {data:active};
-    assert.equal(op,'session.message.list'); assert.ok(args.includes('order=desc')); assert.ok(args.includes('limit=2')); return {data:Array.isArray(latest)?latest:[latest]};
+    assert.equal(op,'session.message.list'); assert.ok(args.includes('order=desc')); assert.ok(args.includes('limit=1')); return {data:[latest]};
   }};
   assert.equal(await session.settledSuccessor(sample,deps),true);assert.equal(waited,1);
-  latest=[{type:'idle',outcome:'succeeded',time:{created:Date.now()-100}},latest];assert.equal(await session.settledSuccessor(sample,deps),true);latest=latest[1];
+  for(const outcome of ['succeeded','failed','interrupted']) {
+    latest={type:'idle',outcome,time:{created:Date.now()-60000}};assert.equal(await session.settledSuccessor(sample,deps),true);
+  }
+  latest={type:'assistant',finish:'stop',time:{completed:Date.now()-60000}};assert.equal(await session.settledSuccessor(sample,deps),true);
   age=29999;const beforeWait=waited;assert.equal(await session.settledSuccessor(sample,deps),false);assert.equal(waited,beforeWait);age=31000;
   active={[r.sessionID]:{type:'running'}};assert.equal(await session.settledSuccessor(sample,deps),false);active={};
-  for(const message of [{type:'user',time:{completed:Date.now()-500}},{type:'assistant',finish:'tool-calls',time:{completed:Date.now()-500}},{type:'assistant',finish:'stop',time:{completed:Date.now()-60000}},{type:'assistant',finish:'stop',time:{}}]) {
+  assert.equal(await session.settledSuccessor({...sample,executing:true},deps),false);
+  for(const message of [{type:'synthetic',text:'Continuing after restart',time:{created:Date.now()-500}},{type:'user',time:{completed:Date.now()-500}},{type:'assistant',finish:'tool-calls',time:{completed:Date.now()-500}},{type:'assistant',finish:'stop',time:{}},{type:'idle',outcome:'shutdown',time:{created:Date.now()-60000}}]) {
     latest=message;assert.equal(await session.settledSuccessor(sample,deps),false);
   }
  console.log('frozen registered endpoint, cwd/session divergence and exact worker execution/cancellation passed');

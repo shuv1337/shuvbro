@@ -40,7 +40,7 @@ function successorTiming(binding) {
   const hz = Number(ticks.stdout?.trim()), uptime = Number(fs.readFileSync("/proc/uptime", "utf8").split(" ")[0]);
   if (ticks.status !== 0 || !Number.isFinite(hz) || hz <= 0 || !Number.isFinite(uptime)) throw new Error("cannot verify successor uptime");
   const age = (uptime - Number(current.start) / hz) * 1000;
-  return { age, started: Date.now() - age };
+  return { age };
 }
 
 // Test seams exercise the same criterion; production callers always use real
@@ -52,17 +52,13 @@ export async function settledSuccessor(snapshot, deps = {}) {
   const active = (deps.api || nativeAPI)(snapshot.binding, "session.active").data;
   if (!active || typeof active !== "object" || Array.isArray(active) || Object.values(active).some(value => value?.type !== "running")) throw new Error("invalid successor settlement snapshot");
   if (Object.hasOwn(active, snapshot.record.sessionID)) return false;
-  const messages = (deps.api || nativeAPI)(snapshot.binding, "session.message.list", [...snapshot.args, "--param", "order=desc", "--param", "limit=2"]).data;
-  if (!Array.isArray(messages) || !messages.length || messages.length > 2) return false;
-  // The installed fork appends a succeeded idle notice after the assistant.
-  // Accept only that adjacent terminal pair, never skip a newer user/tool row.
-  const notice = messages[0].type === "idle" ? messages[0] : undefined;
-  const latest = notice ? messages[1] : messages[0], completed = latest?.time?.completed;
-  if (notice && (notice.outcome !== "succeeded" || !Number.isFinite(notice.time?.created) || notice.time.created < completed || notice.time.created > Date.now())) return false;
-  // The unfiltered newest message must be a terminal assistant response, not
-  // a stale earlier answer, a tool-call step or a queued/restart user message.
+  const messages = (deps.api || nativeAPI)(snapshot.binding, "session.message.list", [...snapshot.args, "--param", "order=desc", "--param", "limit=1"]).data;
+  if (!Array.isArray(messages) || messages.length !== 1) return false;
+  const latest = messages[0], completed = latest?.time?.completed;
+  if (latest?.type === "idle") return ["succeeded", "failed", "interrupted"].includes(latest.outcome) &&
+    Number.isFinite(latest.time?.created) && latest.time.created <= Date.now();
   return latest?.type === "assistant" && latest.finish === "stop" && !latest.error &&
-    Number.isFinite(completed) && completed > timing.started + 25 && completed <= Date.now();
+    Number.isFinite(completed) && completed <= Date.now();
 }
 
 function readPrivateText(file) {

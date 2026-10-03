@@ -58,7 +58,7 @@ Busy state comes from the Firstmate-owned worker plugin's `session.execution.sta
 `bin/fm-opencode-v2-session.mjs` reconciles the exact recorded worker through native `session.get` and `session.active`, and interrupts that exact session before pane lifecycle actions or explicitly approved discard.
 Teardown refuses active or unverifiable native execution; a dead pane is not evidence that the worker stopped.
 The fork resumes durable in-flight claims at boot with at-least-once replay risk, including repeated side effects.
-After restart, cleanup requires exact-session successor cancellation or the conservative settled-idle proof owned by the [V2 supervision protocol](../../../../../docs/supervision-protocols/opencode-v2.md).
+After restart, cleanup requires exact-session successor cancellation or the [protocol's bounded idle/terminal settlement proof](../../../../../docs/supervision-protocols/opencode-v2.md), including released turns that ended before the restart.
 Unproven successors remain visibly unproven; confirmed cancellation or settlement records the successor binding.
 `--force` discard without proof accepts that a later service start may resume work in a removed isolated copy; it never reports confirmed cancellation.
 Portable regressions and isolated installed-fork probes cover these lifecycle paths; combined shared-service/Herdr qualification remains pending.
