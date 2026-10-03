@@ -11,23 +11,33 @@ set -eu
 [ -z "${FM_V2_ACTIVATION:-}" ] && [ -z "${OPENCODE_SESSION_ID:-}" ] || exit 91
 if [ "$1" = debug ]; then printf 'state %s\n' "$TEST_NATIVE_STATE"; exit 0; fi
 if [ "$1" != api ]; then
-  [ "$1" = --auto ] && [ "$2" = --session ] && [ "$3" = ses_worker_exact ] || exit 92
+  [ "$1" = --server ] && [ "$2" = http://127.0.0.1:12345 ] && [ "$3" = --auto ] && [ "$4" = --session ] && [ "$5" = ses_worker_exact ] && [ "$OPENCODE_PASSWORD" = fixture ] || exit 92
+  IFS= read -r input
+  [ "$input" = original-terminal-input ] || exit 98
   printf '%s\n' attached >> "$TEST_LOG"
   exit 0
 fi
 shift
-if [ "$1" = --server ]; then [ "$2" = http://127.0.0.1:12345 ] || exit 97; shift 2; fi
+if [ "$1" != --server ]; then echo unsafe-default-autostart >> "$TEST_LOG"; exit 97; fi
+[ "$2" = http://127.0.0.1:12345 ] && [ "$OPENCODE_PASSWORD" = fixture ] || exit 97
+shift 2
 operation=$1
 shift
-body='' param=''
+body='' param='' session_param=''
 while [ "$#" -gt 0 ]; do
-  case "$1" in --data) body=$2; shift 2 ;; --param) param=$2; shift 2 ;; *) exit 93 ;; esac
+  case "$1" in --data) body=$2; shift 2 ;; --param) param=$2; case "$param" in sessionID=*) session_param=$param ;; esac; shift 2 ;; *) exit 93 ;; esac
 done
 case "$operation" in
   server.info) jq -cn --argjson pid "$TEST_SERVICE_PID" '{pid:$pid}' ;;
+  config.get)
+    [ "$param" = "location[directory]=$TEST_WORK" ] || exit 94
+    if [ -n "${TEST_CONFIGURED:-}" ]; then
+      jq -cn --arg model "$TEST_CONFIGURED" --arg object "${TEST_CONFIGURED_OBJECT:-0}" '[{type:"document",info:{model:"wrong/earlier"}},{type:"directory",path:"/fixture"},{type:"document",info:{model:(if $object=="1" then {providerID:"fixture",model:"test-model",variant:"high"} else $model end)}}]'
+    else echo '[]'; fi ;;
   model.list|model.default)
     [ "$param" = "location[directory]=$TEST_WORK" ] || exit 94
     if [ "$operation" = model.default ]; then
+      if [ -n "${TEST_CONFIGURED:-}" ]; then echo '{"data":{"id":"external-fallback","providerID":"other-provider","variants":[]}}'; exit 0; fi
       echo '{"data":{"id":"test-model","providerID":"fixture","variants":[{"id":"high"}]}}'
     else
       echo '{"data":[{"id":"test-model","providerID":"fixture","variants":[{"id":"high"}]}]}'
@@ -38,10 +48,14 @@ case "$operation" in
     echo created >> "$TEST_LOG"
     jq -cn --argjson body "$body" '{data:{id:"ses_worker_exact",location:$body.location,model:($body.model + {variant:($body.model.variant // "default")})}}' ;;
   session.prompt)
-    [ -f "$TEST_RECORD" ] && [ "$param" = sessionID=ses_worker_exact ] || exit 95
+    [ -f "$TEST_RECORD" ] && [ "$session_param" = sessionID=ses_worker_exact ] && [ "$param" = "location[directory]=$TEST_WORK" ] || exit 95
     jq -e '.sessionID=="ses_worker_exact" and .text=="exact worker brief" and .delivery=="queue"' <<< "$body" >/dev/null
     echo admitted >> "$TEST_LOG"
     echo '{"id":"msg_worker"}' ;;
+  session.environment)
+    [ "$param" = sessionID=ses_worker_exact ] || exit 95
+    jq -e '.variables.TEST_WORK!=null and .variables.FM_V2_ACTIVATION==null and .variables.OPENCODE_SESSION_ID==null and .variables.OPENCODE_PASSWORD==null and .variables.OPENCODE_SERVER_PASSWORD==null' <<< "$body" >/dev/null
+    echo environment >> "$TEST_LOG" ;;
   *) exit 96 ;;
 esac
 SH
@@ -53,16 +67,29 @@ mkdir -p "$TEST_NATIVE_STATE"
 jq -cn --argjson pid "$$" '{pid:$pid,url:"http://127.0.0.1:12345",password:"fixture"}' > "$TEST_NATIVE_STATE/service.json"
 chmod 600 "$TEST_NATIVE_STATE/service.json"
 export FM_V2_ACTIVATION='inherited-wrong-process' OPENCODE_SESSION_ID=ses_parent
-for model in default explicit variant; do
+printf '%s\n' original-terminal-input > "$TMP_ROOT/input"
+for model in default explicit variant configured configured-object; do
   : > "$TEST_LOG"
   args=()
+  unset TEST_CONFIGURED TEST_CONFIGURED_OBJECT
+  case "$model" in configured*) export TEST_CONFIGURED='fixture/test-model#high' ;; esac
+  [ "$model" != configured-object ] || export TEST_CONFIGURED_OBJECT=1
   case "$model" in explicit) args=(--model fixture/test-model) ;; variant) args=(--model 'fixture/test-model#high') ;; esac
-  (cd "$TEST_WORK" && "$ROOT/bin/fm-opencode-v2-launch.sh" "${args[@]}" --prompt 'exact worker brief' --session-record "$TEST_RECORD") || fail "$model worker launcher"
-  [ "$(cat "$TEST_LOG")" = $'created\nadmitted\nattached' ] || fail "$model did not record/admit/attach its exact worker"
-  case "$model" in variant) expected=high ;; *) expected=default ;; esac
+  (cd "$TEST_WORK" && "$ROOT/bin/fm-opencode-v2-launch.sh" "${args[@]}" --prompt 'exact worker brief' --session-record "$TEST_RECORD" < "$TMP_ROOT/input") || fail "$model worker launcher"
+  [ "$(cat "$TEST_LOG")" = $'created\nenvironment\nadmitted\nattached' ] || fail "$model did not record/admit/attach its exact worker"
+  case "$model" in variant|configured*) expected=high ;; *) expected=default ;; esac
   jq -e --arg variant "$expected" '.sessionID=="ses_worker_exact" and .model.variant==$variant' "$TEST_RECORD" >/dev/null || fail "incorrect $model variant record"
   pass "$model worker shares service, records exact session/model, strips activation and admits before attachment"
 done
+unset TEST_CONFIGURED TEST_CONFIGURED_OBJECT
+: > "$TEST_LOG"
+export TEST_CONFIGURED='fixture/unavailable'
+if (cd "$TEST_WORK" && FM_OPENCODE_V2_CATALOG_POLLS=2 "$ROOT/bin/fm-opencode-v2-launch.sh" --prompt 'exact worker brief' --session-record "$TEST_RECORD") 2> "$TMP_ROOT/config-denied"; then
+  fail 'unavailable configured default fell back to another model'
+fi
+[ ! -s "$TEST_LOG" ] || fail 'unavailable configured default started a worker'
+unset TEST_CONFIGURED
+pass 'configured default refuses rather than selecting an external catalog fallback'
 : > "$TEST_LOG"
 if (cd "$TEST_WORK" && "$ROOT/bin/fm-opencode-v2-launch.sh" --model 'fixture/test-model#missing' --prompt 'exact worker brief' --session-record "$TEST_RECORD") 2> "$TMP_ROOT/denied"; then
   fail 'unavailable worker variant was accepted'

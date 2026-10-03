@@ -2,6 +2,8 @@
 // Linux process birth is required; unsupported hosts refuse activation.
 // CLI: identity PID | registry | read SESSION | helper STATE [acquire] |
 // claim/retire (strict record JSON on stdin, serialized with fm-wake-lib locks).
+// api OPERATION PARAMS... (service binding JSON on stdin); attach SESSION
+// BINDING_JSON (credential-free argument, preserving interactive terminal stdin).
 // Native adapters import this owner; neither metadata nor RPC chooses read paths.
 import * as fs from "node:fs";
 import { userInfo } from "node:os";
@@ -52,6 +54,7 @@ export function nativeAPI(record, operation, parameters = []) {
     env: { ...process.env, OPENCODE_PASSWORD: service.password }, encoding: "utf8", timeout: 10000, maxBuffer: 1024 * 1024,
   });
   if (result.status !== 0 || result.signal) throw new Error("cannot verify native service operation " + operation);
+  if (operation === "session.environment" && !result.stdout.trim()) return null;
   return JSON.parse(result.stdout);
 }
 
@@ -258,6 +261,20 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
       if (nativeAPI(result, "server.info").pid !== service.pid) throw new Error("registered endpoint is not the connected execution service");
     }
     else if (action === "registry") result = registry();
+    else if (action === "api") result = nativeAPI(JSON.parse(fs.readFileSync(0, "utf8")), arg, process.argv.slice(4));
+    else if (action === "attach") {
+      if (!idPattern.test(arg || "")) throw new Error("invalid exact worker session");
+      // Credential-free binding is an argument here: stdin must remain the
+      // worker's actual terminal, not the JSON pipe used by short API calls.
+      const record = JSON.parse(mode);
+      if (nativeAPI(record, "server.info").pid !== record.servicePID) throw new Error("worker attachment endpoint changed service");
+      const service = registeredService(record.serviceURL);
+      if (service.pid !== record.servicePID || service.start !== record.serviceStart || service.boot !== record.hostBootID) throw new Error("worker attachment registration changed service incarnation");
+      const attached = spawnSync("shuvcode", ["--server", record.serviceURL, "--auto", "--session", arg], {
+        env: { ...process.env, OPENCODE_PASSWORD: service.password }, stdio: "inherit",
+      });
+      process.exitCode = attached.status ?? 1;
+    }
     else if (action === "read") result = readRegistration(arg);
     else if (action === "probe") {
       let present = false;
