@@ -234,6 +234,7 @@ export default { id: "firstmate.native.v2", async setup(ctx) {
           if (pending.kind === "startup:" + record.claimID) await journal.deliver(pending);
         }
         if (held) failure("V2 supervision ownership is unavailable; automatic reconciliation is continuing");
+        else if (!journal.pending().some(value => value.kind === "startup:" + record.claimID)) notices.recovered();
         return;
       }
       held = true;

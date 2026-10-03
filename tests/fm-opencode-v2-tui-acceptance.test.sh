@@ -160,6 +160,33 @@ test_notice_silent_until_first_ownership() {
   pass "real TUI setup: lock acquired after more than 30 s of notice clock stays silent"
 }
 
+test_notice_startup_transient_self_heals() {
+  tui_case notice-startup-transient 1
+  local out="$CASE/out.json" steps
+  steps=$(jq -nc --argjson l "$(lock_step)" '
+    [{do:"wait",until:"diagnostic",match:"admission (remains pending|rejected)",timeoutMs:20000},
+    {do:"wait",until:"admitted",match:"fm-session-start",timeoutMs:20000},{do:"tick",count:3},
+    {do:"advance-notice-clock",ms:31000},{do:"tick",count:3},{do:"sleep",ms:500},{do:"notice-count"},
+    $l,{do:"wait",until:"lock"},{do:"wait",until:"watcher"},{do:"tick",count:3},{do:"sleep",ms:500},{do:"notice-count"}]')
+  v2_tui "$CASE" "$(spec "$(jq -nc --argjson s "$steps" '{manualNoticeClock:true,captureTimer:true,rejectPrompts:5,faultMatch:"fm-session-start",steps:$s}')")" "$out"
+  jq -e 'all(.steps[] | select(.step=="wait"); .ok)' "$out" >/dev/null || fail "startup transient positive control failed: $(jq -c '.steps' "$out")"
+  jq -e 'all(.steps[] | select(.step=="notice-count"); .count==0 and .toasts==0)' "$out" >/dev/null || fail "self-healed startup admission prompted manual repair: $(jq -c '.steps' "$out")"
+  pass "real TUI setup: a self-healed startup admission failure before .lock never matures into a notice"
+}
+
+test_notice_startup_undelivered_stays_open() {
+  tui_case notice-startup-undelivered 1
+  local out="$CASE/out.json" steps
+  steps=$(jq -nc '
+    [{do:"wait",until:"diagnostic",match:"admission (remains pending|rejected)",timeoutMs:20000},{do:"tick",count:3},
+    {do:"advance-notice-clock",ms:31000},{do:"tick",count:3},
+    {do:"wait",until:"admitted",match:"WATCHER FAILURE",timeoutMs:10000},{do:"notice-count"}]')
+  v2_tui "$CASE" "$(spec "$(jq -nc --argjson s "$steps" '{manualNoticeClock:true,captureTimer:true,rejectPrompts:100000,faultMatch:"fm-session-start",steps:$s}')")" "$out"
+  jq -e 'all(.steps[] | select(.step=="wait"); .ok)' "$out" >/dev/null || fail "undelivered startup admission did not keep its episode open: $(jq -c '.steps' "$out")"
+  jq -e 'all(.steps[] | select(.step=="notice-count"); .count==1 and .toasts==1)' "$out" >/dev/null || fail "undelivered startup notice count differs"
+  pass "real TUI setup: an undelivered startup admission still notifies once after the bound"
+}
+
 test_notice_ownership_lost_after_held() {
   tui_case notice-ownership-lost 1
   local out="$CASE/out.json" steps
@@ -214,6 +241,8 @@ if [ "${FM_V2_NOTICE_ONLY:-0}" = 1 ]; then
   test_notice_permanent_after_stall
   test_notice_transient
   test_notice_silent_until_first_ownership
+  test_notice_startup_transient_self_heals
+  test_notice_startup_undelivered_stays_open
   test_notice_ownership_lost_after_held
   test_notice_stale_startup_entry
   test_notice_rebind_failure_immediate
@@ -773,6 +802,8 @@ v2_run_cases \
   test_notice_permanent_after_stall \
   test_notice_transient \
   test_notice_silent_until_first_ownership \
+  test_notice_startup_transient_self_heals \
+  test_notice_startup_undelivered_stays_open \
   test_notice_ownership_lost_after_held \
   test_notice_stale_startup_entry \
   test_notice_rebind_failure_immediate \
