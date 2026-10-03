@@ -25,7 +25,7 @@ When this session owns supervision and away mode is not active:
    An exhausted admission remains pending and produces a bounded diagnostic, not an unguarded recovery-marker reopen.
    Subsequent attempts continue with capped backoff while ownership remains valid; confirmed canonical queue acknowledgement retires the obsolete transport obligation without reporting it as admitted.
 6. Ordinary wake: do not ask the model to re-arm because continuity is plugin-owned.
-7. Unexpected child close enters bounded exponential retry; failure remains visible in the TUI and the home-owned adapter diagnostic.
+7. Unexpected child close enters bounded exponential retry; each distinct failure is shown as a TUI toast, queued once to the exact lead session as a bounded operational prompt, and kept in the home-owned adapter diagnostic.
    An interrupted model turn alone never schedules continuation; a later durable fleet wake may resume supervision.
 8. Failure or missing cycle only: if the plugin reports a watcher failure, drain queued wakes, inspect the failure text, and use `bin/fm-watch-arm.sh` manually only as a short recovery probe.
 9. Never use shell `&` for watcher supervision.
@@ -38,6 +38,8 @@ The installed TUI can finish process exit before asynchronous plugin disposal, s
 The server retains protective refusal for stale exact registered leads, including after restart; unrelated and inherited child markers remain inert.
 If a surviving owner reconnects to a restarted service, invoke its native `/firstmate-rebind` command to verify and republish that service incarnation explicitly.
 The endpoint itself remains frozen and must have a local native managed registration; an unregistered `--server` or different endpoint cannot silently fall back to the default service.
+Workers dispatched from a home with a V2 lead owner record use that record's frozen endpoint; a stale or noncanonical record refuses the spawn instead of falling back to the default service.
+A failed worker spawn interrupts the exact admitted native session before closing its window and reports any unproved cancellation.
 The fork preserves in-flight execution claims across shutdown and resumes them at boot with at-least-once semantics: the model may repeat side-effecting commands.
 Worker cleanup therefore refuses until exact-session cancellation on the live successor is proven, or an idle successor has been up at least 30 seconds, two execution samples at least one second apart are empty, and its newest message is a succeeded/failed/interrupted idle notice or a completed assistant response with `finish:stop`.
 The terminal may predate the restart; newer user/restart messages, incomplete/tool-call responses or ambiguous evidence still refuse.

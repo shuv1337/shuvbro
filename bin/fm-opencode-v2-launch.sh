@@ -6,6 +6,7 @@
 # FILE is the home-owned task session sidecar passed by fm-spawn, not an RPC
 # read target. It records exact worker ID/model plus the service incarnation and
 # endpoint for native execution reconciliation before interrupt/cleanup.
+# A home with a V2 lead owner record binds workers to that lead's frozen endpoint.
 set -euo pipefail
 model_ref='' prompt='' have_prompt=0 record=''
 while [ "$#" -gt 0 ]; do
@@ -25,7 +26,8 @@ case "$record" in *.opencode-v2-session.json) ;; *) echo 'error: native worker r
 meta=${record%.opencode-v2-session.json}.meta
 [ -f "$meta" ] && [ ! -L "$meta" ] || { echo 'error: native worker task metadata is absent or unsafe' >&2; exit 1; }
 meta_before=$(cat "$meta")
-service=$(node "$SCRIPT_DIR/fm-opencode-v2-owner.mjs" service)
+endpoint=$(node "$SCRIPT_DIR/fm-opencode-v2-owner.mjs" lead-endpoint "$(dirname "$record")")
+service=$(node "$SCRIPT_DIR/fm-opencode-v2-owner.mjs" service ${endpoint:+"$endpoint"})
 # Every API read/write targets the verified frozen endpoint. No default service
 # discovery/auto-start is allowed after registration, even if it disappears.
 api() { node "$SCRIPT_DIR/fm-opencode-v2-owner.mjs" api "$@" <<< "$service"; }

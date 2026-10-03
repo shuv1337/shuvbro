@@ -1,6 +1,6 @@
 // Supplemental V2 session-lock authority and its fixed discovery projection.
 // Linux process birth is required; unsupported hosts refuse activation.
-// CLI: identity PID | registry | read SESSION | helper STATE [acquire] |
+// CLI: identity PID | registry | read SESSION | helper STATE [acquire] | lead-endpoint STATE |
 // claim/retire (strict record JSON on stdin, serialized with fm-wake-lib locks).
 // api OPERATION PARAMS... (service binding JSON on stdin); attach SESSION
 // BINDING_JSON (credential-free argument, preserving interactive terminal stdin).
@@ -179,6 +179,24 @@ export function canonical(value, requireLock = true) {
   return value;
 }
 
+// A home with a V2 lead owner record dispatches workers only on that lead's
+// frozen endpoint. No owner record keeps the default managed registration.
+export function leadEndpoint(state) {
+  const home = fs.realpathSync(state);
+  let value;
+  try { value = schema(readPrivate(join(home, ".opencode-v2-owner.json"))); }
+  catch (error) { if (error.code === "ENOENT") return undefined; throw leadRefusal(error); }
+  try {
+    if (value.state !== home) throw new Error("owner record belongs to another state directory");
+    canonical(live(value));
+  } catch (error) { throw leadRefusal(error); }
+  return value.serviceURL;
+}
+
+function leadRefusal(error) {
+  return new Error(`this home's V2 lead owner record is not a live canonical claim (${error.message}); relaunch or /firstmate-rebind the lead with bin/fm-opencode-v2-primary.sh before dispatching opencode-v2 workers`);
+}
+
 function ancestor(target) {
   let pid = process.pid;
   for (let i = 0; i < 64 && pid > 1; i++) {
@@ -263,6 +281,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
       result = { serviceURL: service.serviceURL, servicePID: service.pid, serviceStart: service.start, hostBootID: service.boot };
       if (nativeAPI(result, "server.info").pid !== service.pid) throw new Error("registered endpoint is not the connected execution service");
     }
+    else if (action === "lead-endpoint") result = leadEndpoint(arg);
     else if (action === "registry") result = registry();
     else if (action === "api") result = nativeAPI(JSON.parse(fs.readFileSync(0, "utf8")), arg, process.argv.slice(4));
     else if (action === "attach") {

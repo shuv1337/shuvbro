@@ -409,6 +409,7 @@ test_claude_threads_model_and_effort() {
 #   FM_FAKE_V2_TUI=no       the TUI never appears after launch
 #   FM_FAKE_V2_SUBMIT=no    every Enter on the pre-filled composer is swallowed
 #   FM_FAKE_V2_SWALLOW_FIRST=yes  only the first such Enter is swallowed
+#   FM_FAKE_V2_SIDECAR=<wt> the launch helper records an admitted worker session
 make_opencode_v2_tmux() {
   local fakebin=$1
   cat > "$fakebin/tmux" <<'SH'
@@ -442,7 +443,13 @@ case "${1:-}" in
     if [ -n "$literal" ]; then
       printf '%s\n' "$literal" >> "$FM_FAKE_LAUNCH_LOG"
       case "$literal" in
-        *'fm-opencode-v2-launch.sh'*) printf 'launch-helper\n' > "$FM_FAKE_V2_STATE" ;;
+        *'fm-opencode-v2-launch.sh'*)
+          printf 'launch-helper\n' > "$FM_FAKE_V2_STATE"
+          if [ -n "${FM_FAKE_V2_SIDECAR:-}" ]; then
+            birth=$(node "$FM_FAKE_V2_ROOT/bin/fm-opencode-v2-owner.mjs" identity "$FM_FAKE_V2_SERVICE_PID")
+            ( umask 077; jq -cn --argjson birth "$birth" --arg wt "$FM_FAKE_V2_SIDECAR" '{version:1,sessionID:"ses_spawned",location:{directory:$wt},model:{providerID:"fixture",id:"echo"},servicePID:$birth.pid,serviceStart:$birth.start,hostBootID:$birth.boot,serviceURL:"http://127.0.0.1:12345"}' \
+              > "$FM_FAKE_V2_HOME/state/$FM_FAKE_V2_ID.opencode-v2-session.json" )
+          fi ;;
         *'shuvcode --standalone'*) printf 'launch-typed\n' > "$FM_FAKE_V2_STATE" ;;
       esac
       exit 0
@@ -451,7 +458,7 @@ case "${1:-}" in
       *' Enter '*)
         case "$state" in
           launch-typed|launch-helper)
-            if [ "${FM_FAKE_V2_AUTOSUBMIT:-no}" != no ] || [ "$state" = launch-helper ]; then
+            if [ "${FM_FAKE_V2_AUTOSUBMIT:-no}" != no ] || { [ "$state" = launch-helper ] && [ "${FM_FAKE_V2_TUI:-yes}" = yes ]; }; then
               printf 'submitted\n' > "$FM_FAKE_V2_STATE"
               state=busy event=session-execution-started
               if [ "${FM_FAKE_V2_AUTOSUBMIT:-no}" = finished ]; then
@@ -479,6 +486,7 @@ case "${1:-}" in
     esac
     exit 0
     ;;
+  kill-window) printf 'kill-window\n' >> "$FM_FAKE_V2_STATE.ops"; exit 0 ;;
   capture-pane)
     start= end= prev=
     for arg in "$@"; do
@@ -741,6 +749,53 @@ test_opencode_v2_unsubmitted_brief_fails_loudly() {
   assert_contains "$out" "did not show its pre-filled launch brief" \
     "missing opencode-v2 TUI lacked a loud diagnostic"
   pass "opencode-v2 spawn fails loudly when the brief cannot be shown or submitted"
+}
+
+# The launch helper admits the worker prompt on the shared service before the
+# pane handshake, so a failed spawn must cancel that exact session before it
+# closes the window, and must say so when cancellation is not proven.
+test_opencode_v2_spawn_failure_cancels_admitted_session() {
+  local mode id out status
+  for mode in confirmed refused; do
+    id="profile-v2-cancel-$mode"
+    opencode_v2_launch_case "$id" "$id"
+    mkdir -p "$CASE_DIR/native-state"
+    jq -cn --argjson pid "$$" '{pid:$pid,url:"http://127.0.0.1:12345",password:"fixture"}' > "$CASE_DIR/native-state/service.json"
+    chmod 600 "$CASE_DIR/native-state/service.json"
+    cat > "$FAKEBIN_DIR/shuvcode" <<'SH'
+#!/usr/bin/env bash
+set -eu
+case "$1" in --version) echo 'shuvcode v2.0.22-shuv.1'; exit 0 ;; --help) echo '--server --session --auto'; exit 0 ;; esac
+if [ "$1" = debug ]; then echo "state $FM_FAKE_V2_NATIVE/native-state"; exit 0; fi
+[ "$1" = api ] && [ "$2" = --server ] && [ "$3" = http://127.0.0.1:12345 ] && [ "$OPENCODE_PASSWORD" = fixture ] || exit 92
+case "$4" in
+  server.info) jq -cn --argjson pid "$FM_FAKE_V2_SERVICE_PID" '{pid:$pid}' ;;
+  session.get) jq -cn --arg wt "$FM_FAKE_V2_SIDECAR" '{data:{id:"ses_spawned",location:{directory:$wt},model:{providerID:"fixture",id:"echo"}}}' ;;
+  session.active) if [ -e "$FM_FAKE_V2_NATIVE/cancelled" ]; then echo '{"data":{}}'; else echo '{"data":{"ses_spawned":{"type":"running"}}}'; fi ;;
+  session.interrupt)
+    printf 'interrupt\n' >> "$FM_FAKE_V2_STATE.ops"
+    [ "$FM_FAKE_V2_CANCEL" = confirmed ] || exit 17
+    : > "$FM_FAKE_V2_NATIVE/cancelled"; echo '{"interrupted":true}' ;;
+  *) exit 93 ;;
+esac
+SH
+    chmod +x "$FAKEBIN_DIR/shuvcode"
+    out=$(FM_FAKE_V2_TUI=no FM_FAKE_V2_SIDECAR="$(realpath "$WT_DIR")" FM_FAKE_V2_SERVICE_PID=$$ FM_FAKE_V2_NATIVE="$CASE_DIR" FM_FAKE_V2_CANCEL="$mode" \
+      run_opencode_v2_spawn "$id" --model opencode/space-bunny-free)
+    status=$?
+    [ "$status" -ne 0 ] || fail "$mode: an opencode-v2 spawn with no visible turn must fail: $out"
+    [ "$(cat "$CASE_DIR/v2.state.ops" 2>/dev/null)" = $'interrupt\nkill-window' ] \
+      || fail "$mode: the admitted native session was not interrupted before the window closed: $(cat "$CASE_DIR/v2.state.ops" 2>/dev/null)"
+    if [ "$mode" = confirmed ]; then
+      assert_present "$CASE_DIR/cancelled" "confirmed: the exact native session was not cancelled"
+      assert_not_contains "$(cat "$HOME_DIR/state/$id.status")" unproved "confirmed: a proven cancellation was reported as unproved"
+    else
+      assert_grep 'native worker cancellation unproved: cannot verify native service operation session.interrupt' \
+        "$HOME_DIR/state/$id.status" "refused: the failure detail omitted the unproved cancellation"
+      assert_contains "$out" "native worker cancellation unproved" "refused: the spawn error omitted the unproved cancellation"
+    fi
+  done
+  pass "opencode-v2 spawn failure interrupts the admitted native session before closing its window and reports unproved cancellation"
 }
 
 test_opencode_v2_auto_submitted_brief() {
@@ -1598,6 +1653,7 @@ test_opencode_v2_launch_uses_auto_and_omits_model
 test_opencode_v2_spawn_submits_the_prefilled_brief
 test_opencode_v2_unsubmitted_brief_fails_loudly
 test_opencode_v2_auto_submitted_brief
+test_opencode_v2_spawn_failure_cancels_admitted_session
 test_opencode_worker_keeps_tracked_plugins_package_json
 test_codex_threads_model_and_effort
 test_codex_omits_invalid_max_effort

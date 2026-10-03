@@ -279,9 +279,14 @@ test_stream_loss_falls_back_to_timer_and_recovers_a_wake() {
   step_ok "$out" 9 "the timer fallback did not arm a watcher after stream loss"
   step_ok "$out" 11 "a genuine durable wake was not admitted after stream loss"
   [ "$(wake_admissions "$out")" = 1 ] || fail "expected exactly one wake admission after stream loss: $(jq -c '.admitted' "$out")"
-  [ "$(jq '.admitted | length' "$out")" = 2 ] || fail "stream loss produced prompts beyond the startup nudge and the one wake: $(jq -c '.admitted' "$out")"
+  [ "$(jq '[.admitted[] | select(.text | test("WATCHER FAILURE") | not)] | length' "$out")" = 2 ] || fail "stream loss produced prompts beyond the startup nudge and the one wake: $(jq -c '.admitted' "$out")"
   jq -e '[.failures[] | select(test("event stream"))] | length >= 1' "$out" >/dev/null || fail "stream loss was not reported as a bounded diagnostic"
-  pass "tui: after stream loss the timer fallback arms and a genuine wake is admitted once, without replayed events"
+  jq -e '[.admitted[] | select(.text | test("WATCHER FAILURE")) | select((.text | test("event stream interrupted")) and .delivery == "queue" and .sessionID == "ses_lead")] | length == 1' "$out" >/dev/null \
+    || fail "stream loss was not queued exactly once to the exact lead session: $(jq -c '[.prompts[] | select(.text | test("WATCHER FAILURE"))]' "$out")"
+  [ "$(jq '[.prompts[] | select(.text | test("WATCHER FAILURE"))] | length' "$out")" = 1 ] || fail "the failure prompt repeated: $(jq -c '.prompts' "$out")"
+  jq -e '[.toasts[]? | select(.variant == "error" and (.message | test("event stream interrupted")))] | length == 1' "$out" >/dev/null \
+    || fail "stream loss was not shown once in the TUI: $(jq -c '.toasts' "$out")"
+  pass "tui: after stream loss the failure is toasted and queued once to the lead, the timer fallback arms and a genuine wake is admitted once"
 }
 
 # Interrupted turn: no self-generated continuation. Positive control in the same

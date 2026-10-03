@@ -4,9 +4,12 @@ import { createAdmissionJournal } from "./admission.js";
 import { bindingRPC } from "./rpc.js";
 import { eventSessionID, isIdleEvent } from "../lib/fm-plugin-v2.js";
 import { runProcess } from "../lib/fm-plugin-common.js";
+import { encodeFirstmateOperationalInput } from "../lib/fm-operational-input.js";
 import { existsSync } from "node:fs";
+import { createHash } from "node:crypto";
 
 const slot = Symbol.for("firstmate.native.v2.tui.coordinator");
+const FAILURE_PROMPT_LIMIT = 8;
 
 export async function supervisionNeeded(record, env = helperEnvironment(record)) {
   if (existsSync(`${record.state}/.afk`)) return false;
@@ -139,12 +142,21 @@ export default { id: "firstmate.native.v2", async setup(ctx) {
    const paths = { root: record.root, home: record.home, state: record.state, config: record.config };
   let reconcileInFlight;
   let lastFailure = "";
+  const surfaced = new Set();
   const failure = reason => {
     if (stopped) return;
     if (lastFailure === reason) return;
     lastFailure = reason;
     console.error(reason);
+    const text = String(reason).slice(0, 4000);
     writePrivate(`${record.state}/.opencode-v2-failure.json`, { version: 1, sessionID: record.sessionID, claimID: record.claimID, reason: String(reason).slice(0, 12000) });
+    if (surfaced.has(text) || surfaced.size >= FAILURE_PROMPT_LIMIT) return;
+    surfaced.add(text);
+    try { ctx.ui.toast?.show({ variant: "error", message: "Firstmate watcher failure: " + text }); } catch (error) { console.error("V2 failure toast: " + error.message); }
+    void (async () => {
+      const prompt = await encodeFirstmateOperationalInput(record.root, "watcher", `WATCHER FAILURE - native V2 supervision reported a failure; drain queued wakes with bin/fm-wake-drain.sh, inspect this reason, and probe recovery manually with bin/fm-watch-arm.sh if continuity is not restored.\n\n${text}`);
+      await journal.deliver(journal.prepare(prompt, "failure:" + record.claimID + ":" + createHash("sha256").update(text).digest("hex")));
+    })().catch(error => console.error("V2 failure prompt: " + error.message));
   };
   const owns = () => {
     try {

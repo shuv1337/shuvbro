@@ -3149,10 +3149,17 @@ opencode_v2_submit_prefill() {
 }
 
 # Same orphan hazard as rovo: a launched --auto worker with no published task
-# record must not outlive a failed spawn.
+# record must not outlive a failed spawn. Its prompt was admitted on the shared
+# service, so pane death alone is not stopped execution.
 opencode_v2_spawn_fail() {  # <detail>
-  printf 'failed: %s\n' "$1" >> "$STATE/$ID.status"
-  echo "error: $1; inspect window $T" >&2
+  local detail=$1 cancel
+  if [ -e "$STATE_REAL/$ID.opencode-v2-session.json" ] || [ -L "$STATE_REAL/$ID.opencode-v2-session.json" ]; then
+    if ! cancel=$(fm_control_v2_interrupt "$STATE_REAL" "$ID" "$WT" 2>&1); then
+      detail="$detail; native worker cancellation unproved: ${cancel//$'\n'/ }"
+    fi
+  fi
+  printf 'failed: %s\n' "$detail" >> "$STATE/$ID.status"
+  echo "error: $detail; inspect window $T" >&2
   rovo_endpoint_cleanup
 }
 
