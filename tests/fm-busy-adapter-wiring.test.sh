@@ -535,6 +535,24 @@ test_opencode_v2_is_refused_as_a_positional_secondmate() {
   pass "opencode-v2 is refused as a positional secondmate before any worker is created"
 }
 
+test_opencode_v2_capability_refuses_before_dispatch() {
+  local rec id=busy-v2-probe out
+  rec=$(make_spawn_case v2-probe opencode "$id")
+  read_case_record "$rec"
+  cat > "$FAKEBIN_DIR/shuvcode" <<'SH'
+#!/bin/bash
+[ "$1" = --version ] || exit 99
+echo 'shuvcode v1.0.0'
+SH
+  chmod +x "$FAKEBIN_DIR/shuvcode"
+  out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$id" "$PROJ_DIR" opencode-v2) && fail "unqualified V2 target dispatched: $out"
+  assert_contains "$out" 'unqualified target' 'V2 refusal must name the unsupported installed build'
+  assert_absent "$HOME_DIR/state/.spawn-$id.lock" 'probe must precede the task runtime lock'
+  assert_absent "$HOME_DIR/state/$id.meta" 'probe must precede task metadata'
+  assert_absent "$HOME_DIR/state/$id.busy-gen" 'probe must precede execution wiring'
+  pass 'unqualified V2 target refuses before task runtime state or isolated-copy acquisition'
+}
+
 test_kimi_and_grok_install_no_unverified_wiring() {
   local state out
   state="$TMP_ROOT/gates/state"
@@ -564,6 +582,7 @@ test_gemini_hooks_stale_incarnation_harmless
 test_raw_gemini_launch_has_no_semantic_wiring
 test_gemini_is_refused_as_a_secondmate
 test_opencode_v2_is_refused_as_a_positional_secondmate
+test_opencode_v2_capability_refuses_before_dispatch
 test_codex_unverified_until_a_semantic_source_exists
 
 echo "all fm-busy-adapter-wiring tests passed"

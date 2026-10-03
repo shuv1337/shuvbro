@@ -65,6 +65,25 @@ SH
 chmod +x "$TMP_ROOT/bin/shuvcode"
 export TEST_LOG="$TMP_ROOT/order" TEST_CREATE="$TMP_ROOT/create.json" TEST_RECORD="$TMP_ROOT/worker.opencode-v2-session.json" TEST_WORK="$TMP_ROOT/work"
 printf '%s\n' task-fixture > "$TMP_ROOT/worker.meta"
+
+# Read-only target/runtime probe: no service API, launch or worktree side effects.
+ROOT="$ROOT" LAB="$TMP_ROOT/capability" node --input-type=module <<'JS'
+import * as fs from 'node:fs'; import assert from 'node:assert/strict'; import {pathToFileURL} from 'node:url';
+const {probeCapabilities}=await import(pathToFileURL(process.env.ROOT+'/bin/fm-opencode-v2-capability.mjs'));
+const lab=process.env.LAB,runtime=lab+'/.opencode/plugins';fs.mkdirSync(runtime,{recursive:true});
+const binary=lab+'/shuvcode',log=lab+'/calls';
+fs.writeFileSync(binary,`#!/bin/bash\necho "$*" >> '${log}'\ncase "$1" in --version) echo "\${PROBE_VERSION:-shuvcode v2.0.22-shuv.1}" ;; --help) echo "\${PROBE_FLAGS:---server --session --auto}" ;; *) exit 99 ;; esac\n`,{mode:0o700});
+process.env.PROBE_VERSION='shuvcode v1.0.0';await assert.rejects(probeCapabilities(lab,binary),/unqualified target/);delete process.env.PROBE_VERSION;
+process.env.PROBE_FLAGS='--session --auto';await assert.rejects(probeCapabilities(lab,binary),/missing native --server/);delete process.env.PROBE_FLAGS;
+await assert.rejects(probeCapabilities(lab,binary),/npm ci/);
+fs.mkdirSync(runtime+'/node_modules/effect',{recursive:true});
+fs.writeFileSync(runtime+'/package.json',JSON.stringify({dependencies:{effect:'4.0.0-rc.112'}}));
+fs.writeFileSync(runtime+'/node_modules/effect/package.json',JSON.stringify({name:'effect',version:'4.0.0-rc.112',type:'module',exports:'./index.js'}));
+fs.writeFileSync(runtime+'/node_modules/effect/index.js','export const Data={TaggedError(){}}; export const Effect={gen(){},promise(){},tryPromise(){},runPromise(){},flatMap(){},fail(){}};');
+assert.equal((await probeCapabilities(lab,binary)).qualified,true);
+assert.ok(fs.readFileSync(log,'utf8').trim().split('\n').every(line=>['--version','--help'].includes(line)),'probe accessed service or dispatch');
+JS
+pass 'capability probe refuses unqualified version, missing CLI and runtime; qualified stand-in is read-only'
 export PATH="$TMP_ROOT/bin:$PATH"
 export TEST_NATIVE_STATE="$TMP_ROOT/native-state" TEST_SERVICE_PID=$$
 mkdir -p "$TEST_NATIVE_STATE"

@@ -1206,6 +1206,26 @@ if [ "$KIND" = secondmate ]; then
   fi
   [ "$remote_spawn_rc" -eq 3 ] || exit "$remote_spawn_rc"
 fi
+# Probe V2 before even the transient spawn lock is published. Revalidate after
+# locked harness resolution below, so configuration/record changes cannot evade
+# the gate. This reads the same selector precedence without adopting a task.
+V2_CAPABILITY_PROBED=0
+if [ "$KIND" != secondmate ]; then
+  if [ -n "$HARNESS_ARG" ]; then
+    capability_harness=$HARNESS_ARG
+  elif [ "$RELAUNCH" -eq 1 ]; then
+    capability_harness=$(fm_meta_get "$STATE/$ID.meta" harness)
+  elif [ -n "${POS[2]:-}" ]; then
+    capability_harness=${POS[2]}
+  else
+    capability_harness=$("$FM_ROOT/bin/fm-harness.sh" crew)
+  fi
+  if [ "$capability_harness" = opencode-v2 ]; then
+    node "$FM_ROOT/bin/fm-opencode-v2-capability.mjs" "$FM_ROOT" >/dev/null || exit 1
+    V2_CAPABILITY_PROBED=1
+  fi
+fi
+
 # Backend selection (data/fm-backend-design-d7): explicit --backend, else
 # FM_BACKEND env, else config/backend, else runtime auto-detection, else
 # default tmux (fm_backend_name). fm_backend_validate_spawn refuses unknown or
@@ -1632,6 +1652,10 @@ case "$ARG3" in
     LAUNCH=$(launch_template "$HARNESS" "$KIND") || { echo "error: unknown harness '$HARNESS'; pass a raw launch command to use an unverified adapter" >&2; exit 1; }
     ;;
 esac
+
+if [ "$HARNESS" = opencode-v2 ] && [ "$V2_CAPABILITY_PROBED" -ne 1 ]; then
+  node "$FM_ROOT/bin/fm-opencode-v2-capability.mjs" "$FM_ROOT" >/dev/null || exit 1
+fi
 
 # muse and gemini are verified as CREWMATE/SCOUT adapters only. A secondmate is
 # a firstmate instance, so it needs a primary supervision protocol.

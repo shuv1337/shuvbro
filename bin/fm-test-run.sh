@@ -1315,7 +1315,7 @@ families_for_changed_path() {
       printf '%s\n' __script__:fm-session-lock-ancestry.test.sh
       printf '%s\n' __script__:fm-sessionstart-nudge.test.sh
       ;;
-    bin/fm-opencode-v2-launch.sh)
+    bin/fm-opencode-v2-launch.sh|bin/fm-opencode-v2-capability.mjs)
       printf '%s\n' __script__:fm-opencode-v2-launch.test.sh
       printf '%s\n' __script__:fm-busy-adapter-wiring.test.sh
       printf '%s\n' __script__:fm-opencode-v2-plugin.test.sh
