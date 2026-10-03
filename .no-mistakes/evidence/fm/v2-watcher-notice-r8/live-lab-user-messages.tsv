@@ -1,0 +1,34 @@
+msg_1011dde1b0010N7oa6WVY8hdqT	ses_efee22365ffeiICQN2ReFDFoha	4	unrelated work
+msg_1011dddef0018iVJOPZFbXqc39	ses_efee22395ffeWM3dx46IIaXkHU	4	unrelated work
+msg_1011ddce1001Y0hxZ0LSX45Y5T	ses_efee223c5ffePOvETSOJaSoPLk	4	unrelated work
+msg_862046dbff490e7baa23ea9452cf9fe2e80ba88e5550cab3c57d7cec63e4081e	ses_efee36113ffeLwv53q9cq6ZWnz	5	FIRSTMATE_OP: v1 session-start: Run `bin/fm-session-start.sh` now, exactly once, before executing any other i
+msg_1011ca695001PDP74tLwv5UUgY	ses_efee36113ffeLwv53q9cq6ZWnz	14	RUN: bin/fm-session-start.sh > /tmp/fm-v2-succ-live.vqHqTc/session-start.out 2>&1
+msg_1011caba00018VfoQBepl1irf9	ses_efee36113ffeLwv53q9cq6ZWnz	28	RUN: printf 'kind=scout\n' > state/lab.meta; printf 'working: started\n' > state/lab.status
+msg_941806b083bb32b45b6c8bd8702521ed6f901a3baddffbb4da6dfdcfba6d4e4b	ses_efee36113ffeLwv53q9cq6ZWnz	44	FIRSTMATE_OP: v1 watcher: WATCHER FIRED - drain queued wakes with bin/fm-wake-drain.sh and handle the reporte
+msg_201ffc72d3f341f753ec0e965f6286936de8c8f0599cff92f3e808d4d679471f	ses_efee36113ffeLwv53q9cq6ZWnz	60	FIRSTMATE_OP: v1 watcher: WATCHER FIRED - drain queued wakes with bin/fm-wake-drain.sh and handle the reporte
+msg_4f2c4c1c1c054127c43967ac6905bfee4fb796c50bb4290cf907d1f26f80d6c7	ses_efee36113ffeLwv53q9cq6ZWnz	76	FIRSTMATE_OP: v1 watcher: WATCHER FIRED - drain queued wakes with bin/fm-wake-drain.sh and handle the reporte
+msg_ecaf6f441c13f167abe0bc8b6b83aafddd0accb81a8e19ad56d99135f18ce8d9	ses_efee36113ffeLwv53q9cq6ZWnz	92	FIRSTMATE_OP: v1 watcher: WATCHER FIRED - drain queued wakes with bin/fm-wake-drain.sh and handle the reporte
+msg_e3fc5979fcaa451d51da93aea279309eb177e79794322bab210befdc9b7455cc	ses_efee36113ffeLwv53q9cq6ZWnz	108	FIRSTMATE_OP: v1 watcher: WATCHER FIRED - drain queued wakes with bin/fm-wake-drain.sh and handle the reporte
+msg_74b6b609bbd431cd16e3b644b1b13054b4791c7b0c4d68569070b1147114329e	ses_efee36113ffeLwv53q9cq6ZWnz	124	FIRSTMATE_OP: v1 watcher: WATCHER FIRED - drain queued wakes with bin/fm-wake-drain.sh and handle the reporte
+msg_a62c16a21559240036dfedb7f5f553399e56ca1a22a1dc74c8cc73d60bfdae25	ses_efee36113ffeLwv53q9cq6ZWnz	140	FIRSTMATE_OP: v1 watcher: WATCHER FIRED - drain queued wakes with bin/fm-wake-drain.sh and handle the reporte
+msg_f0366263a94a1e31cd85a7daf2a3e74cb57e363415dd1ef1b0b2e0071a5aac42	ses_efee36113ffeLwv53q9cq6ZWnz	156	FIRSTMATE_OP: v1 watcher: WATCHER FIRED - drain queued wakes with bin/fm-wake-drain.sh and handle the reporte
+msg_ddbb8a70e56ff12bb35b0b332b1e2006237fd2a9c6721bd992d141b4e82cae27	ses_efee36113ffeLwv53q9cq6ZWnz	172	FIRSTMATE_OP: v1 watcher: WATCHER FIRED - drain queued wakes with bin/fm-wake-drain.sh and handle the reporte
+msg_bb2539d9fa58ea2d614d69e633018caedf20aa23900e228c8015ca87c95c48b1	ses_efee36113ffeLwv53q9cq6ZWnz	188	FIRSTMATE_OP: v1 watcher: WATCHER FIRED - drain queued wakes with bin/fm-wake-drain.sh and handle the reporte
+msg_bc8f51a2c7cfa7f3034511f5ba2eb9b421ccf6372ffeae022d232c39df2bff7d	ses_efee36113ffeLwv53q9cq6ZWnz	204	FIRSTMATE_OP: v1 watcher: WATCHER FIRED - drain queued wakes with bin/fm-wake-drain.sh and handle the reporte
+msg_c1acc6cca8f64898e77bc403e71233e4a517cfa33465125b6929e54bd94213bd	ses_efee36113ffeLwv53q9cq6ZWnz	220	FIRSTMATE_OP: v1 watcher: WATCHER FIRED - drain queued wakes with bin/fm-wake-drain.sh and handle the reporte
+msg_1c41b55b93e44041602d1cfe1e1fb08a7271a1a488bbc4cd5849609e92a7045e	ses_efee36113ffeLwv53q9cq6ZWnz	236	FIRSTMATE_OP: v1 watcher: WATCHER FIRED - drain queued wakes with bin/fm-wake-drain.sh and handle the reporte
+msg_349296754d71f2d8e9b5ee84180c29544072b46eed4ff9aed8e33194f755b463	ses_efee36113ffeLwv53q9cq6ZWnz	252	FIRSTMATE_OP: v1 watcher: WATCHER FIRED - drain queued wakes with bin/fm-wake-drain.sh and handle the reporte
+msg_66b1004a5993a8f0e6b5e429340ad74650065b7c8648108431b42249ab17aeda	ses_efee36113ffeLwv53q9cq6ZWnz	268	FIRSTMATE_OP: v1 watcher: WATCHER FIRED - drain queued wakes with bin/fm-wake-drain.sh and handle the reporte
+msg_c70b95b9cd32e928f4da5b412b13ff39ea39a1be562f1493a7af10f5057c45e2	ses_efee36113ffeLwv53q9cq6ZWnz	284	FIRSTMATE_OP: v1 watcher: WATCHER FIRED - drain queued wakes with bin/fm-wake-drain.sh and handle the reporte
+msg_bb2cbd39398cbbd9e748996004b48531f6ab9eb3e5e533774ea31d8ae316d9d7	ses_efee36113ffeLwv53q9cq6ZWnz	300	FIRSTMATE_OP: v1 watcher: WATCHER FIRED - drain queued wakes with bin/fm-wake-drain.sh and handle the reporte
+msg_843a93ca8a93e5c03facfa07c01c205af68384806f709024dcba447ea4276ec1	ses_efee36113ffeLwv53q9cq6ZWnz	316	FIRSTMATE_OP: v1 watcher: WATCHER FIRED - drain queued wakes with bin/fm-wake-drain.sh and handle the reporte
+msg_f5b39c4a701b4f0e1558ddeb7795aa7ecbfa360d45faabbe242a0e771c396536	ses_efee36113ffeLwv53q9cq6ZWnz	332	FIRSTMATE_OP: v1 watcher: WATCHER FIRED - drain queued wakes with bin/fm-wake-drain.sh and handle the reporte
+msg_70a1e726e19588cf6c56a4d8f6d1344d77378beb1ff628d798f508417bdd5665	ses_efee36113ffeLwv53q9cq6ZWnz	348	FIRSTMATE_OP: v1 watcher: WATCHER FIRED - drain queued wakes with bin/fm-wake-drain.sh and handle the reporte
+msg_20ed44185a4328985f18054365eac98dbbfddab30b26b39532b1af9365e3f1fe	ses_efee36113ffeLwv53q9cq6ZWnz	365	FIRSTMATE_OP: v1 watcher: WATCHER FIRED - drain queued wakes with bin/fm-wake-drain.sh and handle the reporte
+msg_9fb828b50a05cd9c0fbd60e2d6170ad3ccc822df6264c4176c7d09475622877c	ses_efee36113ffeLwv53q9cq6ZWnz	381	FIRSTMATE_OP: v1 watcher: WATCHER FIRED - drain queued wakes with bin/fm-wake-drain.sh and handle the reporte
+msg_a6ae3f23288c3dbd1947ac1d3b63a8862473ac22ebcf0716887068531e060007	ses_efee36113ffeLwv53q9cq6ZWnz	397	FIRSTMATE_OP: v1 watcher: WATCHER FIRED - drain queued wakes with bin/fm-wake-drain.sh and handle the reporte
+msg_9e97ce3ba5ba535055003bdf95dc6704c08e1e001207a9477a36498ba4160ea3	ses_efee36113ffeLwv53q9cq6ZWnz	415	FIRSTMATE_OP: v1 session-start: Run `bin/fm-session-start.sh` now, exactly once, before executing any other i
+msg_1011e9f4f001IbqC5RLw91ZDhP	ses_efee36113ffeLwv53q9cq6ZWnz	424	RUN: bin/fm-session-start.sh > /tmp/fm-v2-succ-live.vqHqTc/session-start.out 2>&1
+msg_e615b5abc54feb09677b3dab463b0e3a885472d4b67e478e8d7057b4b951a40a	ses_efee36113ffeLwv53q9cq6ZWnz	438	FIRSTMATE_OP: v1 watcher: WATCHER FIRED - drain queued wakes with bin/fm-wake-drain.sh and handle the reporte
+msg_6b4704c1df32c4deb7c55ef8c22a537036c79474f55e833f821f48d6dd03f785	ses_efee36113ffeLwv53q9cq6ZWnz	452	FIRSTMATE_OP: v1 watcher: WATCHER FIRED - drain queued wakes with bin/fm-wake-drain.sh and handle the reporte
+msg_7f1fec9621a8d059ddd43f7a3f45a149de99507c129cf96ce4000c98d991a107	ses_efee36113ffeLwv53q9cq6ZWnz	468	FIRSTMATE_OP: v1 watcher: WATCHER FIRED - drain queued wakes with bin/fm-wake-drain.sh and handle the reporte

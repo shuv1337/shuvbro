@@ -1,0 +1,6 @@
+== --notice-transient
+transient unverifiable successor: private diagnostic retained, no failure prompt, confirmed wake delivered exactly once
+exit=0
+== --notice-persistent
+persistent unverifiable successor: private diagnostic retained, one failure prompt at 30s, confirmed wake delivered exactly once
+exit=0

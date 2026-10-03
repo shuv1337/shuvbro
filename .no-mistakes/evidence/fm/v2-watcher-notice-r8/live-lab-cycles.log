@@ -1,0 +1,19 @@
+cycle 1: 1 1 1 0 1 1 0 0
+cycle 2: 1 1 1 0 1 1 0 0
+cycle 3: 1 1 1 0 1 2 0 0
+cycle 4: 1 1 1 0 1 1 0 0
+cycle 5: 1 1 1 0 1 2 0 0
+cycle 6: 1 1 1 0 1 1 0 0
+cycle 7: 1 1 1 0 1 2 0 0
+cycle 8: 1 1 1 0 1 1 0 0
+cycle 9: 1 1 1 0 1 2 0 0
+cycle 10: 1 1 1 0 1 1 0 0
+after watcher TERM: 1 1 1 0 1 1 0 0
+after watcher KILL: 1 0 0 0 1 2 0 0
+after arm TERM: 1 0 0 0 1 1 0 0
+after arm KILL: 1 0 0 0 1 1 0 0
+with other sessions: 1 0 0 0 1 1 0 0
+after server package reload: 1 0 0 0 1 1 0 0
+after TUI plugin reload: 1 0 0 0 1 2 0 0
+flush after TUI plugin reload: 1 0 0 0 1 1 0 0
+after relaunch: 1 0 0 0 1 1 0 0
