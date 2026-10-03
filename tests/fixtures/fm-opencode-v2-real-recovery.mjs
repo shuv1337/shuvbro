@@ -26,6 +26,9 @@ case "\${1:-}" in
   *) probe= ;;
 esac
 if [ -n "$probe" ]; then
+  if [ "$probe" = needed ] && [ "\${FM_V2_SERVICE_URL:-}" != http://127.0.0.1:12345 ]; then
+    echo needed wrong-endpoint >> '${state}/env-probes'; exit 98
+  fi
   if [ "\${OPENCODE_PASSWORD+x}" = x ] || [ "\${OPENCODE_SERVER_PASSWORD+x}" = x ]; then
     echo "$probe credential-present" >> '${state}/env-probes'; exit 99
   fi
@@ -40,6 +43,7 @@ process.env.FM_HOME = home; process.env.FM_ROOT_OVERRIDE = root; process.env.FM_
 process.env.FM_V2_REGISTRY_NAMESPACE += "-real";
 process.env.OPENCODE_PASSWORD = "sentinel-not-a-real-credential";
 process.env.OPENCODE_SERVER_PASSWORD = "second-sentinel-not-a-real-credential";
+process.env.FM_V2_SERVICE_URL = "http://127.0.0.1:9999"; // inherited routing is not the frozen binding
 const me = owner.identity(process.pid);
 const record = { version: 1, sessionID: "ses_real_recovery", claimID: "c".repeat(48), ...paths, ownerPID: me.pid, ownerStart: me.start, hostBootID: me.boot, servicePID: me.pid, serviceStart: me.start, serviceURL: "http://127.0.0.1:12345", lifecycle: "active" };
 process.env.OPENCODE_SESSION_ID = record.sessionID;
@@ -69,7 +73,8 @@ echo safe >> '${state}/check-probes'
   const { spawnSync } = await import("node:child_process");
   const registration = spawnSync(root + "/bin/fm-check-register.sh", ["probe"], { env: process.env, encoding: "utf8" });
   assert.equal(registration.status, 0, registration.stderr);
-  assert.equal(await supervisionNeeded(paths), true);
+  await assert.rejects(supervisionNeeded(paths), /invalid frozen service endpoint/);
+  assert.equal(await supervisionNeeded(record), true);
   const admitted = [], prepared = [], failures = [];
   const journal = createAdmissionJournal(paths, record.sessionID, async input => {
     const value = owner.readPrivate(journalDir + "/" + input.id + ".json");
@@ -83,7 +88,7 @@ echo safe >> '${state}/check-probes'
     const value = journal.prepare(...args);
     prepared.push({ value, token: read(".watcher-down") }); return value;
   } };
-  const options = { owns: () => true, needs: () => supervisionNeeded(paths), admission, processIdentity: owner.identity, failure: reason => failures.push(reason) };
+  const options = { owns: () => true, needs: () => supervisionNeeded(record), admission, processIdentity: owner.identity, failure: reason => failures.push(reason) };
   coordinator = createWatchArmCoordinator(paths, () => {}, options);
   assert.equal(await coordinator.ensureArmed(record.sessionID), "armed");
   const first = read(".watch.lock/pid"); verifyProcessEnvironment(first);

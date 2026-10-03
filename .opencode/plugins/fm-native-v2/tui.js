@@ -1,4 +1,4 @@
-import { identity, schema, publish, readRegistration, canonical, live, markerKey, writePrivate, registeredService } from "../../../bin/fm-opencode-v2-owner.mjs";
+import { identity, schema, publish, readRegistration, canonical, live, markerKey, writePrivate, registeredService, serviceURL } from "../../../bin/fm-opencode-v2-owner.mjs";
 import { createWatchArmCoordinator } from "../lib/fm-watch-arm-v2.js";
 import { createAdmissionJournal } from "./admission.js";
 import { bindingRPC } from "./rpc.js";
@@ -8,16 +8,16 @@ import { existsSync } from "node:fs";
 
 const slot = Symbol.for("firstmate.native.v2.tui.coordinator");
 
-export async function supervisionNeeded(paths, env = helperEnvironment(paths)) {
-  if (existsSync(`${paths.state}/.afk`)) return false;
-  const result = await runProcess("bash", ["-c", '. "$1/bin/fm-supervision-lib.sh" || exit 2; fm_supervision_status "$2" || exit 2; if [ "$FM_SUP_NEEDED" = true ] || [ "$FM_SUP_QUEUE_PENDING" = true ]; then echo needed; else echo idle; fi', "fm-native-v2", paths.root, paths.state], { cwd: paths.root, env, timeout: 10000 });
+export async function supervisionNeeded(record, env = helperEnvironment(record)) {
+  if (existsSync(`${record.state}/.afk`)) return false;
+  const result = await runProcess("bash", ["-c", '. "$1/bin/fm-supervision-lib.sh" || exit 2; fm_supervision_status "$2" || exit 2; if [ "$FM_SUP_NEEDED" = true ] || [ "$FM_SUP_QUEUE_PENDING" = true ]; then echo needed; else echo idle; fi', "fm-native-v2", record.root, record.state], { cwd: record.root, env, timeout: 10000 });
   if (result.code !== 0 || !["needed", "idle"].includes(result.stdout.trim())) throw new Error("cannot evaluate canonical native supervision requirement");
   return result.stdout.trim() === "needed";
 }
 
 export function helperEnvironment(record) {
   const env = { ...process.env, FM_HOME: record.home, FM_ROOT_OVERRIDE: record.root, FM_STATE_OVERRIDE: record.state, FM_CONFIG_OVERRIDE: record.config,
-    FM_V2_REGISTRY_NAMESPACE: process.env.FM_V2_REGISTRY_NAMESPACE || "default", FM_V2_SERVICE_URL: record.serviceURL };
+    FM_V2_REGISTRY_NAMESPACE: process.env.FM_V2_REGISTRY_NAMESPACE || "default", FM_V2_SERVICE_URL: serviceURL(record.serviceURL) };
   for (const key of ["FM_V2_ACTIVATION", "OPENCODE_PASSWORD", "OPENCODE_SERVER_PASSWORD", "OPENCODE_SESSION_ID"]) delete env[key];
   return env;
 }
@@ -159,7 +159,7 @@ export default { id: "firstmate.native.v2", async setup(ctx) {
     catch { return false; }
   };
   const journal = createAdmissionJournal(paths, record.sessionID, input => ctx.client.session.prompt(input, { signal: AbortSignal.any([abort.signal, AbortSignal.timeout(10000)]) }), failure, { valid: validClaim, signal: abort.signal });
-   const coordinatorOptions = { owns, admission: journal, failure, needs: () => supervisionNeeded(paths, helperEnvironment(record)), processIdentity: identity };
+   const coordinatorOptions = { owns, admission: journal, failure, needs: () => supervisionNeeded(record), processIdentity: identity };
    coordinator = createWatchArmCoordinator(paths, () => {}, coordinatorOptions);
   globalThis[slot] = coordinator;
   const env = { ...helperEnvironment(record), OPENCODE_SESSION_ID: record.sessionID };
