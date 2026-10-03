@@ -286,6 +286,9 @@ async function tuiRole([codeRoot, socketFile, specFile, outFile]) {
       },
     },
   };
+  // An activated primary carries the service credential in the owner's own
+  // environment (bin/fm-opencode-v2-primary.sh exports OPENCODE_PASSWORD).
+  for (const [key, value] of Object.entries(spec.ownerEnv || {})) process.env[key] = value;
   if (!spec.inactive) process.env.FM_V2_ACTIVATION = JSON.stringify(activation);
   else delete process.env.FM_V2_ACTIVATION;
   if (spec.failureFile !== false) {

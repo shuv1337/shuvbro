@@ -446,6 +446,78 @@ test_abrupt_owner_exit_retires_and_stops_the_watcher() {
   pass "tui: an owner that exits without its disposer retires its claim and its watcher stops"
 }
 
+# F4-B1 on the real helpers: an idle watcher killed with SIGTERM (empty
+# queue) leaves a downtime episode the real ordinary re-arm resurfaces with no
+# rows (announced:downtime:G, never a handling marker). The owner must keep a
+# live successor, deliver that recovery presentation exactly once without a
+# preparation-failure loop, and still admit the next real wake exactly once.
+test_idle_watcher_term_keeps_a_successor_and_delivers_the_next_wake() {
+  v2_require_native idle-watcher-term || return $?
+  tui_case idle-watcher-term 1
+  local out="$CASE/out.json" steps state="$HOME_DIR/state"
+  # shellcheck disable=SC2016 # expanded by the lead model shell
+  steps=$(jq -nc --argjson a "$(owned_and_armed "$(lock_step)")" --arg s "$state" --arg c "$CASE" --arg st "$state/alpha.status" \
+    '$a + [
+      {do: "shell", command: ("cat " + $s + "/.watch.lock/pid | tee " + $c + "/old.pid")},
+      {do: "shell", command: ("kill -TERM \"$(cat " + $c + "/old.pid)\"")},
+      {do: "wait", until: "shell-ok", timeoutMs: 15000, command: ("p=$(cat " + $s + "/.watch.lock/pid 2>/dev/null) && [ \"$p\" != \"$(cat " + $c + "/old.pid)\" ] && kill -0 \"$p\"")},
+      {do: "wait", until: "admitted", match: "rearm-resurface", timeoutMs: 20000},
+      {do: "shell", command: ("cat " + $s + "/.watch.lock/pid | tee " + $c + "/succ.pid")},
+      {do: "sleep", ms: 8000},
+      {do: "shell", command: ("p=$(cat " + $s + "/.watch.lock/pid 2>/dev/null) && [ \"$p\" = \"$(cat " + $c + "/succ.pid)\" ] && kill -0 \"$p\" && echo stable; cat " + $s + "/.watcher-down 2>/dev/null")},
+      {do: "write", path: $st, text: "done: alpha finished\n"},
+      {do: "wait", until: "admitted", match: "alpha", timeoutMs: 20000}, {do: "sleep", ms: 1500}]')
+  v2_tui "$CASE" "$(spec "$(jq -nc --argjson s "$steps" '{steps: $s}')")" "$out"
+  step_ok "$out" 3 "positive control: the lead did not arm"
+  jq -e '.steps[4].stdout | test("^[0-9]+")' "$out" >/dev/null || fail "fixture: no idle watcher pid before SIGTERM: $(jq -c '.steps[4]' "$out")"
+  step_ok "$out" 6 "no live successor watcher replaced the SIGTERMed idle watcher within 15 s"
+  step_ok "$out" 7 "the no-row downtime resurface was never admitted after the idle watcher died"
+  jq -e '.steps[10].stdout | test("stable")' "$out" >/dev/null \
+    || fail "the successor watcher did not stay alive (retire/re-arm loop): $(jq -c '.steps[10]' "$out")"
+  [ "$(jq '[.failures[] | select(test("neither durable wake rows nor recovery generation|could not deliver an actionable wake"))] | length' "$out")" = 0 ] \
+    || fail "the no-row resurface failed preparation: $(jq -c '[.failures[] | select(test("recovery generation|actionable wake"))] | .[0:3]' "$out")"
+  [ "$(jq '[.admitted[] | select(.text | test("rearm-resurface"))] | length' "$out")" = 1 ] \
+    || fail "expected exactly one no-row resurface admission: $(jq -c '[.admitted[] | .text[0:80]]' "$out")"
+  step_ok "$out" 12 "after the idle watcher's recovery the next real wake was not admitted"
+  [ "$(jq '[.admitted[] | select(.text | test("alpha"))] | length' "$out")" = 1 ] \
+    || fail "the next real wake was not admitted exactly once: $(jq -c '[.admitted[] | .text[0:80]]' "$out")"
+  pass "tui: an idle watcher SIGTERM keeps one live successor, delivers the no-row resurface once and the next real wake once"
+}
+
+# F4-M1: the owner's service credential never reaches the arm, the watcher or a
+# registered custom check. Positive control: a canary set beside it in the
+# owner's environment does reach them, proving the inheritance path is tested.
+test_service_credential_never_reaches_watcher_tree() {
+  v2_require_native credential-scope || return $?
+  tui_case credential-scope 1
+  local out="$CASE/out.json" steps state="$HOME_DIR/state" secret canary
+  secret="fixture-secret-$RANDOM$RANDOM" canary="fixture-canary-$RANDOM"
+  printf '#!/usr/bin/env bash\ntr "\\0" "\\n" < /proc/$$/environ > %q\n' "$CASE/check.env" > "$state/envprobe.check.sh"
+  chmod 700 "$state/envprobe.check.sh"
+  FM_HOME=$HOME_DIR FM_STATE_OVERRIDE=$state FM_CONFIG_OVERRIDE=$HOME_DIR/config bash "$V2_CODE_ROOT/bin/fm-check-register.sh" envprobe >/dev/null \
+    || fail "fixture: could not register the probe check"
+  steps=$(jq -nc --argjson a "$(owned_and_armed "$(lock_step)")" --arg s "$state" --arg c "$CASE/check.env" \
+    '$a + [{do: "shell", command: ("w=$(cat " + $s + "/.watch.lock/pid); tr \"\\0\" \"\\n\" < /proc/$w/environ; a=$(ps -o ppid= -p $w | tr -d \" \"); echo ARM=$(tr \"\\0\" \" \" < /proc/$a/cmdline); tr \"\\0\" \"\\n\" < /proc/$a/environ | sed \"s/^/ARMENV:/\"")},
+      {do: "wait", until: "file", path: $c, timeoutMs: 20000}]')
+  FM_CHECK_INTERVAL=1 v2_tui "$CASE" "$(spec "$(jq -nc --argjson s "$steps" --arg p "$secret" --arg k "$canary" '{steps: $s, ownerEnv: {OPENCODE_PASSWORD: $p, OPENCODE_SERVER_PASSWORD: $p, FM_V2_TEST_CANARY: $k}}')")" "$out"
+  step_ok "$out" 3 "positive control: the lead did not arm"
+  step_ok "$out" 5 "fixture: the registered custom check never ran"
+  jq -e '.steps[4].stdout | test("ARM=.*fm-watch-arm.sh")' "$out" >/dev/null || fail "fixture: the watcher's parent is not the arm: $(jq -c '.steps[4].stdout[0:300]' "$out")"
+  jq -e --arg k "$canary" '.steps[4].stdout | test("(^|\n)FM_V2_TEST_CANARY=" + $k) and test("ARMENV:FM_V2_TEST_CANARY=" + $k)' "$out" >/dev/null \
+    || fail "positive control: the owner's environment did not reach the watcher and arm"
+  grep -qx "FM_V2_TEST_CANARY=$canary" "$CASE/check.env" || fail "positive control: the owner's environment did not reach the custom check"
+  # Report every surface that carries the credential (names only, value redacted).
+  local leaks=() names
+  names=$(jq -r '.steps[4].stdout' "$out" | grep -v '^ARMENV:' | grep -F "$secret" | sed 's/=.*//' | sort -u | tr '\n' ' ')
+  [ -z "$names" ] || leaks+=("watcher: $names")
+  names=$(jq -r '.steps[4].stdout' "$out" | sed -n 's/^ARMENV://p' | grep -F "$secret" | sed 's/=.*//' | sort -u | tr '\n' ' ')
+  [ -z "$names" ] || leaks+=("arm: $names")
+  names=$(grep -F "$secret" "$CASE/check.env" | sed 's/=.*//' | sort -u | tr '\n' ' ')
+  [ -z "$names" ] || leaks+=("custom check: $names")
+  [ "${#leaks[@]}" = 0 ] || fail "the service credential reached the watcher tree (values redacted): $(printf '[%s] ' "${leaks[@]}")"
+  pass "tui: the owner's service credential reaches neither the arm, the watcher nor a custom check (canary does)"
+}
+
 # Two homes on one service: a durable wake in home B reaches only lead B, and
 # lead A ignores B's session events.
 test_two_homes_route_wakes_to_their_own_lead() {
@@ -577,6 +649,8 @@ v2_run_cases \
   test_rejected_admissions_retry_one_id \
   test_owner_exit_then_next_owner_represents_the_wake \
   test_abrupt_owner_exit_retires_and_stops_the_watcher \
+  test_idle_watcher_term_keeps_a_successor_and_delivers_the_next_wake \
+  test_service_credential_never_reaches_watcher_tree \
   test_two_homes_route_wakes_to_their_own_lead \
   test_pending_admission_retires_after_real_drain_and_ack \
   test_worker_child_event_isolation
