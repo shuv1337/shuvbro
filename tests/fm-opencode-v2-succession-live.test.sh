@@ -29,7 +29,8 @@
 #   - session start makes native .lock == the activated TUI process PID
 #   - first arm: one watcher, no turn-end-guard prompt, first wake handled once
 #   - steady succession: each wake one admitted message ID and one canonical ack
-#   - watcher TERM/KILL and arm TERM recover; next wake handled once
+#   - watcher TERM/KILL and arm TERM recover: an idle watcher death presents
+#     exactly one no-row resurface; next wake handled once           [F4-B1]
 #   - arm SIGKILL with a surviving watcher does not strand the next wake [D5, D8]
 #   - subdirectory, unrelated and child sessions never own or receive wakes
 #   - server package reload: TUI process, claim and watcher keep their lifetimes
@@ -265,7 +266,12 @@ journal_ids() {
     jq -r 'select(.phase == "admitted" or .phase == "acknowledged") | .id' "$f" 2>/dev/null
   done
 }
-acks() { local n; n=$(grep -c '^acked ' "$LAB/handled.log" 2>/dev/null) || true; echo "${n:-0}"; }
+# Row-bearing canonical acks (seq > 0) count handled queued wakes. A no-row
+# recovery presentation (rearm-resurface after a watcher death) acks
+# through 0 under its own recovery generation and is counted separately.
+acks() { local n; n=$(grep -c '^acked [1-9]' "$LAB/handled.log" 2>/dev/null) || true; echo "${n:-0}"; }
+resurfaces() { awk '$1 == "acked" && $2 == 0 {print $3}' "$LAB/handled.log" 2>/dev/null | sort -u | count; }
+resurfaces_above() { [ "$(resurfaces)" -gt "$1" ]; }
 watchers() { pgrep -f "^bash $PRIMARY/bin/fm-watch.sh" | count; }
 arms() { pgrep -f "$PRIMARY/bin/fm-watch-arm.sh" | count; }
 watch_pid() { cat "$PRIMARY/state/.watch.lock/pid" 2>/dev/null || echo none; }
@@ -375,11 +381,24 @@ for pair in watcher:TERM watcher:KILL arm:TERM; do
   what=${pair%%:*} sig=${pair#*:}
   before=$(watch_pid)
   if [ "$what" = watcher ]; then victim=$before; else victim=$(pgrep -f "$PRIMARY/bin/fm-watch-arm.sh" | head -1); fi
+  r0=$(resurfaces)
   kill -"$sig" "$victim" 2>/dev/null
-  if wait_until 60 replaced "$before" && wake_ok "after $what $sig"; then
-    pass "the $what SIG$sig mid-idle recovers and the next wake is handled once"
+  # An idle watcher's death leaves a row-less downtime episode: the owner
+  # must present it exactly once (one generation) and keep one successor
+  # [F4-B1]. An arm TERM retires its own watcher and may resurface at most once.
+  recovered=1
+  if [ "$what" = watcher ]; then
+    wait_until 60 resurfaces_above "$r0" || recovered=0
+  fi
+  wait_until 60 replaced "$before" || recovered=0
+  sleep 4   # absence window: a second generation or retire/re-arm loop would show here
+  got=$(( $(resurfaces) - r0 ))
+  if [ "$what" = watcher ]; then [ "$got" = 1 ] || recovered=0; else [ "$got" -le 1 ] || recovered=0; fi
+  one_supervisor || recovered=0
+  if [ "$recovered" = 1 ] && wake_ok "after $what $sig"; then
+    pass "the $what SIG$sig mid-idle recovers ($got no-row resurface) and the next wake is handled once"
   else
-    live_fail "after $what SIG$sig: watchers=$(watchers) arms=$(arms) $(tail -1 "$LAB/cycles.log")"
+    live_fail "[F4-B1] after $what SIG$sig: resurfaces=$got watchers=$(watchers) arms=$(arms) $(tail -1 "$LAB/cycles.log")"
   fi
 done
 victim=$(pgrep -f "$PRIMARY/bin/fm-watch-arm.sh" | head -1)
@@ -394,6 +413,9 @@ else
 fi
 
 # --- other root and child sessions --------------------------------------------------
+# Start the absence window from a settled watcher (same pid across a poll).
+settled() { local p; p=$(watch_pid); one_supervisor && sleep 3 && [ "$(watch_pid)" = "$p" ]; }
+wait_until 20 settled || live_fail "supervision never settled before the other-session window: watchers=$(watchers) arms=$(arms)"
 before=$(watch_pid)
 SUB=$(create_session "$PRIMARY/docs/sub")
 UNRELATED=$(create_session "$PRIMARY")
