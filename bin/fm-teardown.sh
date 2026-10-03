@@ -223,6 +223,15 @@
 set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+retire_native_worker_package() {  # <worktree> <state> <task>
+  local dir="$1/.opencode/plugins/fm-worker-v2" state
+  state=$(cd "$2" 2>/dev/null && pwd -P) || return 0
+  [ -d "$dir" ] && [ ! -L "$dir" ] && [ ! -L "$dir/.fm-owned.json" ] || return 0
+  jq -e --arg state "$state" --arg id "$3" '.state==$state and .id==$id' "$dir/.fm-owned.json" >/dev/null 2>&1 || return 0
+  rm -f "$dir/server.js" "$dir/package.json" "$dir/.fm-owned.json"
+  rmdir "$dir" 2>/dev/null || true
+}
 FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
@@ -924,6 +933,11 @@ ORCA_PATH_MATCH_VERIFIED=0
 CLEANUP_RECOVERY=$TEARDOWN_CLEANUP_RECOVERY
 
 KIND=$TEARDOWN_META_KIND
+if [ "$(fm_meta_get "$META" harness)" = opencode-v2 ]; then
+  v2_action=teardown
+  [ "$FORCE" != --force ] || v2_action=discard
+  node "$SCRIPT_DIR/fm-opencode-v2-session.mjs" "$v2_action" "$STATE/$ID.opencode-v2-session.json" "$WT" >/dev/null || exit 1
+fi
 EXPECTED_TREEHOUSE_PROJECT_LOCK=
 if [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ] \
    && is_treehouse_pool_slot "$PROJ" "$WT"; then
@@ -2695,6 +2709,11 @@ validate_firstmate_home_children_removal() {
     validate_pr_poll_cleanup "$sub_state" "$child_id" || return 1
     child_wt=$(meta_value "$child_meta" worktree)
     child_kind=$(meta_value "$child_meta" kind)
+    if [ "$(meta_value "$child_meta" harness)" = opencode-v2 ]; then
+      # Read-only preflight: forced cleanup may cancel a verified active child,
+      # but only after every remaining lock/path validation has passed.
+      node "$SCRIPT_DIR/fm-opencode-v2-session.mjs" status "$sub_state/$child_id.opencode-v2-session.json" "$child_wt" >/dev/null || return 1
+    fi
     [ -n "$child_kind" ] || child_kind=ship
     child_backend=$(fm_backend_of_meta "$child_meta")
     if [ "$child_kind" = secondmate ]; then
@@ -2707,11 +2726,13 @@ validate_firstmate_home_children_removal() {
       if [ -n "$child_wt" ] && [ -e "$child_wt" ]; then
         child_proj=$(meta_value "$child_meta" project)
         validate_child_worktree_for_removal "$child_wt" "$child_proj" >/dev/null || return 1
+        retire_native_worker_package "$child_wt" "$sub_state" "$child_id"
         require_orca_worktree_path_match "$child_orca_worktree_id" "$child_wt" || return 1
       fi
     elif [ -n "$child_wt" ] && [ -e "$child_wt" ]; then
       child_proj=$(meta_value "$child_meta" project)
       validate_child_worktree_for_removal "$child_wt" "$child_proj" >/dev/null || return 1
+      retire_native_worker_package "$child_wt" "$sub_state" "$child_id"
     fi
   done
 }
@@ -2758,10 +2779,6 @@ teardown_herdr_require_prerequisites() {  # <task-id>
       return 1
     fi
   done
-  if ! declare -F fm_lock_try_acquire >/dev/null 2>&1; then
-    # shellcheck source=bin/fm-wake-lib.sh
-    . "$SCRIPT_DIR/fm-wake-lib.sh"
-  fi
   if ! declare -F fm_lock_try_acquire >/dev/null 2>&1 \
     || ! declare -F fm_lock_release >/dev/null 2>&1; then
     echo "error: herdr teardown lock machinery is unavailable for $task_id; nothing was changed - restore the lock support and rerun teardown" >&2
@@ -2914,6 +2931,9 @@ cleanup_firstmate_home_children() {
         "$child_wt/.opencode/plugins/fm-busy-state.js" \
         "$child_wt/.fm-grok-turnend" "$child_wt/.fm-kimi-turnend"
       if [ -n "$child_proj" ] && [ -d "$child_proj" ] && command -v treehouse >/dev/null 2>&1; then
+        if [ "$(fm_meta_get "$sub_state/$child_id.meta" harness)" = opencode-v2 ]; then
+          node "$SCRIPT_DIR/fm-opencode-v2-session.mjs" discard "$sub_state/$child_id.opencode-v2-session.json" "$child_wt" >/dev/null || return 1
+        fi
         if teardown_treehouse_return "$child_wt" "$child_proj" "child worktree"; then
           :
         else
@@ -2941,7 +2961,7 @@ cleanup_firstmate_home_children() {
       "$sub_state/$child_id.pi-ext.ts" "$sub_state/$child_id.omp-ext.ts" \
       "$sub_state/$child_id.grok-turnend-token" "$sub_state/$child_id.kimi-turnend-token" \
       "$sub_state/$child_id.muse-session" "$sub_state/$child_id.muse-session-current" \
-      "$sub_state/$child_id.cursor-session" "$sub_state/$child_id.reconcile-nudged" \
+      "$sub_state/$child_id.cursor-session" "$sub_state/$child_id.opencode-v2-session.json" "$sub_state/$child_id.reconcile-nudged" \
       "$sub_state/.$child_id.branch-outcome-index"
   done
 }
@@ -3195,6 +3215,7 @@ fi
 
 # Best-effort: drop the local task branch so the shared repo does not accumulate refs.
 if [ "$BACKEND" = orca ] && [ "$KIND" != secondmate ]; then
+  retire_native_worker_package "$WT" "$STATE" "$ID"
   if [ "$ORCA_PATH_MATCH_VERIFIED" != 1 ]; then
     require_orca_worktree_path_match_if_present "$ORCA_WORKTREE_ID" "$WT" || exit 1
     ORCA_PATH_MATCH_VERIFIED=1
@@ -3211,8 +3232,12 @@ if [ "$BACKEND" = orca ] && [ "$KIND" != secondmate ]; then
       "$WT/.fm-grok-turnend" "$WT/.fm-kimi-turnend"
   fi
   [ -z "$T_ORCA" ] || fm_backend_kill "$BACKEND" "$T" "$(meta_value "$META" zellij_tab_id)" "fm-$ID" 2>/dev/null || true
+  if [ "$(fm_meta_get "$META" harness)" = opencode-v2 ]; then
+    node "$SCRIPT_DIR/fm-opencode-v2-session.mjs" "$v2_action" "$STATE/$ID.opencode-v2-session.json" "$WT" >/dev/null || exit 1
+  fi
   fm_backend_remove_worktree "$BACKEND" "$ORCA_WORKTREE_ID"
 elif [ -d "$WT" ] && [ "$KIND" != secondmate ]; then
+  retire_native_worker_package "$WT" "$STATE" "$ID"
   branch=$(git -C "$WT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo HEAD)
   if [ "$branch" != "HEAD" ]; then
     if git -C "$WT" checkout --detach -q 2>/dev/null; then
@@ -3229,6 +3254,9 @@ elif [ -d "$WT" ] && [ "$KIND" != secondmate ]; then
   post_lock_cleanup_check=
   if [ "$FORCE" != "--force" ] && [ "$KIND" != scout ] && [ "$KIND" != secondmate ]; then
     post_lock_cleanup_check=validate_worktree_teardown_safety
+  fi
+  if [ "$(fm_meta_get "$META" harness)" = opencode-v2 ]; then
+    node "$SCRIPT_DIR/fm-opencode-v2-session.mjs" "$v2_action" "$STATE/$ID.opencode-v2-session.json" "$WT" >/dev/null || exit 1
   fi
   teardown_treehouse_return "$WT" "$PROJ" "worktree" "$post_lock_cleanup_check" || {
     echo "error: treehouse return failed for worktree $WT; teardown aborted" >&2
@@ -3345,7 +3373,7 @@ status_retire_presentation_task "$STATE" "$ID" || exit 1
 rm -f "$STATE/$ID.turn-ended" "$STATE/$ID.progress" \
   "$STATE/$ID.pi-ext.ts" "$STATE/$ID.omp-ext.ts" "$STATE/$ID.grok-turnend-token" \
   "$STATE/$ID.kimi-turnend-token" "$STATE/$ID.muse-session" \
-  "$STATE/$ID.muse-session-current" "$STATE/$ID.cursor-session" \
+  "$STATE/$ID.muse-session-current" "$STATE/$ID.cursor-session" "$STATE/$ID.opencode-v2-session.json" \
   "$STATE/$ID.control-relaunch" "$STATE/$ID.control-relaunch.meta-prior" \
   "$STATE/$ID.control-relaunch.brief-prior" "$STATE/$ID.control-relaunch.note" \
   "$STATE/$ID.reconcile-nudged" "$STATE/$ID.gemini-settings.json" \

@@ -234,7 +234,7 @@ drive_oc_plugin_v2() {
 import { pathToFileURL } from "node:url";
 const spec = JSON.parse(process.argv[2]);
 const mod = await import(pathToFileURL(process.env.PLUGIN_PATH).href);
-if (!mod.default || typeof mod.default.setup !== "function") {
+if (typeof mod.setupBusyStateV2 !== "function") {
   throw new Error("generated plugin missing V2 setup");
 }
 const queue = [];
@@ -268,7 +268,7 @@ const ctx = {
     },
   },
 };
-const cleanup = await mod.default.setup(ctx);
+const cleanup = await mod.setupBusyStateV2(ctx);
 await new Promise((resolve) => setTimeout(resolve, 30));
 for (const event of spec.events) {
   queue.push(event);
@@ -290,6 +290,7 @@ test_opencode_v2_plugin_scopes_to_this_location() {
   state="$HOME_DIR/state"
   plugin="$WT_DIR/.opencode/plugins/fm-busy-state.js"
   assert_present "$plugin" "opencode spawn did not write the busy-state plugin"
+  printf '%s\n' '{"version":1,"sessionID":"ses_worker"}' > "$state/$id.opencode-v2-session.json"
   link="$TMP_ROOT/oc-v2-scope-link"
   ln -s "$WT_DIR" "$link"
 
@@ -322,6 +323,7 @@ test_opencode_v2_plugin_rejects_child_session() {
   state="$HOME_DIR/state"
   plugin="$WT_DIR/.opencode/plugins/fm-busy-state.js"
   rm -f "$state/$id.turn-ended"
+  printf '%s\n' '{"version":1,"sessionID":"ses_worker"}' > "$state/$id.opencode-v2-session.json"
 
   out=$(drive_oc_plugin_v2 "$plugin" "$(jq -nc --arg dir "$WT_DIR" '{
     directory: $dir,
@@ -533,6 +535,24 @@ test_opencode_v2_is_refused_as_a_positional_secondmate() {
   pass "opencode-v2 is refused as a positional secondmate before any worker is created"
 }
 
+test_opencode_v2_capability_refuses_before_dispatch() {
+  local rec id=busy-v2-probe out
+  rec=$(make_spawn_case v2-probe opencode "$id")
+  read_case_record "$rec"
+  cat > "$FAKEBIN_DIR/shuvcode" <<'SH'
+#!/bin/bash
+[ "$1" = --version ] || exit 99
+echo 'shuvcode v1.0.0'
+SH
+  chmod +x "$FAKEBIN_DIR/shuvcode"
+  out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$id" "$PROJ_DIR" opencode-v2) && fail "unqualified V2 target dispatched: $out"
+  assert_contains "$out" 'unqualified target' 'V2 refusal must name the unsupported installed build'
+  assert_absent "$HOME_DIR/state/.spawn-$id.lock" 'probe must precede the task runtime lock'
+  assert_absent "$HOME_DIR/state/$id.meta" 'probe must precede task metadata'
+  assert_absent "$HOME_DIR/state/$id.busy-gen" 'probe must precede execution wiring'
+  pass 'unqualified V2 target refuses before task runtime state or isolated-copy acquisition'
+}
+
 test_kimi_and_grok_install_no_unverified_wiring() {
   local state out
   state="$TMP_ROOT/gates/state"
@@ -562,6 +582,7 @@ test_gemini_hooks_stale_incarnation_harmless
 test_raw_gemini_launch_has_no_semantic_wiring
 test_gemini_is_refused_as_a_secondmate
 test_opencode_v2_is_refused_as_a_positional_secondmate
+test_opencode_v2_capability_refuses_before_dispatch
 test_codex_unverified_until_a_semantic_source_exists
 
 echo "all fm-busy-adapter-wiring tests passed"

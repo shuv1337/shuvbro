@@ -1,16 +1,7 @@
 import { spawn } from "node:child_process";
 import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
-import { pluginRoot, runProcess as runProcessStrict } from "./lib/fm-plugin-common.js";
-import { createSessionBinder } from "./lib/fm-session-bind-v2.js";
-import {
-  definePlugin,
-  eventSessionID,
-  eventType,
-  isIdleEvent,
-  promptQueued,
-  subscribeEvents,
-} from "./lib/fm-plugin-v2.js";
+import { definePlugin } from "./lib/fm-plugin-v2.js";
 
 const handledSessions = new Set();
 
@@ -69,58 +60,9 @@ export const FmPrimarySessionstartNudge = async ({ client, directory, worktree }
   };
 };
 
-const nudgedSessions = new Set();
-
-function nudgeKey(root, sessionID) {
-  return `${root}\0${sessionID}`;
-}
-
-async function setupSessionstartNudgeV2(ctx) {
-  const root = await pluginRoot(ctx);
-  if (!root) return;
-  const binder = createSessionBinder(ctx);
-  const abort = new AbortController();
-
-  async function deliverNudge(sessionID) {
-    const key = nudgeKey(root, sessionID);
-    if (!sessionID || nudgedSessions.has(key)) return;
-    if (!(await binder.owns(sessionID))) return;
-    const result = await runProcessStrict(`${root}/bin/fm-sessionstart-nudge.sh`, []);
-    const nudge = result.code === 0 ? result.stdout.trim() : "";
-    if (!nudge) return;
-    try {
-      await promptQueued(ctx, sessionID, nudge);
-      nudgedSessions.add(key);
-    } catch {
-      nudgedSessions.delete(key);
-    }
-  }
-
-  void (async () => {
-    try {
-      for await (const event of subscribeEvents(ctx, abort.signal)) {
-        await binder.observe(event);
-        const sessionID = eventSessionID(event);
-        if (eventType(event) === "session.created" || isIdleEvent(event)) {
-          await deliverNudge(sessionID);
-        }
-      }
-    } catch {
-      if (abort.signal.aborted) return;
-    }
-  })();
-
-  return () => {
-    abort.abort();
-    for (const key of [...nudgedSessions]) {
-      if (key.startsWith(`${root}\0`)) nudgedSessions.delete(key);
-    }
-  };
-}
-
 export default definePlugin({
-  id: "fm-primary-sessionstart-nudge",
-  setup: setupSessionstartNudgeV2,
+  id: "firstmate.v1.compat.sessionstart-nudge",
+  setup() {},
   async server(input) {
     return FmPrimarySessionstartNudge(input);
   },

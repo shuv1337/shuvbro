@@ -275,7 +275,10 @@ family_for_basename() {
     fm-test-run.test.sh|fm-test-isolation-proof.test.sh)
       printf '%s\n' pure-contract-unit
       ;;
-    fm-daemon.test.sh|fm-guard-stale-banner.test.sh|fm-opencode-v2-plugin.test.sh|fm-pi-watch-extension.test.sh|\
+    fm-daemon.test.sh|fm-guard-stale-banner.test.sh|fm-opencode-v2-plugin.test.sh|fm-opencode-v2-launch.test.sh|fm-pi-watch-extension.test.sh|\
+    fm-opencode-v2-guard-acceptance.test.sh|fm-opencode-v2-ownership-acceptance.test.sh|\
+    fm-opencode-v2-tui-acceptance.test.sh|fm-opencode-v2-wake-admission.test.sh|\
+    fm-opencode-v2-worker-restart-acceptance.test.sh|\
     fm-session-lock-ancestry.test.sh|fm-cursor-primary.test.sh|\
     fm-supervision-events.test.sh|fm-turnend-guard.test.sh|fm-wake-daemon-lifecycle-e2e.test.sh|\
     fm-wake-drain-unread-status.test.sh|\
@@ -327,6 +330,8 @@ family_for_basename() {
     fm-muse-signals-live-e2e.test.sh|fm-rovo-signals-live-e2e.test.sh|\
     fm-herdr-version-floor-live-e2e.test.sh|\
     fm-opencode-primary-live-e2e.test.sh|fm-opencode-v2-worker-live-e2e.test.sh|fm-pi-branch-live-e2e.test.sh|\
+    fm-opencode-v2-shared-service-live.test.sh|fm-opencode-v2-herdr-detach-live.test.sh|\
+    fm-opencode-v2-herdr-transport-smoke-live.test.sh|fm-opencode-v2-succession-live.test.sh|\
     fm-pi-branch-responsiveness-live-e2e.test.sh|\
     fm-pi-primary-live-e2e.test.sh|fm-pi-codex-native.test.sh|fm-omp-primary-live-e2e.test.sh|\
     fm-sessionstart-hook-live-e2e.test.sh|fm-sessionstart-instruction-refresh-live-e2e.test.sh|\
@@ -655,7 +660,17 @@ tests/fm-no-mistakes-required.test.sh 370
 tests/fm-omp-harness.test.sh 59969
 tests/fm-on.test.sh 34087
 tests/fm-opencode-primary-live-e2e.test.sh 21
-tests/fm-opencode-v2-plugin.test.sh 8000
+tests/fm-opencode-v2-guard-acceptance.test.sh 45000
+tests/fm-opencode-v2-herdr-detach-live.test.sh 20
+tests/fm-opencode-v2-herdr-transport-smoke-live.test.sh 20
+tests/fm-opencode-v2-launch.test.sh 15000
+tests/fm-opencode-v2-ownership-acceptance.test.sh 40000
+tests/fm-opencode-v2-plugin.test.sh 60000
+tests/fm-opencode-v2-shared-service-live.test.sh 20
+tests/fm-opencode-v2-succession-live.test.sh 20
+tests/fm-opencode-v2-tui-acceptance.test.sh 230000
+tests/fm-opencode-v2-wake-admission.test.sh 8000
+tests/fm-opencode-v2-worker-restart-acceptance.test.sh 50000
 tests/fm-operational-input.test.sh 231
 tests/fm-peek-remote.test.sh 1018
 tests/fm-pending-reply-10.test.sh 4350
@@ -1309,8 +1324,43 @@ families_for_changed_path() {
     bin/fm-quota-choose.sh)
       printf '%s\n' "__script__:fm-quota-choose.test.sh"
       ;;
+    bin/fm-opencode-v2-owner.mjs|bin/fm-opencode-v2-primary.sh|bin/fm-opencode-v2-session.mjs)
+      printf '%s\n' __script__:fm-opencode-v2-plugin.test.sh
+      printf '%s\n' __script__:fm-session-lock-ancestry.test.sh
+      printf '%s\n' __script__:fm-sessionstart-nudge.test.sh
+      printf '%s\n' __script__:fm-opencode-v2-guard-acceptance.test.sh
+      printf '%s\n' __script__:fm-opencode-v2-ownership-acceptance.test.sh
+      printf '%s\n' __script__:fm-opencode-v2-tui-acceptance.test.sh
+      printf '%s\n' __script__:fm-opencode-v2-shared-service-live.test.sh
+      printf '%s\n' __script__:fm-opencode-v2-succession-live.test.sh
+      printf '%s\n' __script__:fm-opencode-v2-worker-restart-acceptance.test.sh
+      ;;
+    bin/fm-arm-command-policy.mjs|bin/fm-cd-command-policy.mjs)
+      printf '%s\n' __script__:fm-arm-pretool-check.test.sh
+      printf '%s\n' __script__:fm-cd-pretool-check.test.sh
+      printf '%s\n' __script__:fm-opencode-v2-guard-acceptance.test.sh
+      ;;
+    tests/fm-opencode-v2-acceptance-lib.sh|tests/assets/fm-opencode-v2-native-harness.mjs)
+      printf '%s\n' __script__:fm-opencode-v2-guard-acceptance.test.sh
+      printf '%s\n' __script__:fm-opencode-v2-ownership-acceptance.test.sh
+      printf '%s\n' __script__:fm-opencode-v2-tui-acceptance.test.sh
+      printf '%s\n' __script__:fm-opencode-v2-shared-service-live.test.sh
+      printf '%s\n' __script__:fm-opencode-v2-succession-live.test.sh
+      printf '%s\n' __script__:fm-opencode-v2-worker-restart-acceptance.test.sh
+      ;;
+    bin/fm-opencode-v2-launch.sh|bin/fm-opencode-v2-capability.mjs)
+      printf '%s\n' __script__:fm-opencode-v2-launch.test.sh
+      printf '%s\n' __script__:fm-busy-adapter-wiring.test.sh
+      printf '%s\n' __script__:fm-opencode-v2-plugin.test.sh
+      printf '%s\n' __script__:fm-opencode-v2-worker-live-e2e.test.sh
+      ;;
     .opencode/plugins/*)
       printf '%s\n' __script__:fm-opencode-v2-plugin.test.sh
+      printf '%s\n' __script__:fm-opencode-v2-guard-acceptance.test.sh
+      printf '%s\n' __script__:fm-opencode-v2-ownership-acceptance.test.sh
+      printf '%s\n' __script__:fm-opencode-v2-tui-acceptance.test.sh
+      printf '%s\n' __script__:fm-opencode-v2-wake-admission.test.sh
+      printf '%s\n' __script__:fm-opencode-v2-succession-live.test.sh
       printf '%s\n' __script__:fm-pi-watch-extension.test.sh
       printf '%s\n' __script__:fm-turnend-guard.test.sh
       printf '%s\n' __script__:fm-sessionstart-nudge.test.sh
@@ -1472,6 +1522,9 @@ families_for_changed_path() {
     tests/lib.sh|tests/*-helpers.sh|tests/fixtures.sh)
       families_for_test_reference "$(basename "$path")" \
         || printf '%s\n' "__unmapped__:$path"
+      ;;
+    tests/fixtures/fm-opencode-v2-provider-host.mjs|tests/fixtures/fm-opencode-v2-real-recovery.mjs)
+      printf '%s\n' __script__:fm-opencode-v2-plugin.test.sh
       ;;
     tests/fixtures/*/*)
       # A fixture belongs to whichever suite reads its directory, found by the

@@ -35,8 +35,8 @@ export function runProcess(command, args, options = {}) {
     proc.on("error", (error) => {
       resolveResult({ code: 127, stdout, stderr: String(error?.message ?? error) });
     });
-    proc.on("close", (code) => {
-      resolveResult({ code: code ?? 0, stdout, stderr });
+    proc.on("close", (code, signal) => {
+      resolveResult({ code, signal, stdout, stderr });
     });
     if (input !== undefined) proc.stdin.end(input);
   });

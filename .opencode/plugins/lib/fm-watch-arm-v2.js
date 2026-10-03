@@ -1,4 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { encodeFirstmateOperationalInput } from "./fm-operational-input.js";
 import { isPrimaryRoot, positiveInteger, sessionOwnsLock, shouldArm } from "./fm-plugin-common.js";
 
@@ -8,20 +9,6 @@ const ARM_RETIRE_TIMEOUT_MS = positiveInteger("FM_WATCH_ARM_RETIRE_TIMEOUT_MS", 
 const REARM_RETRY_BASE_MS = positiveInteger("FM_WATCH_REARM_RETRY_BASE_MS", 250);
 const REARM_RETRY_MAX_MS = positiveInteger("FM_WATCH_REARM_RETRY_MAX_MS", 4000);
 const REARM_RETRY_LIMIT = positiveInteger("FM_WATCH_REARM_RETRY_LIMIT", 5);
-
-const owners = new Map();
-
-export function registerWatchOwner(home, coordinator) {
-  owners.set(home, coordinator);
-}
-
-export function watchOwnerFor(home) {
-  return owners.get(home) || null;
-}
-
-export function unregisterWatchOwner(home, coordinator) {
-  if (owners.get(home) === coordinator) owners.delete(home);
-}
 
 function retryDelay(attempt) {
   return Math.min(REARM_RETRY_MAX_MS, REARM_RETRY_BASE_MS * 2 ** Math.max(0, attempt - 1));
@@ -62,7 +49,12 @@ function classifyArmClose(stdout, stderr, code, signal) {
   };
 }
 
-export function createWatchArmCoordinator(paths, deliverPrompt) {
+export function createWatchArmCoordinator(paths, deliverPrompt, options = {}) {
+  const childEnv = () => {
+    const env = { ...process.env, FM_HOME: paths.home, FM_STATE_OVERRIDE: paths.state, FM_ROOT_OVERRIDE: paths.root, FM_CONFIG_OVERRIDE: paths.config };
+    for (const key of ["FM_V2_ACTIVATION", "OPENCODE_PASSWORD", "OPENCODE_SERVER_PASSWORD"]) delete env[key];
+    return env;
+  };
   const state = {
     child: null,
     armStatus: "idle",
@@ -73,8 +65,38 @@ export function createWatchArmCoordinator(paths, deliverPrompt) {
     armClose: new WeakMap(),
     armReadiness: new WeakMap(),
     armRecovery: new WeakMap(),
+    processProofs: new Map(),
     stopped: false,
   };
+
+  // Native process-exit disposal cannot await the arm's shell trap. Retain
+  // immutable process births, not a home-wide PID search or unbound kill.
+  function rememberProcess(pid) {
+    if (!options.processIdentity || !pid) return;
+    for (const [previous, proof] of state.processProofs) {
+      try {
+        const current = options.processIdentity(previous);
+        if (current.start !== proof.start || current.boot !== proof.boot) state.processProofs.delete(previous);
+      } catch { state.processProofs.delete(previous); }
+    }
+    try { state.processProofs.set(Number(pid), options.processIdentity(Number(pid))); } catch { /* already exited */ }
+  }
+  function cleanupSync() {
+    state.stopped = true;
+    if (state.retryTimer) clearTimeout(state.retryTimer);
+    state.retryTimer = null;
+    for (const [pid, expected] of state.processProofs) {
+      try {
+        const current = options.processIdentity(pid);
+        if (current.pid === expected.pid && current.start === expected.start && current.boot === expected.boot) process.kill(pid, "SIGTERM");
+      } catch { /* gone or birth changed: never signal a reused PID */ }
+    }
+  }
+
+  function handlingGeneration() {
+    try { return readFileSync(`${paths.state}/.watcher-down`, "utf8").trim().match(/^(?:pending|announced):(?:handling|downtime):([A-Za-z0-9._-]+)$/)?.[1]; }
+    catch { return undefined; }
+  }
 
   function setArmStatus(status) {
     state.armStatus = status;
@@ -106,7 +128,7 @@ export function createWatchArmCoordinator(paths, deliverPrompt) {
         {
           cwd: paths.root,
           encoding: "utf8",
-          env: { ...process.env, FM_HOME: paths.home, FM_STATE_OVERRIDE: paths.state, FM_ROOT_OVERRIDE: paths.root },
+          env: childEnv(), timeout: ARM_READY_TIMEOUT_MS,
         },
       );
       if (result.status === 0) return { ok: true, detail: "" };
@@ -130,10 +152,14 @@ export function createWatchArmCoordinator(paths, deliverPrompt) {
     return confirmHandlingDelivery(snapshot());
   }
 
-  async function deliverActionableWake(sessionID, message, recovery) {
+  async function deliverActionableWake(sessionID, message, recovery, saved) {
+    if (state.stopped || options.owns && !options.owns()) return;
+    if (options.admission?.acknowledged(saved)) return;
+    if (options.admission && !recovery) throw new Error("V2 successor has no verifiable recovery generation; pending admission retained");
     if (recovery) {
       const confirmed = confirmHandlingDeliveryWithRetry(recovery);
       if (!confirmed.ok) {
+        if (options.admission) throw new Error(confirmed.detail);
         if (recovery.watcherPid) {
           try {
             process.kill(Number(recovery.watcherPid), 0);
@@ -145,10 +171,15 @@ export function createWatchArmCoordinator(paths, deliverPrompt) {
         return;
       }
     }
+    if (options.admission) {
+      await options.admission.deliver(options.admission.confirm(saved, recovery));
+      return;
+    }
     await sendPrompt(sessionID, wakePrompt(message));
   }
 
   function surfaceFailure(sessionID, reason) {
+    if (options.failure) { options.failure(reason); return; }
     void sendPrompt(sessionID, wakePrompt(reason)).catch(() => {});
   }
 
@@ -202,7 +233,7 @@ export function createWatchArmCoordinator(paths, deliverPrompt) {
     return { failure: `${failure}\nwatcher: FAILED - OpenCode could not restore watcher continuity after ${REARM_RETRY_LIMIT} retries` };
   }
 
-  async function scheduleRetry(sessionID, reason, predecessorArmPid) {
+  async function scheduleRetry(sessionID, reason) {
     if (state.stopped || state.child || state.retryTimer) return;
     state.retryFailures += 1;
     if (state.retryFailures > REARM_RETRY_LIMIT) {
@@ -213,7 +244,9 @@ export function createWatchArmCoordinator(paths, deliverPrompt) {
     setArmStatus("retrying");
     const timer = setTimeout(() => {
       if (state.retryTimer === timer) state.retryTimer = null;
-      void ensureArm(sessionID, predecessorArmPid).then((status) => {
+      // A failed close did not deliver a handling presentation. An ordinary
+      // arm must resurface downtime/queued rows, even if its watcher survived.
+      void ensureArm(sessionID).then((status) => {
         if (["armed", "starting", "wake"].includes(status)) return;
         surfaceFailure(sessionID, `watcher: FAILED - OpenCode could not launch a continuity retry (${status})`);
       });
@@ -248,7 +281,7 @@ export function createWatchArmCoordinator(paths, deliverPrompt) {
   function spawnArm(sessionID, predecessorArmPid = "") {
     setArmStatus("starting");
     const env = {
-      ...process.env,
+      ...childEnv(),
       FM_HOME: paths.home,
       FM_ROOT_OVERRIDE: paths.root,
       FM_STATE_OVERRIDE: paths.state,
@@ -265,6 +298,7 @@ export function createWatchArmCoordinator(paths, deliverPrompt) {
       },
     );
     state.child = armChild;
+    rememberProcess(armChild.pid);
     let stdout = "";
     let stderr = "";
     let settled = false;
@@ -287,9 +321,21 @@ export function createWatchArmCoordinator(paths, deliverPrompt) {
     const releaseChild = () => {
       if (state.child === armChild) state.child = null;
     };
+    let watcherCaptured = false;
     const observeRecovery = () => {
+      const ownedWatcher = `${stdout}\n${stderr}`.match(/^watcher: started pid=([0-9]+)\b/m);
+      if (ownedWatcher && !watcherCaptured) { watcherCaptured = true; rememberProcess(ownedWatcher[1]); }
       const recovery = `${stdout}\n${stderr}`.match(/^watcher: started pid=([0-9]+).* recovery-generation=([A-Za-z0-9._-]+)$/m);
       if (recovery) state.armRecovery.set(armChild, { watcherPid: recovery[1], generation: recovery[2] });
+      else {
+        const ready = `${stdout}\n${stderr}`.match(/^watcher: (?:started|attached) pid=([0-9]+)\b/m);
+        if (!ready) return;
+        try {
+          const marker = readFileSync(`${paths.state}/.watcher-down`, "utf8").trim();
+          const generation = marker.match(/^(?:pending|announced):(?:handling|downtime):([A-Za-z0-9._-]+)$/)?.[1];
+          if (generation) state.armRecovery.set(armChild, { watcherPid: ready[1], generation });
+        } catch { /* confirmation is required; missing evidence cannot admit */ }
+      }
     };
     armChild.stdout.on("data", (chunk) => {
       stdout += chunk.toString();
@@ -314,13 +360,29 @@ export function createWatchArmCoordinator(paths, deliverPrompt) {
         if (state.restorationInFlight) return;
         state.retryFailures = 0;
         setArmStatus("wake");
-        const restoration = restoreAfterActionableClose(sessionID, predecessor);
+        const restoration = (async () => {
+          let saved, preparationError;
+          try {
+            saved = options.admission
+               ? options.admission.prepare(await encodeFirstmateOperationalInput(paths.root, "watcher", wakePrompt(classification.message)), "wake", { predecessorArmPid: predecessor, recovery: { generation: handlingGeneration() } })
+              : undefined;
+          } catch (error) { preparationError = error.message; }
+          const result = await restoreAfterActionableClose(sessionID, predecessor);
+          return { ...result, saved, preparationError };
+        })();
         state.restorationInFlight = restoration;
         void restoration
           .then(async (result) => {
             try {
               const message = result.failure ? `${classification.message}\n\n${result.failure}` : classification.message;
-              await deliverActionableWake(sessionID, message, result.recovery);
+              if (state.stopped) return;
+              if (result.preparationError) {
+                // Journal failure must not destroy restored continuity or mint
+                // a fresh downtime generation on every reconciliation tick.
+                throw new Error(result.preparationError);
+              }
+              if (options.admission && result.failure) throw new Error(result.failure);
+              await deliverActionableWake(sessionID, message, result.recovery, result.saved);
             } finally {
               if (state.restorationInFlight === restoration) state.restorationInFlight = null;
             }
@@ -338,7 +400,7 @@ export function createWatchArmCoordinator(paths, deliverPrompt) {
         setArmStatus("failed");
         return;
       }
-      void scheduleRetry(sessionID, classification.message, predecessor);
+      void scheduleRetry(sessionID, classification.message);
     });
     armChild.on("error", (error) => {
       if (settled) return;
@@ -354,7 +416,6 @@ export function createWatchArmCoordinator(paths, deliverPrompt) {
       void scheduleRetry(
         sessionID,
         `watcher: FAILED - OpenCode arm child failed: ${error.message}`,
-        String(armChild.pid ?? ""),
       );
     });
     return armChild;
@@ -363,11 +424,12 @@ export function createWatchArmCoordinator(paths, deliverPrompt) {
   async function beginArm(sessionID, predecessorArmPid) {
     if (state.stopped) return { status: "skipped", armChild: null };
     if (!sessionID) return { status: "skipped", armChild: null };
-    if (!(await isPrimaryRoot(paths.root, paths.home))) return { status: "not-primary", armChild: null };
-    if (!(await sessionOwnsLock(paths))) return { status: "read-only", armChild: null };
+    if (!options.owns && !(await isPrimaryRoot(paths.root, paths.home))) return { status: "not-primary", armChild: null };
+    if (!(await (options.owns ? options.owns() : sessionOwnsLock(paths)))) return { status: "read-only", armChild: null };
     if (state.child) return { status: "existing", armChild: state.child };
     if (state.retryTimer) return { status: "retrying", armChild: null };
-    if (!shouldArm(paths)) return { status: "not-needed", armChild: null };
+    if (!(await (options.needs ? options.needs() : shouldArm(paths)))) return { status: "not-needed", armChild: null };
+    if (state.stopped) return { status: "skipped", armChild: null };
     return { status: "spawned", armChild: spawnArm(sessionID, predecessorArmPid) };
   }
 
@@ -396,17 +458,28 @@ export function createWatchArmCoordinator(paths, deliverPrompt) {
   }
 
   return {
+    cleanupSync,
     ensureArmed: (sessionID) => ensureArm(sessionID),
-    cleanup() {
+    async resumePending(sessionID) {
+      if (!options.admission || state.restorationInFlight || state.stopped) return;
+      const pending = options.admission.pending().filter(value => value.kind === "wake");
+      if (!pending.length) return;
+      const result = await restoreAfterActionableClose(sessionID, "");
+      if (result.failure) throw new Error(result.failure);
+      for (const saved of pending) {
+        if (state.stopped) return;
+        await deliverActionableWake(sessionID, "", result.recovery, saved);
+      }
+    },
+    async cleanup() {
       state.stopped = true;
       if (state.retryTimer) {
         clearTimeout(state.retryTimer);
         state.retryTimer = null;
       }
-      if (state.child) {
-        state.child.kill("SIGTERM");
-        state.child = null;
-      }
+      if (state.launchInFlight) await state.launchInFlight;
+      if (state.child && !(await retireArm(state.child))) throw new Error("V2 old arm did not retire within its bounded deadline");
+      state.child = null;
     },
   };
 }

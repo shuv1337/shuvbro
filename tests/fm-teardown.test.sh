@@ -2328,11 +2328,37 @@ configure_secondmate_with_tmux_children() {  # <case-dir>
 }
 
 test_forced_secondmate_teardown_holds_descendant_lifecycle_locks() {
-  local case_dir home lock ready release holder_pid rc waited=0 child
+  local case_dir home lock ready release holder_pid rc waited=0 child birth
   case_dir=$(make_case descendant-locks)
   write_meta "$case_dir" local-only secondmate
   configure_secondmate_with_tmux_children "$case_dir"
   home="$case_dir/secondmate-home"
+  # Child A is executing natively. A later child-B lock refusal must leave it
+  # executing; the uncontended retry may cancel only in the cleanup phase.
+  printf '%s\n' harness=opencode-v2 >> "$home/state/child-a.meta"
+  mkdir -p "$case_dir/native-state"
+  birth=$(node "$ROOT/bin/fm-opencode-v2-owner.mjs" identity "$$")
+  jq -cn --argjson birth "$birth" '{pid:$birth.pid,url:"http://127.0.0.1:12345",password:"fixture"}' > "$case_dir/native-state/service.json"
+  jq -cn --argjson birth "$birth" --arg wt "$case_dir/child-a-wt" '{version:1,sessionID:"ses_child_a",location:{directory:$wt},model:{providerID:"fixture",id:"echo"},servicePID:$birth.pid,serviceStart:$birth.start,hostBootID:$birth.boot,serviceURL:"http://127.0.0.1:12345"}' > "$home/state/child-a.opencode-v2-session.json"
+  chmod 600 "$case_dir/native-state/service.json" "$home/state/child-a.opencode-v2-session.json"
+  export FM_FAKE_V2_CASE="$case_dir" FM_FAKE_V2_SERVICE_PID="$$"
+  cat > "$case_dir/fakebin/shuvcode" <<'SH'
+#!/usr/bin/env bash
+set -eu
+base=$FM_FAKE_V2_CASE
+if [ "$1" = debug ]; then echo "state $base/native-state"; exit 0; fi
+[ "$1" = api ] && [ "$2" = --server ] && [ "$3" = http://127.0.0.1:12345 ] && [ "$OPENCODE_PASSWORD" = fixture ] || exit 92
+echo "$4" >> "$base/native-ops.log"
+case "$4" in
+  server.info) jq -cn --argjson pid "$FM_FAKE_V2_SERVICE_PID" '{pid:$pid}' ;;
+  session.get) jq -cn --arg wt "$base/child-a-wt" '{data:{id:"ses_child_a",location:{directory:$wt},model:{providerID:"fixture",id:"echo"}}}' ;;
+  session.active)
+    if [ -e "$base/native-cancelled" ]; then echo '{"data":{}}'; else echo '{"data":{"ses_child_a":{"type":"running"}}}'; fi ;;
+  session.interrupt) : > "$base/native-cancelled"; echo '{"interrupted":true}' ;;
+  *) exit 93 ;;
+esac
+SH
+  chmod +x "$case_dir/fakebin/shuvcode"
   : > "$case_dir/kill.log"
   : > "$case_dir/treehouse.log"
   cat > "$case_dir/fakebin/tmux" <<SH
@@ -2375,6 +2401,9 @@ SH
   fi
   assert_grep "descendant task child-b has a lifecycle action in flight" "$case_dir/stderr" \
     "descendant-locks: refusal did not name the contended descendant"
+  assert_grep session.active "$case_dir/native-ops.log" "descendant-locks: native read-only preflight was not exercised"
+  [ ! -e "$case_dir/native-cancelled" ] \
+    || { : > "$release"; wait "$holder_pid" 2>/dev/null || true; fail "descendant-locks: validation preflight cancelled an executing child"; }
   [ ! -e "$home/state/.control-child-a.lock" ] \
     && [ ! -e "$home/state/.meta-child-a.lock" ] \
     || { : > "$release"; wait "$holder_pid" 2>/dev/null || true; fail "descendant-locks: refusal leaked earlier descendant locks"; }
@@ -2398,6 +2427,8 @@ SH
     || fail "descendant-locks: uncontended retry retained retired task state"
   [ -s "$case_dir/kill.log" ] && [ -s "$case_dir/treehouse.log" ] \
     || fail "descendant-locks: uncontended retry did not perform endpoint and worktree cleanup"
+  [ -e "$case_dir/native-cancelled" ] || fail "descendant-locks: cleanup did not cancel the recorded native child"
+  unset FM_FAKE_V2_CASE FM_FAKE_V2_SERVICE_PID
   pass "forced secondmate teardown holds every descendant lifecycle and metadata lock"
 }
 

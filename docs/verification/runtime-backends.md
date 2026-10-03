@@ -1601,22 +1601,19 @@ FM_OPENCODE_V2_WORKER_LIVE=1 bash tests/fm-opencode-v2-worker-live-e2e.test.sh
 ```
 
 Observed result: `ok - shuvcode v2.0.22-shuv.1 explicit model/variant, unattended ask, explicit deny, busy/idle, turn-end and persistent follow-up`.
-The guard uses real `fm-spawn`, a private tmux socket, a disposable worktree,
-and real shuvcode tools and worker plugins. It verifies the persisted root
-session and every assistant message's requested model and variant, execution of an ask-policy shell tool
-under `--auto`, a recorded `permission.rejected` result for an explicitly denied
-command, current-generation semantic busy and idle, turn-end notification, and
-a second tool-using turn through the same persistent composer.
+This result used the former private leased-server launcher, not the current shared-service launcher.
+The opt-in test now requires relocated XDG native paths, a disposable registered shared service and an explicit non-default ownership namespace; it has not been rerun live after that change.
 Only Treehouse allocation is replaced with entry into the disposable worktree.
 The guard requires configured model credentials and is opt-in, outside portable CI.
 
 The installed root TUI rejects `--model`; its `mini --model` path did not honor
 the requested model in the live probe and lacks the root's `--auto` contract.
-`bin/fm-opencode-v2-launch.sh` instead verifies the requested model against one
-private leased server's settled catalog, creates a model-bound root session,
-and attaches the unattended root TUI to that same server. Keeping the server
-alive through the persistent TUI also lets asynchronous terminal hooks finish.
-`tests/fm-spawn-dispatch-profile.test.sh` exercises catalog readiness, model and
-variant refusal, session-binding validation, exact prompt forwarding, lease
-closure on success and failure, and both current auto-submission and older
-composer-prefill submission handshakes.
+The current `bin/fm-opencode-v2-launch.sh` creates an exact model-bound session on the registered shared service; `tests/fm-opencode-v2-launch.test.sh` exercises its credential-free catalog, session binding, variant refusal and record-before-admission behavior.
+
+### Native shared-service qualification status
+
+The native route is implemented but is not yet qualified for the combined issue #1 matrix.
+On 2026-10-02, isolated Linux probes with installed shuvcode v2.0.22-shuv.1 demonstrated native package loading, exact TUI-owned lock and pathless binding RPC, a real typed cd-guard refusal, unrelated-root execution, observer environment recovery, ordinary session-ID spoof refusal, one durable queued wake and shared-worker attachment, plus natural TUI retirement with the shared service surviving.
+Those probes used a deterministic local provider, not a paid/vendor model, and did not qualify the actual two-home/two-worker/Herdr, busy-and-idle delivery or restarted-service positive matrix.
+The endpoint, worker execution-reconciliation and isolated worker-live safety changes have portable regression coverage only until their opt-in live tests are rerun.
+No upstream `opencode2`, cross-host split or V2 secondmate qualification is claimed.

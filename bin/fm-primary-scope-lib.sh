@@ -22,6 +22,12 @@ fm_root_is_secondmate_home() {
 # Otherwise only a plain checkout is primary, never a linked task worktree.
 fm_primary_scope_matches() {
   local root=$1 state=$2 git_dir git_common_dir
+  # A linked native V2 primary is eligible only through its explicit exact
+  # process/session claim. Location equality never activates a worker copy.
+  if fm_primary_v2_scope_matches "$root" "$state"; then
+    [ -f "$root/AGENTS.md" ] && [ -d "$root/bin" ] && [ -d "$state" ]
+    return
+  fi
   if ! fm_root_is_secondmate_home "$root"; then
     git_dir=$(git -C "$root" rev-parse --git-dir 2>/dev/null) || return 1
     git_common_dir=$(git -C "$root" rev-parse --git-common-dir 2>/dev/null) || return 1
@@ -30,4 +36,13 @@ fm_primary_scope_matches() {
   [ -f "$root/AGENTS.md" ] || return 1
   [ -d "$root/bin" ] || return 1
   [ -d "$state" ] || return 1
+}
+
+# Native eligibility is exact owner proof, never plain/linked checkout shape.
+# acquire validates a claimed activation before the model has written .lock.
+fm_primary_v2_scope_matches() {
+  local root=$1 state=$2
+  [ -f "$root/AGENTS.md" ] && [ -d "$root/bin" ] && [ -d "$state" ] || return 1
+  [ -n "${OPENCODE_SESSION_ID:-}" ] || return 1
+  node "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/fm-opencode-v2-owner.mjs" helper "$state" acquire >/dev/null 2>&1
 }

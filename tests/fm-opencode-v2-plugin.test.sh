@@ -1,888 +1,425 @@
 #!/usr/bin/env bash
-# Credential-free unit tests for OpenCode V2 / shuvcode plugin setup().
+# Credential-free behavioral coverage for the native exact-session contract.
+# Live native loader/service/Herdr qualification is separate and opt-in.
 set -u
-
 # shellcheck source=tests/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
-
 TMP_ROOT=$(fm_test_tmproot fm-opencode-v2-plugin)
 export NODE_NO_WARNINGS=1
+export FM_V2_REGISTRY_NAMESPACE="test-$$-$RANDOM"
 
-make_primary() {
-  local dir=$1
-  mkdir -p "$dir/bin" "$dir/state" "$dir/config"
-  git init -q "$dir"
-  : > "$dir/AGENTS.md"
-  : > "$dir/state/task.meta"
+test_native_exact_owner_and_transport() {
+  local out
+  out=$(ROOT="$ROOT" LAB="$TMP_ROOT" node --input-type=module 2>&1 <<'JS'
+import assert from 'node:assert/strict';
+import * as fs from 'node:fs';
+import { pathToFileURL } from 'node:url';
+import { spawnSync } from 'node:child_process';
+const base=pathToFileURL(process.env.ROOT+'/');
+const owner=await import(new URL('bin/fm-opencode-v2-owner.mjs',base));
+const server=await import(new URL('.opencode/plugins/fm-native-v2/server.js',base));
+const tui=await import(new URL('.opencode/plugins/fm-native-v2/tui.js',base));
+const {runProcess}=await import(new URL('.opencode/plugins/lib/fm-plugin-common.js',base));
+const {createAdmissionJournal}=await import(new URL('.opencode/plugins/fm-native-v2/admission.js',base));
+const {createSessionBinder}=await import(new URL('.opencode/plugins/lib/fm-session-bind-v2.js',base));
+const home=process.env.LAB+'/external';
+fs.mkdirSync(home+'/state',{recursive:true,mode:0o700});
+fs.mkdirSync(home+'/config',{recursive:true,mode:0o700});
+const me=owner.identity(process.pid);
+const r={version:1,sessionID:'ses_native_exact',claimID:'a'.repeat(48),root:process.env.ROOT,home,state:home+'/state',config:home+'/config',ownerPID:me.pid,ownerStart:me.start,hostBootID:me.boot,servicePID:me.pid,serviceStart:me.start,serviceURL:'http://127.0.0.1:12345',lifecycle:'claimed'};
+assert.equal(await tui.supervisionNeeded(r),false);
+fs.writeFileSync(r.state+'/fixture.check.sh','');
+fs.writeFileSync(r.state+'/fixture.check-trust','');
+assert.equal(await tui.supervisionNeeded(r),true);
+fs.unlinkSync(r.state+'/fixture.check.sh');fs.unlinkSync(r.state+'/fixture.check-trust');
+fs.mkdirSync(r.state+'/procevent');fs.writeFileSync(r.state+'/procevent/fixture.source','');
+assert.equal(await tui.supervisionNeeded(r),true);
+fs.unlinkSync(r.state+'/procevent/fixture.source');
+let metadata={kept:'value'};
+const get=async({sessionID})=>({id:sessionID,location:{directory:r.root},metadata:sessionID===r.sessionID?metadata:{}});
+const ctx={client:{session:{get,update:async input=>{metadata=input.metadata;},environment:async input=>{assert.equal(input.variables.FM_HOME,home);}},server:{info:async()=>({pid:me.pid})},rpc:()=>({bindingStatus:input=>server.bindingStatus({get},input)})}};
+await tui.activate(ctx,r);
+fs.mkdirSync(home+'/native',{mode:0o700});fs.mkdirSync(home+'/bin',{mode:0o700});
+owner.writePrivate(home+'/native/service.json',{pid:me.pid,url:r.serviceURL,password:'fixture'});
+fs.writeFileSync(home+'/bin/shuvcode',`#!/bin/bash\nprintf 'state %s\\n' '${home}/native'\n`,{mode:0o700});
+process.env.PATH=home+'/bin:'+process.env.PATH;
+await tui.rebind(ctx,r);
+await assert.rejects(tui.rebind(ctx,{...r,serviceURL:'http://127.0.0.1:9999'}),/immutable/);
+assert.equal(tui.helperEnvironment(r).PATH,process.env.PATH);
+assert.equal(tui.helperEnvironment(r).HOME,process.env.HOME);
+assert.equal(tui.helperEnvironment(r).FM_V2_ACTIVATION,undefined);
+assert.equal(tui.helperEnvironment(r).OPENCODE_PASSWORD,undefined);
+const killed=await runProcess(process.execPath,['-e','setInterval(()=>{},1000)'],{timeout:50});
+assert.notEqual(killed.code,0);
+assert.equal(killed.signal,'SIGTERM');
+assert.equal(metadata.kept,'value');
+assert.equal((await server.bindingStatus({get},{sessionID:r.sessionID,claimID:r.claimID})).status,'valid');
+assert.equal((await server.guardScope({get},'ses_unrelated')).registered,false);
+assert.equal((await server.guardScope({get:async()=>({id:'ses_child',parentID:r.sessionID,location:{directory:r.root},metadata})},'ses_child')).registered,false);
+// Same-directory root event is never implicit authority (round-one red case).
+const binder=createSessionBinder({location:{directory:r.root},session:{get}});
+await binder.observe({type:'session.created',data:{sessionID:'ses_unrelated',location:{directory:r.root}}});
+assert.equal(await binder.owns('ses_unrelated'),false);
+// Refused takeover must not rewrite either canonical view or native metadata.
+await assert.rejects(tui.activate(ctx,{...r,claimID:'b'.repeat(48)}));
+assert.equal(metadata.firstmateV2Lead.claimID,r.claimID);
+assert.equal(owner.readRegistration(r.sessionID).claimID,r.claimID);
+assert.throws(()=>owner.publish('claim',{...r,config:home+'/replacement'}),/frozen/);
+fs.writeFileSync(r.state+'/.lock',String(me.pid)+'\n',{mode:0o600});
+const env={...process.env,FM_HOME:home,FM_ROOT_OVERRIDE:r.root,FM_STATE_OVERRIDE:r.state,FM_CONFIG_OVERRIDE:r.config,OPENCODE_SESSION_ID:r.sessionID};
+const check=(variables=env)=>spawnSync('bash',['-c','. "$1/bin/fm-session-lock-lib.sh"; fm_session_lock_owned_by_self "$FM_STATE_OVERRIDE"','check',r.root],{env:variables});
+assert.equal(check().status,0);
+assert.notEqual(check({...env,FM_CONFIG_OVERRIDE:home+'/wrong'}).status,0);
+assert.notEqual(check({...env,OPENCODE_SESSION_ID:'ses_unrelated'}).status,0);
+assert.notEqual(check({...env,FM_HOME:r.root}).status,0);
+// Missing helper is denial only for the exact lead, not unrelated/child calls.
+assert.equal(await server.denyReason({get},{tool:'shell',sessionID:'ses_unrelated',input:{command:'true'}}),'');
+assert.equal(await server.denyReason({get},{tool:'shell',sessionID:r.sessionID,input:{command:'true'}}),'');
+assert.match(await server.denyReason({get},{tool:'shell',sessionID:r.sessionID,input:{command:'cd /'}}),/persistent-cd/);
+assert.match(await server.denyReason({get},{tool:'shell',sessionID:r.sessionID,input:{command:'bin/fm-watch-arm.sh &'}}),/\[/);
+// Service birth mismatch preserves protective refusal through restart.
+owner.writePrivate(r.state+'/.opencode-v2-owner.json',{...r,serviceStart:'0'});
+assert.notEqual(check().status,0);
+assert.match((await server.guardScope({get},r.sessionID)).error,/stale/);
+owner.writePrivate(r.state+'/.opencode-v2-owner.json',r);
+const originalMetadata=metadata;
+metadata={kept:'replacement'};
+assert.equal((await server.guardScope({get},r.sessionID)).registered,true);
+assert.match((await server.guardScope({get},r.sessionID)).error,/stale/);
+metadata=originalMetadata;
+owner.publish('retire',r);
+assert.match((await server.guardScope({get},r.sessionID)).error,/stale/);
+assert.equal((await server.guardScope({get},'ses_unrelated')).registered,false);
+owner.publish('claim',r);
+// Admission retries keep exact ID/text, preserve queue and survive reload.
+fs.writeFileSync(r.state+'/.wake-queue','100\t1\tsignal\ttask\tready\n',{mode:0o600});
+let calls=[];
+const journal=createAdmissionJournal(r,r.sessionID,async input=>{calls.push(input);if(calls.length===1)throw new Error('unknown acknowledgement');return{id:input.id};},()=>{});
+const admission=journal.prepare('original encoded wake');
+await journal.deliver(journal.confirm(admission));
+assert.equal(calls.length,2);
+assert.deepEqual(calls[0],calls[1]);
+assert.equal(calls[0].delivery,'queue');
+assert.equal(journal.prepare('replacement must not change text').text,'original encoded wake');
+assert.equal(fs.readFileSync(r.state+'/.wake-queue','utf8'),'100\t1\tsignal\ttask\tready\n');
+fs.appendFileSync(r.state+'/.wake-queue','101\t2\tsignal\ttask\tsecond\n');
+const failing=createAdmissionJournal(r,r.sessionID,async()=>{throw new Error('offline');},()=>{});
+const saved=failing.prepare('second wake');
+const confirmed=failing.confirm(saved);
+const journalPath=r.state+'/.opencode-v2-admissions/';
+const savedPath=journalPath+fs.readdirSync(journalPath,{recursive:true}).find(name=>name.endsWith(saved.id+'.json'));
+fs.utimesSync(savedPath,1,1);
+failing.confirm(confirmed);
+assert.equal(fs.statSync(savedPath).mtimeMs,1000);
+await assert.rejects(failing.deliver(confirmed));
+assert.equal(failing.pending().length,1);
+const reloaded=createAdmissionJournal(r,r.sessionID,async input=>{calls.push(input);return{id:input.id};},()=>{});
+const pending=reloaded.pending()[0];
+assert.equal(pending.id,saved.id);
+await reloaded.deliver(pending);
+assert.equal(reloaded.pending().length,0);
+// The canonical ack owner, not this adapter, removes rows. An old pending
+// transport is retired distinctly from admission after those rows disappear.
+fs.appendFileSync(r.state+'/.wake-queue','102\t3\tcheck\tx\tthird\n');
+const obsolete=reloaded.prepare('third original wake');
+fs.writeFileSync(r.state+'/.wake-queue','');
+assert.equal(reloaded.pending().length,0);
+assert.equal(reloaded.acknowledged(obsolete),true);
+const obsoletePath=journalPath+fs.readdirSync(journalPath,{recursive:true}).find(name=>name.endsWith(obsolete.id+'.json'));
+fs.utimesSync(obsoletePath,1,1);reloaded.pending();assert.equal(fs.existsSync(obsoletePath),false);
+const namespace=process.env.FM_V2_REGISTRY_NAMESPACE;
+process.env.FM_V2_REGISTRY_NAMESPACE='../unsafe';
+assert.equal((await server.guardScope({get},'ses_unrelated')).registered,false);
+assert.equal((await server.guardScope({get},r.sessionID)).registered,true);
+process.env.FM_V2_REGISTRY_NAMESPACE=namespace;
+// Filesystem attacks are errors, never authority.
+const bad=home+'/bad.json';
+fs.symlinkSync(r.state+'/.opencode-v2-owner.json',bad);
+assert.throws(()=>owner.readPrivate(bad));
+fs.unlinkSync(bad);
+fs.linkSync(r.state+'/.opencode-v2-owner.json',bad);
+assert.throws(()=>owner.readPrivate(bad));
+fs.unlinkSync(bad);
+owner.publish('retire',r);
+owner.publish('cleanup-test-namespace',{});
+console.log('exact owner/guard/transport behaviors passed');
+JS
+  ) || fail "native exact-owner contract: $out"
+  pass "$out"
 }
 
-drive_v2() {
-  local plugin=$1
-  shift
-  PLUGIN="$plugin" node --input-type=module - "$@" <<'EOF'
-import { pathToFileURL } from "node:url";
-import { writeFileSync } from "node:fs";
-
-const spec = JSON.parse(process.argv[2]);
-const mod = await import(pathToFileURL(process.env.PLUGIN).href);
-if (!mod.default || typeof mod.default.setup !== "function") {
-  throw new Error("missing V2 default.setup");
+test_v1_factories_preserved() {
+  local out
+  out=$(ROOT="$ROOT" node --input-type=module 2>&1 <<'JS'
+import assert from 'node:assert/strict';
+import {pathToFileURL} from 'node:url';
+for(const [name,factory] of [['watch-arm','FmPrimaryWatchArm'],['turnend-guard','FmPrimaryTurnendGuard'],['sessionstart-nudge','FmPrimarySessionstartNudge'],['cd-check','FmPrimaryCdCheck'],['pretool-check','FmPrimaryPretoolCheck']]){
+  const module=await import(pathToFileURL(process.env.ROOT+'/.opencode/plugins/fm-primary-'+name+'.js'));
+  assert.equal(typeof module[factory],'function');
+  assert.equal(await module.default.setup(new Proxy({},{get(){throw new Error('compatibility entry used a native API');}})),undefined);
+  assert.equal(module.default.effect,undefined);
+}
+console.log('V1 factories preserved; competing V2 entrypoints removed');
+JS
+  ) || fail "$out"
+  pass "$out"
 }
 
-const prompts = [];
-const queue = [];
-let notify = null;
-const sessions = new Map(Object.entries(spec.sessions || {}));
-const abort = new AbortController();
-
-const ctx = {
-  location: {
-    directory: spec.directory,
-    project: { directory: spec.canonical || spec.directory, canonical: spec.canonical || spec.directory, id: "proj" },
-  },
-  event: {
-    subscribe({ signal } = {}) {
-      const stop = signal || abort.signal;
-      return {
-        async *[Symbol.asyncIterator]() {
-          while (!stop.aborted) {
-            if (queue.length) {
-              yield queue.shift();
-              continue;
-            }
-            await new Promise((resolve) => {
-              notify = resolve;
-              if (stop.aborted) resolve();
-            });
-          }
-        },
-      };
-    },
-  },
-  session: {
-    async prompt(request) {
-      prompts.push(request);
-      if (spec.failPrompt) throw new Error("admission failed");
-      return { id: "msg_test" };
-    },
-    async get({ sessionID }) {
-      if (!sessions.has(sessionID)) throw new Error("missing session");
-      return sessions.get(sessionID);
-    },
-  },
-};
-
-if (spec.lockFile) writeFileSync(spec.lockFile, String(spec.lockPid ?? process.pid));
-const cleanup = await mod.default.setup(ctx);
-await new Promise((resolve) => setTimeout(resolve, 50));
-for (const event of spec.events || []) {
-  queue.push(event);
-  notify?.();
-}
-await new Promise((resolve) => setTimeout(resolve, spec.settleMs || 400));
-if (spec.cleanup) {
-  if (typeof cleanup !== "function") throw new Error("setup did not return cleanup");
-  cleanup();
-}
-writeFileSync(spec.out, JSON.stringify({ prompts, cleaned: Boolean(spec.cleanup) }));
-abort.abort();
-notify?.();
-EOF
-}
-
-# The guard plugins deny through the Effect runtime pinned in
-# .opencode/plugins/package.json, the same install a shuvcode lead needs. CI
-# installs it, so there a missing runtime is a failure rather than a skip.
-guard_runtime_ready() {
-  [ -f "$ROOT/.opencode/plugins/node_modules/effect/package.json" ] && return 0
-  [ -z "${CI:-}" ] || fail "effect runtime missing in CI; run: npm ci --prefix .opencode/plugins"
-  printf 'note: %s needs the effect runtime (npm ci --prefix .opencode/plugins)\n' "$1"
-  return 1
-}
-
-# Runs a guard plugin's Effect entrypoint the way shuvcode does: run the
-# registration Effect, then run the registered execute.before hook for one tool
-# event and record the Exit.
-drive_v2_guard() {
-  local plugin=$1
-  shift
-  PLUGIN="$plugin" PLUGINS_DIR="$ROOT/.opencode/plugins" node --input-type=module - "$@" <<'EOF'
-import { createRequire } from "node:module";
-import { pathToFileURL } from "node:url";
-import { writeFileSync } from "node:fs";
-
-const spec = JSON.parse(process.argv[2]);
-const require = createRequire(process.env.PLUGINS_DIR + "/package.json");
-const { Cause, Effect, Exit, Option } = await import(pathToFileURL(require.resolve("effect")).href);
-const mod = await import(pathToFileURL(process.env.PLUGIN).href);
-
-const hooks = [];
-const ctx = {
-  location: {
-    directory: spec.directory,
-    project: { directory: spec.directory, canonical: spec.directory, id: "proj" },
-  },
-  tool: {
-    hook: (name, callback) => Effect.sync(() => {
-      hooks.push({ name, callback });
-    }),
-  },
-};
-
-await Effect.runPromise(mod.default.effect(ctx));
-const hook = hooks.find((item) => item.name === "execute.before");
-if (!hook) throw new Error("missing tool execute.before hook");
-const exit = await Effect.runPromiseExit(hook.callback(spec.toolEvent));
-const result = { hooks: hooks.map((item) => item.name) };
-if (Exit.isSuccess(exit)) {
-  result.outcome = "allowed";
-} else {
-  const failure = Cause.findErrorOption(exit.cause);
-  if (Option.isSome(failure)) {
-    result.outcome = "failed";
-    result.tag = failure.value._tag;
-    result.message = failure.value.message;
-  } else {
-    result.outcome = "defect";
-    result.message = Cause.pretty(exit.cause);
-  }
-}
-writeFileSync(spec.out, JSON.stringify(result));
-EOF
-}
-
-install_guard_helpers() {
-  local repo=$1
-  cp "$ROOT/bin/fm-arm-pretool-check.sh" "$ROOT/bin/fm-cd-pretool-check.sh" \
-    "$ROOT/bin/fm-arm-command-policy.mjs" "$ROOT/bin/fm-cd-command-policy.mjs" "$repo/bin/"
-}
-
-guard_tool_event() {  # <dir> <out> <tool> <command>
-  jq -nc --arg dir "$1" --arg out "$2" --arg tool "$3" --arg command "$4" \
-    '{directory: $dir, out: $out, toolEvent: {tool: $tool, sessionID: "ses_lead", input: {command: $command}}}'
-}
-
-test_v2_watch_arm_does_not_cross_own_sessions() {
-  local repo home out status result
-  repo="$TMP_ROOT/watch-arm-primary"
-  home="$TMP_ROOT/watch-arm-home"
-  make_primary "$repo"
-  mkdir -p "$home/state" "$home/config"
-  : > "$home/state/task.meta"
-  cat > "$repo/bin/fm-watch-arm.sh" <<'SH'
+test_coordinator_persists_before_handoff() {
+  local out lab="$TMP_ROOT/coordinator"
+  mkdir -p "$lab/bin" "$lab/state" "$lab/config"
+  printf '100\t1\tsignal\ttask\tready\n' > "$lab/state/.wake-queue"
+  : > "$lab/state/task.meta"
+  cat > "$lab/bin/fm-watch-arm.sh" <<'SH'
 #!/usr/bin/env bash
-printf 'armed %s %s\n' "${FM_HOME:-missing}" "${FM_STATE_OVERRIDE:-missing}" >> "${FM_ARM_LOG:?}"
-printf 'watcher: healthy pid=1 (beacon 0s)\n'
-SH
-  cat > "$repo/bin/fm-operational-input.sh" <<'SH'
-#!/usr/bin/env bash
-cat
-SH
-  chmod +x "$repo/bin/fm-watch-arm.sh" "$repo/bin/fm-operational-input.sh"
-  log="$TMP_ROOT/watch-arm.log"
-  out="$TMP_ROOT/watch-arm-out.json"
-  status=0
-  FM_HOME="$home" FM_ROOT_OVERRIDE="$repo" FM_ARM_LOG="$log" drive_v2 "$ROOT/.opencode/plugins/fm-primary-watch-arm.js" "$(jq -nc \
-    --arg dir "$repo" --arg out "$out" --arg lock "$home/state/.lock" \
-    '{
-      directory: $dir,
-      out: $out,
-      lockFile: $lock,
-      settleMs: 800,
-      sessions: {
-        ses_other: { id: "ses_other", location: { directory: "/tmp/other-project" } }
-      },
-      events: [
-        { type: "session.execution.succeeded", data: { sessionID: "ses_other" } }
-      ]
-    }')" || status=$?
-  expect_code 0 "$status" "V2 watch-arm foreign session should run"
-  [ ! -f "$log" ] || fail "foreign session armed the watcher: $(cat "$log")"
-  status=0
-  FM_HOME="$home" FM_ROOT_OVERRIDE="$repo" FM_ARM_LOG="$log" drive_v2 "$ROOT/.opencode/plugins/fm-primary-watch-arm.js" "$(jq -nc \
-    --arg dir "$repo" --arg out "$out" --arg lock "$home/state/.lock" \
-    '{
-      directory: $dir,
-      out: $out,
-      lockFile: $lock,
-      settleMs: 800,
-      sessions: {
-        ses_lead: { id: "ses_lead", location: { directory: $dir } }
-      },
-      events: [
-        { type: "session.execution.succeeded", data: { sessionID: "ses_lead" } }
-      ]
-    }')" || status=$?
-  expect_code 0 "$status" "V2 watch-arm lead session should run"
-  result=$(cat "$out")
-  [ -f "$log" ] || fail "bound lead session did not arm: $result"
-  grep -qx "armed $home $home/state" "$log" \
-    || fail "arm child did not receive the FM_HOME home and its state dir: $(cat "$log")"
-  printf '%s' "$result" | jq -e '.prompts | all(.sessionID == "ses_lead")' >/dev/null \
-    || fail "a prompt targeted a foreign session: $result"
-  printf '%s' "$result" | jq -e '.prompts | all(.delivery == "queue")' >/dev/null \
-    || fail "a wake prompt used default steer: $result"
-  pass "OpenCode V2 watch-arm binds one location and does not cross-own"
-}
-
-test_v2_watch_arm_cleanup_stops_children() {
-  local repo home out status result
-  repo="$TMP_ROOT/watch-arm-cleanup"
-  home="$TMP_ROOT/watch-arm-cleanup-home"
-  make_primary "$repo"
-  mkdir -p "$home/state" "$home/config"
-  : > "$home/state/task.meta"
-  cat > "$repo/bin/fm-watch-arm.sh" <<'SH'
-#!/usr/bin/env bash
+if [ "${1:-}" = --handling-delivered ]; then
+  [ -n "$(find "$FM_STATE_OVERRIDE/.opencode-v2-admissions" -name 'msg_*.json' -print -quit)" ] || exit 1
+  [ "$(cat "$FM_STATE_OVERRIDE/arm-pid")" = "$4" ] || exit 1
+  echo confirmed >> "$FM_STATE_OVERRIDE/order"
+  exit 0
+fi
+if [ ! -f "$FM_STATE_OVERRIDE/first" ]; then
+  touch "$FM_STATE_OVERRIDE/first"
+  echo 'signal: task ready'
+  exit 0
+fi
+echo $$ > "$FM_STATE_OVERRIDE/arm-pid"
+echo "watcher: started pid=$$ recovery-generation=fixture-generation"
 trap 'exit 0' TERM
-printf 'watcher: started pid=$$\n'
-sleep 30
+while :; do sleep 0.05; done
 SH
-  cat > "$repo/bin/fm-operational-input.sh" <<'SH'
-#!/usr/bin/env bash
-cat
-SH
-  chmod +x "$repo/bin/fm-watch-arm.sh" "$repo/bin/fm-operational-input.sh"
-  out="$TMP_ROOT/watch-arm-cleanup.json"
-  status=0
-  FM_HOME="$home" FM_ROOT_OVERRIDE="$repo" drive_v2 "$ROOT/.opencode/plugins/fm-primary-watch-arm.js" "$(jq -nc \
-    --arg dir "$repo" --arg out "$out" --arg lock "$home/state/.lock" \
-    '{
-      directory: $dir,
-      out: $out,
-      lockFile: $lock,
-      cleanup: true,
-      sessions: { ses_lead: { id: "ses_lead", location: { directory: $dir } } },
-      events: [ { type: "session.execution.failed", data: { sessionID: "ses_lead", error: { name: "UnknownError" } } } ]
-    }')" || status=$?
-  expect_code 0 "$status" "V2 watch-arm cleanup should run"
-  result=$(cat "$out")
-  printf '%s' "$result" | jq -e '.cleaned == true' >/dev/null \
-    || fail "cleanup was not invoked: $result"
-  pass "OpenCode V2 watch-arm setup returns cleanup"
-}
-
-test_v2_turnend_queues_follow_up_for_bound_session() {
-  local repo out status result
-  repo="$TMP_ROOT/turnend-primary"
-  make_primary "$repo"
-  cat > "$repo/bin/fm-turnend-guard.sh" <<'SH'
-#!/usr/bin/env bash
-printf 'guard-fired\n' >&2
-exit 2
-SH
-  cat > "$repo/bin/fm-operational-input.sh" <<'SH'
-#!/usr/bin/env bash
-printf '\u2063FIRSTMATE_OP: v1 turn-end-guard: '
-cat
-SH
-  chmod +x "$repo/bin/fm-turnend-guard.sh" "$repo/bin/fm-operational-input.sh"
-  out="$TMP_ROOT/turnend-out.json"
-  status=0
-  drive_v2 "$ROOT/.opencode/plugins/fm-primary-turnend-guard.js" "$(jq -nc \
-    --arg dir "$repo" --arg out "$out" \
-    '{
-      directory: $dir,
-      out: $out,
-      settleMs: 600,
-      sessions: {
-        ses_lead: { id: "ses_lead", location: { directory: $dir } },
-        ses_other: { id: "ses_other", location: { directory: "/tmp/other" } }
-      },
-      events: [
-        { type: "session.execution.succeeded", data: { sessionID: "ses_other" } },
-        { type: "session.execution.succeeded", data: { sessionID: "ses_lead" } }
-      ]
-    }')" || status=$?
-  expect_code 0 "$status" "V2 turnend setup should run"
-  result=$(cat "$out")
-  printf '%s' "$result" | jq -e '.prompts | length == 1' >/dev/null \
-    || fail "expected one turnend prompt, got $result"
-  printf '%s' "$result" | jq -e '.prompts[0].sessionID == "ses_lead"' >/dev/null \
-    || fail "turnend targeted the wrong session: $result"
-  printf '%s' "$result" | jq -e '.prompts[0].delivery == "queue"' >/dev/null \
-    || fail "turnend prompt did not set delivery queue: $result"
-  pass "OpenCode V2 turnend queues a follow-up only for the bound session"
-}
-
-test_v2_sessionstart_does_not_mark_failed_admission() {
-  local repo out status result
-  repo="$TMP_ROOT/nudge-primary"
-  make_primary "$repo"
-  cat > "$repo/bin/fm-sessionstart-nudge.sh" <<'SH'
-#!/usr/bin/env bash
-printf 'nudge-text\n'
-SH
-  chmod +x "$repo/bin/fm-sessionstart-nudge.sh"
-  out="$TMP_ROOT/nudge-out.json"
-  status=0
-  drive_v2 "$ROOT/.opencode/plugins/fm-primary-sessionstart-nudge.js" "$(jq -nc \
-    --arg dir "$repo" --arg out "$out" \
-    '{
-      directory: $dir,
-      out: $out,
-      failPrompt: true,
-      sessions: { ses_lead: { id: "ses_lead", location: { directory: $dir } } },
-      events: [
-        { type: "session.created", data: { sessionID: "ses_lead", location: { directory: $dir } } },
-        { type: "session.execution.succeeded", data: { sessionID: "ses_lead" } }
-      ]
-    }')" || status=$?
-  expect_code 0 "$status" "V2 sessionstart setup should run"
-  result=$(cat "$out")
-  printf '%s' "$result" | jq -e '.prompts | length == 2' >/dev/null \
-    || fail "failed admission must not consume the session: $result"
-  printf '%s' "$result" | jq -e '.prompts[0].delivery == "queue"' >/dev/null \
-    || fail "nudge prompt did not set delivery queue: $result"
-  pass "OpenCode V2 sessionstart retries after failed admission and handles resume"
-}
-
-test_v2_sessionstart_ignores_foreign_session() {
-  local repo out status result
-  repo="$TMP_ROOT/nudge-foreign"
-  make_primary "$repo"
-  cat > "$repo/bin/fm-sessionstart-nudge.sh" <<'SH'
-#!/usr/bin/env bash
-printf 'nudge-text\n'
-SH
-  chmod +x "$repo/bin/fm-sessionstart-nudge.sh"
-  out="$TMP_ROOT/nudge-foreign.json"
-  status=0
-  drive_v2 "$ROOT/.opencode/plugins/fm-primary-sessionstart-nudge.js" "$(jq -nc \
-    --arg dir "$repo" --arg out "$out" \
-    '{
-      directory: $dir,
-      out: $out,
-      sessions: { ses_other: { id: "ses_other", location: { directory: "/tmp/other" }, parentID: null } },
-      events: [ { type: "session.created", data: { sessionID: "ses_other", location: { directory: "/tmp/other" } } } ]
-    }')" || status=$?
-  expect_code 0 "$status" "V2 sessionstart foreign session should run"
-  result=$(cat "$out")
-  printf '%s' "$result" | jq -e '.prompts | length == 0' >/dev/null \
-    || fail "foreign session was nudged: $result"
-  pass "OpenCode V2 sessionstart ignores sessions at another location"
-}
-
-test_v2_cd_guard_fails_bare_cd_with_typed_tool_error() {
-  local repo out status result
-  guard_runtime_ready "cd-guard Effect denial" || return 0
-  repo="$TMP_ROOT/cd-guard-primary"
-  make_primary "$repo"
-  install_guard_helpers "$repo"
-  mkdir -p "$repo/projects/x"
-  out="$TMP_ROOT/cd-guard-deny.json"
-  status=0
-  drive_v2_guard "$ROOT/.opencode/plugins/fm-primary-cd-check.js" \
-    "$(guard_tool_event "$repo" "$out" shell "cd projects/x")" || status=$?
-  expect_code 0 "$status" "V2 cd-guard Effect entrypoint should run"
-  result=$(cat "$out")
-  printf '%s' "$result" | jq -e '.hooks == ["execute.before"]' >/dev/null \
-    || fail "cd-guard registered unexpected hooks: $result"
-  printf '%s' "$result" | jq -e '.outcome == "failed" and .tag == "Tool.Error" and (.message | length > 0)' >/dev/null \
-    || fail "bare cd was not rejected as a typed Tool.Error: $result"
-
-  out="$TMP_ROOT/cd-guard-allow.json"
-  status=0
-  drive_v2_guard "$ROOT/.opencode/plugins/fm-primary-cd-check.js" \
-    "$(guard_tool_event "$repo" "$out" shell "git -C projects/x status")" || status=$?
-  expect_code 0 "$status" "V2 cd-guard should evaluate an allowed command"
-  jq -e '.outcome == "allowed"' "$out" >/dev/null \
-    || fail "cd-guard rejected a command that does not relocate the shell: $(cat "$out")"
-
-  out="$TMP_ROOT/cd-guard-other-tool.json"
-  status=0
-  drive_v2_guard "$ROOT/.opencode/plugins/fm-primary-cd-check.js" \
-    "$(guard_tool_event "$repo" "$out" read "cd projects/x")" || status=$?
-  expect_code 0 "$status" "V2 cd-guard should ignore a non-shell tool"
-  jq -e '.outcome == "allowed"' "$out" >/dev/null \
-    || fail "cd-guard evaluated a non-shell tool: $(cat "$out")"
-  pass "OpenCode V2 cd-guard rejects a bare cd as a typed Tool.Error and passes other commands"
-}
-
-test_v2_pretool_fails_compound_backgrounded_arm_with_typed_tool_error() {
-  local repo out status result
-  guard_runtime_ready "watcher-arm Effect denial" || return 0
-  repo="$TMP_ROOT/pretool-primary"
-  make_primary "$repo"
-  install_guard_helpers "$repo"
-  out="$TMP_ROOT/pretool-deny.json"
-  status=0
-  drive_v2_guard "$ROOT/.opencode/plugins/fm-primary-pretool-check.js" \
-    "$(guard_tool_event "$repo" "$out" shell "echo ok; bin/fm-watch-arm.sh --restart &")" || status=$?
-  expect_code 0 "$status" "V2 pretool Effect entrypoint should run"
-  result=$(cat "$out")
-  printf '%s' "$result" | jq -e '.outcome == "failed" and .tag == "Tool.Error" and (.message | length > 0)' >/dev/null \
-    || fail "backgrounded arm inside a compound command was not rejected as a typed Tool.Error: $result"
-
-  out="$TMP_ROOT/pretool-allow.json"
-  status=0
-  drive_v2_guard "$ROOT/.opencode/plugins/fm-primary-pretool-check.js" \
-    "$(guard_tool_event "$repo" "$out" shell "echo ok")" || status=$?
-  expect_code 0 "$status" "V2 pretool should evaluate an allowed command"
-  jq -e '.outcome == "allowed"' "$out" >/dev/null \
-    || fail "pretool rejected an unrelated command: $(cat "$out")"
-  pass "OpenCode V2 pretool rejects a compound backgrounded arm as a typed Tool.Error"
-}
-
-test_v2_named_v1_factory_still_exported() {
-  local out status
-  out=$(node --input-type=module 2>&1 <<EOF
-import { pathToFileURL } from "node:url";
-const watch = await import(pathToFileURL("$ROOT/.opencode/plugins/fm-primary-watch-arm.js").href);
-const turn = await import(pathToFileURL("$ROOT/.opencode/plugins/fm-primary-turnend-guard.js").href);
-const nudge = await import(pathToFileURL("$ROOT/.opencode/plugins/fm-primary-sessionstart-nudge.js").href);
-const pre = await import(pathToFileURL("$ROOT/.opencode/plugins/fm-primary-pretool-check.js").href);
-const cd = await import(pathToFileURL("$ROOT/.opencode/plugins/fm-primary-cd-check.js").href);
-for (const [name, mod] of Object.entries({ watch, turn, nudge })) {
-  if (typeof mod.default?.setup !== "function") throw new Error(name + " missing setup");
-}
-for (const [name, mod] of Object.entries({ pre, cd })) {
-  if (typeof (mod.default?.effect ?? mod.default?.setup) !== "function") throw new Error(name + " missing V2 entrypoint");
-}
-if (typeof watch.FmPrimaryWatchArm !== "function") throw new Error("V1 watch factory missing");
-if (typeof turn.FmPrimaryTurnendGuard !== "function") throw new Error("V1 turnend factory missing");
-if (typeof nudge.FmPrimarySessionstartNudge !== "function") throw new Error("V1 nudge factory missing");
-if (typeof pre.FmPrimaryPretoolCheck !== "function") throw new Error("V1 pretool factory missing");
-if (typeof cd.FmPrimaryCdCheck !== "function") throw new Error("V1 cd factory missing");
-EOF
-)
-  status=$?
-  expect_code 0 "$status" "dual export shape: $out"
-  [ -z "$out" ] || fail "dual export check printed: $out"
-  pass "OpenCode plugins keep V1 named factories beside their V2 entrypoint"
-}
-
-test_v2_command_guard_reads_complete_tool_input() {
-  local out status
-  out=$(node --input-type=module 2>&1 <<EOF
-import { pathToFileURL } from "node:url";
-const mod = await import(pathToFileURL("$ROOT/.opencode/plugins/lib/fm-command-guard-v2.js").href);
-const command = "cd /tmp && bin/fm-watch-arm.sh --restart &";
-if (mod.commandFromTool({ tool: "shell", input: { command } }) !== command) {
-  throw new Error("complete shell input was not preserved");
-}
-if (mod.commandFromTool({ tool: "read", input: { command } }) !== "") {
-  throw new Error("non-shell tool input was classified as a command");
-}
-EOF
-)
-  status=$?
-  expect_code 0 "$status" "V2 command extraction: $out"
-  pass "OpenCode V2 command guards read the complete shell tool input"
-}
-
-test_v2_watch_arm_same_location_binds_only_first_session() {
-  local repo out status result log
-  repo="$TMP_ROOT/watch-arm-first-only"
-  make_primary "$repo"
-  cat > "$repo/bin/fm-watch-arm.sh" <<'SH'
-#!/usr/bin/env bash
-printf 'armed %s\n' "${FM_STATE_OVERRIDE:-missing}" >> "${FM_ARM_LOG:?}"
-printf 'watcher: healthy pid=1 (beacon 0s)\n'
-SH
-  cat > "$repo/bin/fm-operational-input.sh" <<'SH'
-#!/usr/bin/env bash
-cat
-SH
-  chmod +x "$repo/bin/fm-watch-arm.sh" "$repo/bin/fm-operational-input.sh"
-  log="$TMP_ROOT/watch-arm-first.log"
-  out="$TMP_ROOT/watch-arm-first.json"
-  status=0
-  FM_ARM_LOG="$log" drive_v2 "$ROOT/.opencode/plugins/fm-primary-watch-arm.js" "$(jq -nc \
-    --arg dir "$repo" --arg out "$out" --arg lock "$repo/state/.lock" \
-    '{
-      directory: $dir,
-      out: $out,
-      lockFile: $lock,
-      settleMs: 800,
-      sessions: {
-        ses_a: { id: "ses_a", location: { directory: $dir } },
-        ses_b: { id: "ses_b", location: { directory: $dir } }
-      },
-      events: [
-        { type: "session.created", data: { sessionID: "ses_a", location: { directory: $dir } } },
-        { type: "session.created", data: { sessionID: "ses_b", location: { directory: $dir } } },
-        { type: "session.execution.succeeded", data: { sessionID: "ses_b" } }
-      ]
-    }')" || status=$?
-  expect_code 0 "$status" "same-location second session should run"
-  [ ! -f "$log" ] || fail "second root session at the same location armed the watcher: $(cat "$log")"
-  pass "OpenCode V2 watch-arm binds only the first root session at a location"
-}
-
-test_v2_watch_arm_requires_lock_ownership() {
-  local repo log out status
-  repo="$TMP_ROOT/watch-arm-read-only"
-  make_primary "$repo"
-  cat > "$repo/bin/fm-watch-arm.sh" <<'SH'
-#!/usr/bin/env bash
-printf 'armed\n' >> "${FM_ARM_LOG:?}"
-printf 'watcher: healthy pid=1 (beacon 0s)\n'
-SH
-  cat > "$repo/bin/fm-operational-input.sh" <<'SH'
-#!/usr/bin/env bash
-cat
-SH
-  chmod +x "$repo/bin/fm-watch-arm.sh" "$repo/bin/fm-operational-input.sh"
-  log="$TMP_ROOT/watch-arm-read-only.log"
-  out="$TMP_ROOT/watch-arm-read-only.json"
-  status=0
-  FM_ARM_LOG="$log" drive_v2 "$ROOT/.opencode/plugins/fm-primary-watch-arm.js" "$(jq -nc \
-    --arg dir "$repo" --arg out "$out" \
-    '{
-      directory: $dir,
-      out: $out,
-      settleMs: 800,
-      sessions: { ses_lead: { id: "ses_lead", location: { directory: $dir } } },
-      events: [ { type: "session.execution.succeeded", data: { sessionID: "ses_lead" } } ]
-    }')" || status=$?
-  expect_code 0 "$status" "read-only V2 watch-arm should stay inert"
-  [ ! -f "$log" ] || fail "a session without the fleet lock armed the watcher: $(cat "$log")"
-  pass "OpenCode V2 watch-arm stays inert unless this session owns the fleet lock"
-}
-
-test_v2_watch_arm_rejects_foreign_live_lock_owner() {
-  local repo log out status foreign
-  repo="$TMP_ROOT/watch-arm-foreign-lock"
-  make_primary "$repo"
-  cat > "$repo/bin/fm-watch-arm.sh" <<'SH'
-#!/usr/bin/env bash
-printf 'armed\n' >> "${FM_ARM_LOG:?}"
-printf 'watcher: healthy pid=1 (beacon 0s)\n'
-SH
-  cat > "$repo/bin/fm-operational-input.sh" <<'SH'
-#!/usr/bin/env bash
-cat
-SH
-  chmod +x "$repo/bin/fm-watch-arm.sh" "$repo/bin/fm-operational-input.sh"
-  log="$TMP_ROOT/watch-arm-foreign-lock.log"
-  out="$TMP_ROOT/watch-arm-foreign-lock.json"
-  sleep 60 &
-  foreign=$!
-  status=0
-  FM_ARM_LOG="$log" drive_v2 "$ROOT/.opencode/plugins/fm-primary-watch-arm.js" "$(jq -nc \
-    --arg dir "$repo" --arg out "$out" --arg lock "$repo/state/.lock" --argjson pid "$foreign" \
-    '{
-      directory: $dir,
-      out: $out,
-      lockFile: $lock,
-      lockPid: $pid,
-      settleMs: 800,
-      sessions: { ses_lead: { id: "ses_lead", location: { directory: $dir } } },
-      events: [
-        { type: "session.created", data: { sessionID: "ses_lead", location: { directory: $dir } } },
-        { type: "session.execution.succeeded", data: { sessionID: "ses_lead" } }
-      ]
-    }')" || status=$?
-  kill -0 "$foreign" 2>/dev/null || fail "foreign lock owner exited before the check; the lock pid was not live"
-  kill "$foreign" 2>/dev/null
-  wait "$foreign" 2>/dev/null
-  expect_code 0 "$status" "foreign-lock V2 watch-arm should stay inert"
-  [ "$(cat "$repo/state/.lock")" = "$foreign" ] || fail "fixture did not record the foreign lock pid"
-  [ ! -f "$log" ] || fail "a session whose fleet lock names a foreign live pid armed the watcher: $(cat "$log")"
-  pass "OpenCode V2 watch-arm stays inert when the fleet lock names a live pid outside this process ancestry"
-}
-
-test_v2_child_session_does_not_bind_or_arm() {
-  local repo log out status
-  repo="$TMP_ROOT/watch-arm-child"
-  make_primary "$repo"
-  cat > "$repo/bin/fm-watch-arm.sh" <<'SH'
-#!/usr/bin/env bash
-printf 'armed\n' >> "${FM_ARM_LOG:?}"
-printf 'watcher: healthy pid=1 (beacon 0s)\n'
-SH
-  cat > "$repo/bin/fm-operational-input.sh" <<'SH'
-#!/usr/bin/env bash
-cat
-SH
-  chmod +x "$repo/bin/fm-watch-arm.sh" "$repo/bin/fm-operational-input.sh"
-  log="$TMP_ROOT/watch-arm-child.log"
-  out="$TMP_ROOT/watch-arm-child.json"
-  status=0
-  FM_ARM_LOG="$log" drive_v2 "$ROOT/.opencode/plugins/fm-primary-watch-arm.js" "$(jq -nc \
-    --arg dir "$repo" --arg out "$out" --arg lock "$repo/state/.lock" \
-    '{
-      directory: $dir,
-      out: $out,
-      lockFile: $lock,
-      settleMs: 800,
-      sessions: { ses_child: { id: "ses_child", parentID: "ses_lead", location: { directory: $dir } } },
-      events: [
-        { type: "session.created", data: { sessionID: "ses_child", location: { directory: $dir } } },
-        { type: "session.execution.succeeded", data: { sessionID: "ses_child" } }
-      ]
-    }')" || status=$?
-  expect_code 0 "$status" "child-session V2 watch-arm should stay inert"
-  [ ! -f "$log" ] || fail "a child session bound the plugin and armed the watcher: $(cat "$log")"
-  pass "OpenCode V2 session binding proves root parentage before arming"
-}
-
-test_v2_pretool_helper_error_is_not_approval() {
-  local repo out status result
-  guard_runtime_ready "unevaluable guard denial" || return 0
-  repo="$TMP_ROOT/pretool-missing"
-  make_primary "$repo"
-  out="$TMP_ROOT/pretool-missing.json"
-  status=0
-  drive_v2_guard "$ROOT/.opencode/plugins/fm-primary-pretool-check.js" \
-    "$(guard_tool_event "$repo" "$out" shell "true")" || status=$?
-  expect_code 0 "$status" "missing helper should still evaluate"
-  result=$(cat "$out")
-  printf '%s' "$result" | jq -e '.outcome == "failed" and .tag == "Tool.Error"' >/dev/null \
-    || fail "missing helper was treated as approval: $result"
-  pass "OpenCode V2 pretool rejects the call when the guard helper cannot be evaluated"
-}
-
-test_v2_guard_without_runtime_denies_every_primary_shell_call() {
-  local repo wt out status
-  repo="$TMP_ROOT/no-runtime-primary"
-  wt="$TMP_ROOT/no-runtime-worker"
-  make_primary "$repo"
-  git -C "$repo" -c user.name=t -c user.email=t@t commit -q --allow-empty -m init
-  git -C "$repo" worktree add -q "$wt" -b no-runtime-worker
-  mkdir -p "$wt/bin"
-  : > "$wt/AGENTS.md"
-  out=$(PRIMARY="$repo" WORKER="$wt" node --input-type=module 2>&1 <<EOF
-import { pathToFileURL } from "node:url";
-const mod = await import(pathToFileURL("$ROOT/.opencode/plugins/lib/fm-command-guard-v2.js").href);
-const entry = mod.commandGuardEntrypoint({ helper: "fm-cd-pretool-check.sh", fallbackReason: "x" }, null);
-if (entry.effect || typeof entry.setup !== "function") throw new Error("missing runtime must not offer the Effect entrypoint");
-
-async function evaluate(directory, action) {
-  const hooks = [];
-  await entry.setup({
-    location: { directory },
-    permission: { async hook(name, callback) { hooks.push({ name, callback }); } },
-  });
-  const event = { sessionID: "ses_lead", action, resources: ["git status"], effect: "allow" };
-  for (const hook of hooks) if (hook.name === "evaluate") await hook.callback(event);
-  return event;
-}
-
-const shell = await evaluate(process.env.PRIMARY, "shell");
-if (shell.effect !== "deny") throw new Error("primary shell call was not denied: " + JSON.stringify(shell));
-if (!shell.message.includes("npm ci --prefix .opencode/plugins")) throw new Error("denial lacks the install command: " + shell.message);
-const read = await evaluate(process.env.PRIMARY, "read");
-if (read.effect !== "allow") throw new Error("non-shell permission was changed: " + JSON.stringify(read));
-const worker = await evaluate(process.env.WORKER, "shell");
-if (worker.effect !== "allow") throw new Error("worker worktree shell call was denied: " + JSON.stringify(worker));
-EOF
-)
-  status=$?
-  expect_code 0 "$status" "guard without runtime: $out"
-  pass "OpenCode V2 guards deny every primary shell call with the install command when the effect runtime is missing"
-}
-
-test_v2_guard_surfaces_effect_import_failure() {
-  local repo lib out status
-  repo="$TMP_ROOT/import-failure-primary"
-  lib="$TMP_ROOT/import-failure-lib"
-  make_primary "$repo"
-  mkdir -p "$lib"
-  cp "$ROOT/.opencode/plugins/lib/"*.js "$lib/"
-  out=$(env -u NODE_PATH PRIMARY="$repo" LIB="$lib" node --input-type=module 2>&1 <<'EOF'
-import { pathToFileURL } from "node:url";
-const mod = await import(pathToFileURL(process.env.LIB + "/fm-command-guard-v2.js").href);
-const entry = mod.commandGuardEntrypoint({ helper: "fm-cd-pretool-check.sh", fallbackReason: "x" });
-if (entry.effect || typeof entry.setup !== "function") throw new Error("an unresolvable effect runtime must not offer the Effect entrypoint");
-const hooks = [];
-await entry.setup({
-  location: { directory: process.env.PRIMARY },
-  permission: { async hook(name, callback) { hooks.push({ name, callback }); } },
+  chmod +x "$lab/bin/fm-watch-arm.sh"
+  cp "$ROOT/bin/fm-operational-input.sh" "$lab/bin/fm-operational-input.sh"
+  out=$(ROOT="$ROOT" LAB="$lab" node --input-type=module 2>&1 <<'JS'
+import fs from 'node:fs';import assert from 'node:assert/strict';import {pathToFileURL} from 'node:url';
+const root=pathToFileURL(process.env.ROOT+'/');
+const {createWatchArmCoordinator}=await import(new URL('.opencode/plugins/lib/fm-watch-arm-v2.js',root));
+const {createAdmissionJournal}=await import(new URL('.opencode/plugins/fm-native-v2/admission.js',root));
+const p={root:process.env.LAB,home:process.env.LAB,state:process.env.LAB+'/state',config:process.env.LAB+'/config'};
+let admitted=false,failures=[];
+const journal=createAdmissionJournal(p,'ses_coordinator',async input=>{
+  assert.equal(fs.readFileSync(p.state+'/order','utf8').trim(),'confirmed');
+  fs.appendFileSync(p.state+'/order','admitted\n');admitted=true;return{id:input.id};
 });
-const event = { sessionID: "ses_lead", action: "shell", resources: ["git status"], effect: "allow" };
-for (const hook of hooks) if (hook.name === "evaluate") await hook.callback(event);
-if (event.effect !== "deny") throw new Error("primary shell call was not denied: " + JSON.stringify(event));
-if (!event.message.includes("npm ci --prefix .opencode/plugins")) throw new Error("denial lacks the install command: " + event.message);
-const reported = event.message.split("Import error: ")[1] || "";
-if (!/effect/.test(reported)) throw new Error("denial lacks the underlying import error: " + event.message);
-EOF
-)
-  status=$?
-  expect_code 0 "$status" "guard import failure: $out"
-  pass "OpenCode V2 guards surface the underlying effect import error in the primary shell denial"
+const c=createWatchArmCoordinator(p,()=>{throw new Error('unpersisted admission');},{owns:()=>true,admission:journal,failure:reason=>failures.push(reason)});
+await c.ensureArmed('ses_coordinator');
+for(let i=0;i<100&&!admitted;i++)await new Promise(resolve=>setTimeout(resolve,20));
+assert.equal(admitted,true,JSON.stringify(failures));
+assert.equal(fs.readFileSync(p.state+'/order','utf8'),'confirmed\nadmitted\n');
+const pid=Number(fs.readFileSync(p.state+'/arm-pid','utf8'));
+await c.cleanup();
+assert.throws(()=>process.kill(pid,0));
+assert.equal(fs.readFileSync(p.state+'/.wake-queue','utf8'),'100\t1\tsignal\ttask\tready\n');
+console.log('persistent admission precedes handoff; confirmation precedes delivery; cleanup retires child');
+JS
+  ) || fail "$out"
+  pass "$out"
 }
 
-test_v2_worker_worktree_is_inert_when_canonical_is_primary() {
-  local repo wt log out status
-  repo="$TMP_ROOT/canonical-primary"
-  wt="$TMP_ROOT/canonical-worker"
-  make_primary "$repo"
-  git -C "$repo" -c user.name=t -c user.email=t@t commit -q --allow-empty -m init
-  git -C "$repo" worktree add -q "$wt" -b worker
-  mkdir -p "$wt/bin" "$wt/state"
-  : > "$wt/AGENTS.md"
-  : > "$wt/state/task.meta"
-  cat > "$repo/bin/fm-watch-arm.sh" <<'SH'
-#!/usr/bin/env bash
-printf 'armed\n' >> "${FM_ARM_LOG:?}"
-printf 'watcher: healthy pid=1 (beacon 0s)\n'
-SH
-  cp "$repo/bin/fm-watch-arm.sh" "$wt/bin/fm-watch-arm.sh"
-  cat > "$repo/bin/fm-operational-input.sh" <<'SH'
-#!/usr/bin/env bash
-cat
-SH
-  cp "$repo/bin/fm-operational-input.sh" "$wt/bin/fm-operational-input.sh"
-  chmod +x "$repo/bin/"*.sh "$wt/bin/"*.sh
-  log="$TMP_ROOT/canonical-worker.log"
-  out="$TMP_ROOT/canonical-worker.json"
-  status=0
-  FM_ARM_LOG="$log" drive_v2 "$ROOT/.opencode/plugins/fm-primary-watch-arm.js" "$(jq -nc \
-    --arg dir "$wt" --arg canonical "$repo" --arg out "$out" \
-    '{
-      directory: $dir,
-      canonical: $canonical,
-      out: $out,
-      settleMs: 800,
-      sessions: { ses_worker: { id: "ses_worker", location: { directory: $dir } } },
-      events: [
-        { type: "session.created", data: { sessionID: "ses_worker", location: { directory: $dir } } },
-        { type: "session.execution.succeeded", data: { sessionID: "ses_worker" } }
-      ]
-    }')" || status=$?
-  expect_code 0 "$status" "worker worktree setup should run"
-  [ ! -f "$log" ] || fail "a worker worktree session armed the primary's watcher: $(cat "$log")"
-  pass "OpenCode V2 watch-arm stays inert in a worker worktree whose project canonical is the primary"
-}
+test_native_exact_owner_and_transport
+test_v1_factories_preserved
+test_coordinator_persists_before_handoff
 
-test_v2_binder_releases_deleted_lead_session() {
-  local repo log out status result
-  repo="$TMP_ROOT/rebind-primary"
-  make_primary "$repo"
-  cat > "$repo/bin/fm-watch-arm.sh" <<'SH'
-#!/usr/bin/env bash
-printf 'armed\n' >> "${FM_ARM_LOG:?}"
-printf 'watcher: healthy pid=1 (beacon 0s)\n'
-SH
-  cat > "$repo/bin/fm-operational-input.sh" <<'SH'
-#!/usr/bin/env bash
-cat
-SH
-  chmod +x "$repo/bin/fm-watch-arm.sh" "$repo/bin/fm-operational-input.sh"
-  log="$TMP_ROOT/rebind.log"
-  out="$TMP_ROOT/rebind.json"
-  status=0
-  FM_ARM_LOG="$log" drive_v2 "$ROOT/.opencode/plugins/fm-primary-watch-arm.js" "$(jq -nc \
-    --arg dir "$repo" --arg out "$out" --arg lock "$repo/state/.lock" \
-    '{
-      directory: $dir,
-      out: $out,
-      lockFile: $lock,
-      settleMs: 800,
-      sessions: {
-        ses_a: { id: "ses_a", location: { directory: $dir } },
-        ses_b: { id: "ses_b", location: { directory: $dir } }
-      },
-      events: [
-        { type: "session.created", data: { sessionID: "ses_a", location: { directory: $dir } } },
-        { type: "session.deleted", data: { sessionID: "ses_a", info: { id: "ses_a" } } },
-        { type: "session.created", data: { sessionID: "ses_b", location: { directory: $dir } } },
-        { type: "session.execution.succeeded", data: { sessionID: "ses_b" } }
-      ]
-    }')" || status=$?
-  expect_code 0 "$status" "rebind after delete should run"
-  result=$(cat "$out")
-  [ -f "$log" ] || fail "replacement root session did not bind after the lead was deleted: $result"
-  pass "OpenCode V2 binder releases a deleted lead so a replacement root session binds"
-}
-
-test_v2_turnend_double_idle_consumes_skip_once() {
-  local repo out status result
-  repo="$TMP_ROOT/turnend-double-idle"
-  make_primary "$repo"
-  cat > "$repo/bin/fm-turnend-guard.sh" <<'SH'
-#!/usr/bin/env bash
-printf 'guard-fired\n' >&2
-exit 2
-SH
-  cat > "$repo/bin/fm-operational-input.sh" <<'SH'
-#!/usr/bin/env bash
-cat
-SH
-  chmod +x "$repo/bin/fm-turnend-guard.sh" "$repo/bin/fm-operational-input.sh"
-  out="$TMP_ROOT/turnend-double-idle.json"
-  status=0
-  drive_v2 "$ROOT/.opencode/plugins/fm-primary-turnend-guard.js" "$(jq -nc \
-    --arg dir "$repo" --arg out "$out" \
-    '{
-      directory: $dir,
-      out: $out,
-      settleMs: 800,
-      sessions: { ses_lead: { id: "ses_lead", location: { directory: $dir } } },
-      events: [
-        { type: "session.execution.succeeded", data: { sessionID: "ses_lead" } },
-        { type: "session.execution.interrupted", data: { sessionID: "ses_lead", reason: "user" } },
-        { type: "session.execution.started", data: { sessionID: "ses_lead" } },
-        { type: "session.execution.succeeded", data: { sessionID: "ses_lead" } },
-        { type: "session.execution.interrupted", data: { sessionID: "ses_lead", reason: "user" } },
-        { type: "session.execution.started", data: { sessionID: "ses_lead" } },
-        { type: "session.execution.succeeded", data: { sessionID: "ses_lead" } },
-        { type: "session.execution.interrupted", data: { sessionID: "ses_lead", reason: "user" } }
-      ]
-    }')" || status=$?
-  expect_code 0 "$status" "double idle turnend should run"
-  result=$(cat "$out")
-  printf '%s' "$result" | jq -e '.prompts | length == 2' >/dev/null \
-    || fail "expected one blind-turn prompt, one skipped follow-up, then one more prompt; got $result"
-  pass "OpenCode V2 turnend treats one execution terminal event per busy period as one turn end"
-}
-
-test_v2_default_export_is_struct_with_one_v1_factory() {
-  local out status wt
-  wt="$TMP_ROOT/v1-loader-worktree"
-  mkdir -p "$wt"
-  out=$(WT="$wt" node --input-type=module 2>&1 <<EOF
-import { pathToFileURL } from "node:url";
-const files = [
-  "fm-primary-watch-arm.js",
-  "fm-primary-turnend-guard.js",
-  "fm-primary-sessionstart-nudge.js",
-  "fm-primary-pretool-check.js",
-  "fm-primary-cd-check.js",
-];
-const input = { client: {}, directory: process.env.WT, worktree: process.env.WT };
-for (const file of files) {
-  const mod = await import(pathToFileURL("$ROOT/.opencode/plugins/" + file).href);
-  const def = mod.default;
-  if (!def || typeof def !== "object" || typeof def === "function") throw new Error(file + ": default is not a plain struct");
-  if (typeof def.id !== "string" || !def.id) throw new Error(file + ": default.id missing");
-  if (typeof (def.effect ?? def.setup) !== "function") throw new Error(file + ": default V2 entrypoint missing");
-  if (typeof def.server !== "function") throw new Error(file + ": default.server missing");
-  const factories = new Set();
-  for (const [name, value] of Object.entries(mod)) {
-    const factory = name === "default" ? value.server : value;
-    if (typeof factory === "function") factories.add(factory);
+test_frozen_endpoint_and_worker_execution() {
+  local out
+  out=$(ROOT="$ROOT" LAB="$TMP_ROOT/endpoint" node --input-type=module 2>&1 <<'JS'
+import assert from 'node:assert/strict';import fs from 'node:fs';import {spawn,spawnSync} from 'node:child_process';import {pathToFileURL} from 'node:url';
+const root=process.env.ROOT,lab=process.env.LAB;
+fs.mkdirSync(lab+'/bin',{recursive:true});fs.mkdirSync(lab+'/native',{recursive:true});fs.mkdirSync(lab+'/home/state',{recursive:true});fs.mkdirSync(lab+'/home/config',{recursive:true});
+const owner=await import(pathToFileURL(root+'/bin/fm-opencode-v2-owner.mjs'));
+const session=await import(pathToFileURL(root+'/bin/fm-opencode-v2-session.mjs'));
+const me=owner.identity(process.pid),endpoint='http://127.0.0.1:23456';
+process.env.FM_V2_REGISTRY_NAMESPACE='test-endpoint-'+process.pid;
+process.env.FIXTURE_STATE=lab+'/native';process.env.FIXTURE_PID=String(process.pid);process.env.FIXTURE_ROOT=root;process.env.FIXTURE_LOG=lab+'/api.log';process.env.FIXTURE_ACTIVE=lab+'/active';
+fs.writeFileSync(lab+'/native/service.json',JSON.stringify({pid:me.pid,url:endpoint,password:'private-fixture'}),{mode:0o600});
+fs.writeFileSync(lab+'/bin/shuvcode',`#!/usr/bin/env node
+const fs=require('fs'),a=process.argv.slice(2),e=process.env;
+if(a[0]==='debug'){console.log('state '+e.FIXTURE_STATE);process.exit(0)}
+if(a[0]!=='api'||a[1]!=='--server'||a[2]!=='${endpoint}'||e.OPENCODE_PASSWORD!=='private-fixture')process.exit(90);
+const op=a[3];fs.appendFileSync(e.FIXTURE_LOG,op+'\\n');
+const sid='ses_endpoint';
+if(op==='server.info')console.log(JSON.stringify({pid:Number(e.FIXTURE_PID)}));
+else if(op==='shell.list')console.log(JSON.stringify({data:[{pid:Number(e.FIXTURE_SHELL_PID),status:'running',cwd:e.FIXTURE_CWD||e.FIXTURE_ROOT,command:'fixture model tool',metadata:{sessionID:e.FIXTURE_META||sid}}]}));
+else if(op==='session.get')console.log(JSON.stringify({data:{id:e.FIXTURE_WRONG||sid,location:{directory:e.FIXTURE_ROOT},model:{providerID:'fixture',id:'echo'}}}));
+else if(op==='session.active')console.log(JSON.stringify({data:fs.existsSync(e.FIXTURE_ACTIVE)?{[sid]:{type:'running'}}:{}}));
+ else if(op==='session.interrupt'){if(!a.includes('sessionID='+sid)||!a.includes('resume=false'))process.exit(91);fs.rmSync(e.FIXTURE_ACTIVE,{force:true});console.log(JSON.stringify({interrupted:e.FIXTURE_IDLE_INTERRUPT!=='1'}))}
+else process.exit(92);
+`,{mode:0o700});
+process.env.PATH=lab+'/bin:'+process.env.PATH;
+const partial={version:1,sessionID:'ses_endpoint',claimID:'d'.repeat(48),root,home:lab+'/home',state:lab+'/home/state',config:lab+'/home/config',servicePID:me.pid,serviceStart:me.start,hostBootID:me.boot,serviceURL:endpoint,lifecycle:'claimed'};
+const child=spawn(process.execPath,['--input-type=module','-e',`import * as o from ${JSON.stringify(pathToFileURL(root+'/bin/fm-opencode-v2-owner.mjs').href)};const me=o.identity(process.pid);const r={...JSON.parse(process.env.RECORD),ownerPID:me.pid,ownerStart:me.start};o.publish('claim',r);console.log(JSON.stringify(r));setInterval(()=>{},10000);`],{env:{...process.env,RECORD:JSON.stringify(partial)},stdio:['ignore','pipe','pipe']});
+let r;
+try {
+ r=await new Promise((resolve,reject)=>{let text='';child.stdout.on('data',c=>{text+=c;if(text.includes('\n'))resolve(JSON.parse(text.trim()))});child.on('exit',()=>reject(new Error('owner fixture exited')));child.stderr.on('data',c=>reject(new Error(String(c))));});
+ fs.writeFileSync(r.state+'/.lock',String(r.ownerPID),{mode:0o600});
+ const env={...process.env,FM_HOME:r.home,FM_ROOT_OVERRIDE:root,FM_STATE_OVERRIDE:r.state,FM_CONFIG_OVERRIDE:r.config,OPENCODE_SESSION_ID:r.sessionID};
+ const helper=(extra={})=>spawnSync('bash',['-c','export FIXTURE_SHELL_PID=$$; node "$1/bin/fm-opencode-v2-owner.mjs" helper "$FM_STATE_OVERRIDE"','fixture',root],{encoding:'utf8',env:{...env,...extra}});
+ assert.equal(helper().status,0);
+ assert.notEqual(helper({FIXTURE_CWD:lab}).status,0);
+ assert.notEqual(helper({FIXTURE_META:'ses_worker'}).status,0);
+ assert.throws(()=>owner.registeredService('http://127.0.0.1:9999'),/unregistered/);
+ const primary=spawnSync(root+'/bin/fm-opencode-v2-primary.sh',['--session',r.sessionID,'--native-binary','/bin/true','--server','http://127.0.0.1:9999'],{encoding:'utf8',env:{...env,FM_HOME:r.home}});
+ assert.notEqual(primary.status,0);assert.match(primary.stderr,/unregistered/);
+ assert.throws(()=>owner.nativeAPI({...r,serviceURL:undefined},'server.info'),/endpoint/);
+ assert.throws(()=>owner.schema({...r,serviceURL:'http://user:secret@127.0.0.1:23456'}),/endpoint/);
+ assert.equal(owner.registeredService(endpoint).serviceURL,endpoint);
+ const defaultPrimary=spawnSync(root+'/bin/fm-opencode-v2-primary.sh',['--session',r.sessionID,'--native-binary','/bin/echo'],{encoding:'utf8',env:{...env,FM_HOME:r.home}});
+ assert.equal(defaultPrimary.status,0,defaultPrimary.stderr);assert.equal(defaultPrimary.stdout.trim(),'--server '+endpoint+' --session '+r.sessionID);
+ const beforeRefusal=fs.readFileSync(process.env.FIXTURE_LOG,'utf8');
+ fs.renameSync(lab+'/native/service.json',lab+'/native/retained.json');
+ assert.throws(()=>owner.nativeAPI(r,'server.info'),/unregistered/);
+ const unregisteredHelper=helper();assert.notEqual(unregisteredHelper.status,0);assert.match(unregisteredHelper.stderr,/unregistered/);
+ assert.equal(fs.readFileSync(process.env.FIXTURE_LOG,'utf8'),beforeRefusal,'missing endpoint registration must not query/start another service');
+ fs.renameSync(lab+'/native/retained.json',lab+'/native/service.json');
+ assert.throws(()=>owner.publish('claim',{...r,serviceURL:'http://127.0.0.1:9999'}),/conflicting/);
+ const worker=lab+'/worker.json';owner.writePrivate(worker,{version:1,sessionID:r.sessionID,location:{directory:root},model:{providerID:'fixture',id:'echo'},serviceURL:endpoint,servicePID:me.pid,serviceStart:me.start,hostBootID:me.boot});
+ fs.writeFileSync(process.env.FIXTURE_ACTIVE,'running');
+ assert.equal((await session.reconcileWorker('status',worker,root)).executing,true);
+ await assert.rejects(session.reconcileWorker('teardown',worker,root),/still executing/);
+ assert.equal((await session.reconcileWorker('interrupt',worker,root)).executing,false);
+ assert.equal((await session.reconcileWorker('teardown',worker,root)).executing,false);
+ fs.writeFileSync(process.env.FIXTURE_ACTIVE,'running');
+ assert.equal((await session.reconcileWorker('discard',worker,root)).executing,false);
+ process.env.FIXTURE_WRONG='ses_other';await assert.rejects(session.reconcileWorker('interrupt',worker,root),/identity/);delete process.env.FIXTURE_WRONG;
+ // Drive lifecycle executables too: a dead pane cannot suppress native
+ // cancellation, and executing work refuses cleanup before any return action.
+ const work=lab+'/work',state=r.state,task='native-worker';fs.mkdirSync(work);
+ process.env.FIXTURE_ROOT=work;
+ owner.writePrivate(state+'/'+task+'.opencode-v2-session.json',{...owner.readPrivate(worker),location:{directory:work}});
+ fs.writeFileSync(lab+'/bin/tmux','#!/bin/bash\nif [ "$1" = send-keys ]; then echo unsafe-pane-action >> "$FIXTURE_LOG"; fi\necho bash\n',{mode:0o700});
+ fs.writeFileSync(lab+'/bin/treehouse','#!/bin/bash\necho unsafe-return >> "$FIXTURE_LOG"\nexit 1\n',{mode:0o700});
+ fs.writeFileSync(r.config+'/backlog-backend','manual\n');fs.writeFileSync(state+'/.last-watcher-beat','');
+ const meta=spawnSync('bash',['-c','. "$1/tests/lib.sh"; fm_write_meta "$2/native-worker.meta" "window=firstmate:fm-native-worker" "endpoint_task_id=native-worker" "backend=tmux" "harness=opencode-v2" "kind=ship" "mode=local-only" "spawn_gen=native-test" "worktree=$3" "project=$3"','fixture',root,state,work],{encoding:'utf8',env:process.env});
+ assert.equal(meta.status,0,meta.stderr);
+ const lifecycleEnv={...process.env,FM_HOME:r.home,FM_ROOT_OVERRIDE:root,FM_STATE_OVERRIDE:state,FM_CONFIG_OVERRIDE:r.config};delete lifecycleEnv.OPENCODE_SESSION_ID;
+ fs.writeFileSync(process.env.FIXTURE_ACTIVE,'running');
+ const refuse=spawnSync(root+'/bin/fm-teardown.sh',[task],{encoding:'utf8',env:lifecycleEnv});
+ assert.notEqual(refuse.status,0);assert.match(refuse.stderr,/still executing/,refuse.stderr);assert.equal(fs.existsSync(work),true);
+ const cancel=spawnSync(root+'/bin/fm-control.sh',[task,'interrupt'],{encoding:'utf8',env:lifecycleEnv});
+ assert.equal(cancel.status,0,cancel.stderr);assert.match(cancel.stdout,/verified=native-session cancel=confirmed/);assert.equal(fs.existsSync(process.env.FIXTURE_ACTIVE),false);
+ assert.doesNotMatch(fs.readFileSync(process.env.FIXTURE_LOG,'utf8'),/unsafe-pane-action|unsafe-return/);
+ // Failed-launch lifecycle: real isolated git copies, actual launcher refusal,
+ // no sidecar/prompt, then successful exact exit and ordinary/forced cleanup.
+ const repo=lab+'/failed-project';
+ const git=(...args)=>{const result=spawnSync('git',args,{encoding:'utf8'});assert.equal(result.status,0,result.stderr);};
+ git('init','-q','-b','main',repo);git('-C',repo,'config','user.name','Fixture');git('-C',repo,'config','user.email','fixture@example.invalid');
+ fs.writeFileSync(repo+'/README.md','fixture\n');git('-C',repo,'add','README.md');git('-C',repo,'commit','-qm','fixture base');
+ fs.writeFileSync(lab+'/bin/treehouse','#!/bin/bash\nset -eu\n[ "$1" = return ] && [ "$2" = --force ] || exit 91\ngit worktree remove --force "$3"\n',{mode:0o700});
+ fs.writeFileSync(lab+'/bin/tmux','#!/bin/bash\nif [ "$1" = list-windows ]; then echo "fm-$FIXTURE_TASK"; elif [ "$1" = send-keys ]; then echo unsafe-pane-action >> "$FIXTURE_LOG"; else echo bash; fi\n',{mode:0o700});
+ for (const phase of ['absent-normal','absent-force','gone-force']) {
+   const forced=phase!=='absent-normal',id='failed-'+phase,wt=lab+'/'+id,sidecar=state+'/'+id+'.opencode-v2-session.json';
+   git('-C',repo,'worktree','add','-q','-b',id,wt);
+   const meta=spawnSync('bash',['-c','. "$1/tests/lib.sh"; fm_write_meta "$2/$3.meta" "window=firstmate:fm-$3" "endpoint_task_id=$3" "backend=tmux" "harness=opencode-v2" "kind=ship" "mode=local-only" "spawn_gen=failed-launch-test" "worktree=$4" "project=$5"','fixture',root,state,id,wt,repo],{encoding:'utf8',env:process.env});assert.equal(meta.status,0,meta.stderr);
+   const failedEnv={...lifecycleEnv,FIXTURE_TASK:id};
+   const before=fs.readFileSync(process.env.FIXTURE_LOG,'utf8');
+   const launch=spawnSync(root+'/bin/fm-opencode-v2-launch.sh',['--model','fixture/missing','--prompt','must not run','--session-record',sidecar],{cwd:wt,encoding:'utf8',env:lifecycleEnv});
+   assert.notEqual(launch.status,0);assert.equal(fs.existsSync(sidecar),false);assert.doesNotMatch(fs.readFileSync(process.env.FIXTURE_LOG,'utf8').slice(before.length),/session.prompt/);
+   fs.writeFileSync(state+'/'+id+'.status','failed: launch refused before prompt admission\n');
+    if(phase==='gone-force') {
+      owner.writePrivate(sidecar,{...owner.readPrivate(worker),location:{directory:wt},serviceStart:'0'});
+      fs.renameSync(lab+'/native/service.json',lab+'/native/retained.json');
+    }
+   const verdict=await session.reconcileWorker('status',sidecar,wt);
+    if(phase==='gone-force') assert.equal(verdict.incarnation,'unverifiable'); else assert.deepEqual(verdict,{executing:false,recorded:false});
+    const exit=spawnSync(root+'/bin/fm-control.sh',[id,'exit'],{encoding:'utf8',env:failedEnv});
+    const interrupt=spawnSync(root+'/bin/fm-control.sh',[id,'interrupt'],{encoding:'utf8',env:failedEnv});
+    if(phase==='gone-force') {
+      assert.notEqual(exit.status,0); assert.match(exit.stderr,/may resume/);
+      assert.notEqual(interrupt.status,0); assert.doesNotMatch(interrupt.stdout,/cancel=confirmed/);
+      const ordinary=spawnSync(root+'/bin/fm-teardown.sh',[id],{encoding:'utf8',env:failedEnv}); assert.notEqual(ordinary.status,0); assert.match(ordinary.stderr,/may resume/);
+      assert.equal(fs.existsSync(wt),true); assert.equal(fs.existsSync(state+'/'+id+'.meta'),true);
+    } else {
+      assert.equal(exit.status,0,exit.stderr); assert.match(exit.stderr,/no recorded native session/);
+      assert.equal(interrupt.status,0,interrupt.stderr); assert.match(interrupt.stdout,/cancel=not-needed/); assert.doesNotMatch(interrupt.stdout,/cancel=confirmed/);
+    }
+   const teardown=spawnSync(root+'/bin/fm-teardown.sh',[id,...(forced?['--force']:[])],{encoding:'utf8',env:failedEnv});
+    assert.equal(teardown.status,0,teardown.stderr+'\n'+teardown.stdout);assert.equal(fs.existsSync(wt),false);assert.equal(fs.existsSync(state+'/'+id+'.meta'),false);
+    if(phase==='gone-force') { assert.match(teardown.stderr,/forced discard without confirmed native cancellation/); fs.renameSync(lab+'/native/retained.json',lab+'/native/service.json'); }
+ }
+ // Absence is distinct from a present unsafe/malformed record, even after the
+ // service is gone. No damaged proof is permitted to claim "not executing".
+ const damaged=lab+'/damaged.json';fs.writeFileSync(damaged,'{',{mode:0o600});await assert.rejects(session.reconcileWorker('discard',damaged,root),SyntaxError);fs.unlinkSync(damaged);
+ owner.writePrivate(damaged,{...owner.readPrivate(worker),servicePID:1});await assert.rejects(session.reconcileWorker('discard',damaged,root),/invalid recorded/);
+ owner.writePrivate(damaged,{...owner.readPrivate(worker),serviceStart:'000'});await assert.rejects(session.reconcileWorker('discard',damaged,root),/invalid recorded/);
+ owner.writePrivate(damaged,owner.readPrivate(worker));fs.chmodSync(damaged,0o644);await assert.rejects(session.reconcileWorker('teardown',damaged,root),/unsafe record/);fs.chmodSync(damaged,0o600);
+  const absent=state+'/absent.opencode-v2-session.json';
+  fs.symlinkSync(lab+'/does-not-exist',absent);await assert.rejects(session.reconcileWorker('discard',absent,root),/symlink/);fs.unlinkSync(absent);
+  fs.writeFileSync(state+'/absent.busy-state','v1 gen=fixture seq=1 state=busy source=opencode-plugin event=started ts=1\n',{mode:0o600});
+  await assert.rejects(session.reconcileWorker('teardown',absent,root),/busy record.*--force/);
+  assert.equal((await session.reconcileWorker('discard',absent,root)).cancellation,'unconfirmed');fs.unlinkSync(state+'/absent.busy-state');
+  // A dead original can leave execution in the successor at the frozen endpoint.
+  process.env.FIXTURE_ROOT=root;
+ const deadService=spawn(process.execPath,['-e','setInterval(()=>{},10000)'],{stdio:'ignore'});
+ const birth=owner.identity(deadService.pid),deadRecord={...owner.readPrivate(worker),servicePID:birth.pid,serviceStart:birth.start,hostBootID:birth.boot};
+ const closed=new Promise(resolve=>deadService.on('close',resolve));deadService.kill();await closed;
+ owner.writePrivate(damaged,deadRecord);
+ let proofLog=fs.readFileSync(process.env.FIXTURE_LOG,'utf8');
+  fs.writeFileSync(process.env.FIXTURE_ACTIVE,'resumed');
+  assert.equal((await session.reconcileWorker('status',damaged,root)).executing,true);
+  await assert.rejects(session.reconcileWorker('teardown',damaged,root),/still executing/);
+  assert.equal((await session.reconcileWorker('interrupt',damaged,root)).cancellation,'confirmed');
+  assert.equal(fs.existsSync(process.env.FIXTURE_ACTIVE),false);
+  assert.equal(owner.readPrivate(damaged).servicePID,me.pid,'confirmed successor cancellation did not update recorded service binding');
+  assert.equal((await session.reconcileWorker('teardown',damaged,root)).executing,false);
+  owner.writePrivate(damaged,deadRecord);
+  assert.equal((await session.reconcileWorker('teardown',damaged,root)).cancellation,'confirmed'); // positive terminal acknowledgment settles old claim
+  owner.writePrivate(damaged,deadRecord);
+  process.env.FIXTURE_IDLE_INTERRUPT='1';
+  assert.equal((await session.reconcileWorker('status',damaged,root)).cancellation,'unproven');
+  assert.equal((await session.reconcileWorker('status',damaged,root)).executing,null);
+  await assert.rejects(session.reconcileWorker('teardown',damaged,root),/no terminal cancellation/);
+  await assert.rejects(session.reconcileWorker('interrupt',damaged,root),/no terminal cancellation/);
+  assert.equal((await session.reconcileWorker('discard',damaged,root)).cancellation,'unconfirmed');
+  delete process.env.FIXTURE_IDLE_INTERRUPT;
+  owner.writePrivate(damaged,{...owner.readPrivate(worker),serviceStart:'0'});assert.equal((await session.reconcileWorker('discard',damaged,root)).cancellation,'confirmed');
+  owner.writePrivate(damaged,{...owner.readPrivate(worker),hostBootID:'00000000-0000-0000-0000-000000000000'});assert.equal((await session.reconcileWorker('discard',damaged,root)).cancellation,'confirmed');
+  proofLog=fs.readFileSync(process.env.FIXTURE_LOG,'utf8');
+  owner.writePrivate(damaged,deadRecord);
+  fs.renameSync(lab+'/native/service.json',lab+'/native/retained.json');
+  for(const action of ['teardown','interrupt']) await assert.rejects(session.reconcileWorker(action,damaged,root),/may resume/);
+  assert.equal((await session.reconcileWorker('discard',damaged,root)).cancellation,'unconfirmed');
+  assert.equal(fs.readFileSync(process.env.FIXTURE_LOG,'utf8'),proofLog,'offline service must never start/query a default');
+  fs.renameSync(lab+'/native/retained.json',lab+'/native/service.json');
+ owner.writePrivate(damaged,owner.readPrivate(worker));
+ fs.renameSync(lab+'/native/service.json',lab+'/native/retained.json');
+ await assert.rejects(session.reconcileWorker('discard',damaged,root),/unregistered/); // matching original process still lives
+ fs.renameSync(lab+'/native/retained.json',lab+'/native/service.json');
+ assert.equal(fs.readFileSync(process.env.FIXTURE_LOG,'utf8'),proofLog,'live unverifiable service must refuse without cancellation');
+ const replacement=spawn(process.execPath,['-e','setInterval(()=>{},10000)'],{stdio:'ignore'}),replacementClosed=new Promise(resolve=>replacement.on('close',resolve));
+ const originalRegistration=owner.readPrivate(lab+'/native/service.json');
+ try {
+   owner.writePrivate(lab+'/native/service.json',{...originalRegistration,pid:replacement.pid});
+   await assert.rejects(session.reconcileWorker('discard',damaged,root),/different service incarnation/);
+   assert.equal(fs.readFileSync(process.env.FIXTURE_LOG,'utf8'),proofLog,'registration replacement must not prove the still-live original service stopped');
+ } finally {owner.writePrivate(lab+'/native/service.json',originalRegistration);replacement.kill();await replacementClosed;}
+  const log=fs.readFileSync(process.env.FIXTURE_LOG,'utf8');assert.match(log,/shell.list/);assert.equal(log.split('session.interrupt').length-1,10);
+  const sample={record:owner.readPrivate(worker),binding:owner.readPrivate(worker),args:[],executing:false};
+  let age=31000,latest={type:'assistant',finish:'stop',time:{completed:Date.now()-500}},active={},waited=0;
+  const deps={timing:()=>({age,started:Date.now()-age}),wait:async ms=>{assert.equal(ms,1000);waited++;},api:(_record,op,args)=>{
+    if(op==='session.active') return {data:active};
+    assert.equal(op,'session.message.list'); assert.ok(args.includes('order=desc')); assert.ok(args.includes('limit=1')); return {data:[latest]};
+  }};
+  assert.equal(await session.settledSuccessor(sample,deps),true);assert.equal(waited,1);
+  for(const outcome of ['succeeded','failed','interrupted']) {
+    latest={type:'idle',outcome,time:{created:Date.now()-60000}};assert.equal(await session.settledSuccessor(sample,deps),true);
   }
-  if (factories.size !== 2) throw new Error(file + ": expected the named V1 factory plus default.server, got " + factories.size);
-  const hooks = await def.server(input);
-  if (!hooks || typeof hooks !== "object") throw new Error(file + ": default.server returned no V1 hooks");
+  latest={type:'assistant',finish:'stop',time:{completed:Date.now()-60000}};assert.equal(await session.settledSuccessor(sample,deps),true);
+  age=29999;const beforeWait=waited;assert.equal(await session.settledSuccessor(sample,deps),false);assert.equal(waited,beforeWait);age=31000;
+  active={[r.sessionID]:{type:'running'}};assert.equal(await session.settledSuccessor(sample,deps),false);active={};
+  assert.equal(await session.settledSuccessor({...sample,executing:true},deps),false);
+  for(const message of [{type:'synthetic',text:'Continuing after restart',time:{created:Date.now()-500}},{type:'user',time:{completed:Date.now()-500}},{type:'assistant',finish:'tool-calls',time:{completed:Date.now()-500}},{type:'assistant',finish:'stop',time:{}},{type:'idle',outcome:'shutdown',time:{created:Date.now()-60000}}]) {
+    latest=message;assert.equal(await session.settledSuccessor(sample,deps),false);
+  }
+ console.log('frozen registered endpoint, cwd/session divergence and exact worker execution/cancellation passed');
+} finally {child.kill();await new Promise(resolve=>child.on('close',resolve));owner.publish('cleanup-test-namespace',{});}
+JS
+  ) || fail "endpoint/execution behavior: $out"
+  pass "$out"
 }
-EOF
-)
-  status=$?
-  expect_code 0 "$status" "plugin export shape: $out"
-  pass "OpenCode plugin defaults are structs with id, a V2 entrypoint, and a server wrapping the V1 factory"
-}
+test_frozen_endpoint_and_worker_execution
 
-test_v2_watch_arm_does_not_cross_own_sessions
-test_v2_watch_arm_same_location_binds_only_first_session
-test_v2_watch_arm_requires_lock_ownership
-test_v2_watch_arm_rejects_foreign_live_lock_owner
-test_v2_child_session_does_not_bind_or_arm
-test_v2_worker_worktree_is_inert_when_canonical_is_primary
-test_v2_binder_releases_deleted_lead_session
-test_v2_turnend_double_idle_consumes_skip_once
-test_v2_default_export_is_struct_with_one_v1_factory
-test_v2_watch_arm_cleanup_stops_children
-test_v2_turnend_queues_follow_up_for_bound_session
-test_v2_sessionstart_does_not_mark_failed_admission
-test_v2_sessionstart_ignores_foreign_session
-test_v2_cd_guard_fails_bare_cd_with_typed_tool_error
-test_v2_pretool_fails_compound_backgrounded_arm_with_typed_tool_error
-test_v2_pretool_helper_error_is_not_approval
-test_v2_guard_without_runtime_denies_every_primary_shell_call
-test_v2_guard_surfaces_effect_import_failure
-test_v2_command_guard_reads_complete_tool_input
-test_v2_named_v1_factory_still_exported
+out=$(env ROOT="$ROOT" LAB="$TMP_ROOT/provider-host" node "$ROOT/tests/fixtures/fm-opencode-v2-provider-host.mjs" 2>&1) || fail "native provider/lifecycle regression: $out"
+pass "$out"
+
+out=$(env ROOT="$ROOT" LAB="$TMP_ROOT/real-recovery" node "$ROOT/tests/fixtures/fm-opencode-v2-real-recovery.mjs" 2>&1) || fail "real native recovery regression: $out"
+pass "$out"

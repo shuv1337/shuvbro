@@ -25,6 +25,22 @@ Wake, watcher, away-mode, and Relay-specific state mechanics remain with their n
 `AGENTS.md` retains the run-once and read-once operator rules, lock-refusal safety, installation consent, and direct-report recovery boundaries because those facts apply at every session start.
 Ordinary dead-direct-report recovery is owned by `stuck-crewmate-recovery`, while persistent-secondmate recovery is owned by `secondmate-provisioning`.
 
+## Native OpenCode V2 state and activation
+
+Shared-service qualification remains pending; the [native protocol](supervision-protocols/opencode-v2.md) owns current topology limits and activation/recovery behavior.
+Its restart contract covers at-least-once turn resumption, refusal until cancellation/settlement is proven, and the explicit replay risk accepted by forced discard; the [adapter reference](../.agents/skills/harness-adapters/references/harness/opencode-v2.md#dispatch) owns the pre-dispatch capability gate.
+The effective home state contains `.opencode-v2-owner.json` (canonical supplemental ownership proof), `.opencode-v2-failure.json` (bounded native diagnostic), and `.opencode-v2-admissions/<sha256(session)>/msg_*.json` (transport admission journal, not canonical queue acknowledgements).
+`bin/fm-opencode-v2-owner.mjs` owns strict proof schema, safe publication and discovery, `.opencode/plugins/fm-native-v2/tui.js` owns the diagnostic, and `.opencode/plugins/fm-native-v2/admission.js` owns journal phases and retention.
+`state/<id>.opencode-v2-session.json` binds a worker to its exact session, location/model and service endpoint/incarnation; `bin/fm-opencode-v2-launch.sh` publishes it before admission and `bin/fm-opencode-v2-session.mjs` owns execution checks and exact interruption before lifecycle cleanup.
+The fixed discovery projection is `<OS user's home>/.local/state/shuvbro/opencode-v2/<namespace>/<sha256(session)>.json`; XDG relocation and an overridden shell `HOME` never relocate it.
+`FM_V2_REGISTRY_NAMESPACE` defaults to `default` and accepts a 1-64 character token of ASCII letters, digits, underscore and hyphen, never a path; both native entries and helper processes must use the same token.
+Disposable tests must explicitly use a non-default namespace and the owner's `cleanup-test-namespace` command; do not remove or rewrite operator registrations.
+`FM_V2_ACTIVATION` is the launcher's serialized exact TUI/process/session claim, not a user-authored permission flag; workers and observer/helper environments strip it.
+`FM_V2_SERVICE_URL` is a helper-environment observation of the proof's immutable endpoint, not authority to retarget native API calls.
+The owner record freezes the credential-free `serviceURL`; API credentials remain in the native managed service registration and are read locally only for the matched endpoint/incarnation.
+An unregistered explicit `--server` is refused rather than querying the default service, and registration discovery does not start a service.
+Existing `FM_HOME`, `FM_ROOT_OVERRIDE`, `FM_STATE_OVERRIDE` and `FM_CONFIG_OVERRIDE` precedence is frozen at activation, including linked copies and external homes.
+
 ## Persona (config/persona)
 
 Presentation-only role names and tone for this home.
@@ -352,7 +368,7 @@ The full cmux home label also includes a short hash of the resolved `FM_ROOT` pa
 ## Harness support
 
 claude, codex, opencode, pi, pi-signed, grok, kimi, cursor, and omp are empirically verified for crewmate and secondmate launches; gemini is verified for crewmate and scout launches only, and [README requirements](../README.md#requirements) own the set supported for the primary session.
-opencode-v2 (shuvcode, the OpenCode V2 fork) is verified for the primary session and for crewmate and scout launches, and `fm-spawn.sh` refuses it for a secondmate until that role is qualified; [its adapter reference](../.agents/skills/harness-adapters/references/harness/opencode-v2.md) owns the launch template and process-identity facts, and [`docs/supervision-protocols/opencode-v2.md`](supervision-protocols/opencode-v2.md) owns its supervision protocol.
+opencode-v2 (shuvcode, the OpenCode V2 fork) has native primary and worker implementations pending combined shared-service qualification, and `fm-spawn.sh` refuses it for a secondmate until that role is qualified; [its adapter reference](../.agents/skills/harness-adapters/references/harness/opencode-v2.md) owns the launch template and process-identity facts, and [`docs/supervision-protocols/opencode-v2.md`](supervision-protocols/opencode-v2.md) owns its supervision protocol.
 A cursor secondmate or primary runs the tracked project-scope `.cursor/hooks.json` in its own home and must be launched with `--trust`, or no project hook loads; [`docs/supervision-protocols/cursor.md`](supervision-protocols/cursor.md) owns its supervision protocol.
 Cursor typed-submit confirmation is verified on tmux and Herdr only.
 On Zellij, cmux, and Orca a typed-plane Cursor send (a harness-native invocation or an explicit backend target; ordinary text steers ride the durable inbox and exit 0 at enqueue) lands, but `fm-send` reports delivery unconfirmed and exits non-zero because their shared submit core does not consult the busy footer; [runtime backend verification](verification/runtime-backends.md#cursor-agent-cli) owns the evidence and transcript-state boundary.

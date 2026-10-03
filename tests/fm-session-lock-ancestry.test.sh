@@ -268,6 +268,9 @@ SH
 }
 
 test_shuvcode_shared_service_cannot_hold_a_session_lock() {
+  if bash -c '. "$1"; fm_shuvcode_process_matches node "node /tmp/shuvcode/lab/run.mjs"' _ "$LIB"; then
+    fail "an unrelated lab script beneath a shuvcode-named directory became a launcher"
+  fi
   if bash -c '. "$1"; fm_shuvcode_process_matches shuvcode "shuvcode serve --service"' _ "$LIB"; then
     fail "the shared shuvcode service was accepted as a session-lock owner"
   fi
@@ -280,6 +283,34 @@ test_shuvcode_shared_service_cannot_hold_a_session_lock() {
   bash -c '. "$1"; fm_shuvcode_process_matches shuvcode "shuvcode serve --stdio --port 0"' _ "$LIB" \
     || fail "a standalone shuvcode server was not accepted as its session-lock owner"
   pass "session-lock: shared shuvcode service is rejected while standalone server is accepted"
+}
+
+test_shared_service_is_an_ancestry_barrier() {
+  local fakebin
+  fakebin=$(fm_fakebin "$TMP_ROOT/service-barrier")
+  cat > "$fakebin/ps" <<'SH'
+#!/usr/bin/env bash
+field= pid=
+while [ "$#" -gt 0 ]; do
+  case "$1" in -o) field=$2; shift 2 ;; -p) pid=$2; shift 2 ;; *) shift ;; esac
+done
+case "$pid:$field" in
+  710:comm=) echo shuvcode ;;
+  710:args=) echo 'shuvcode serve --service' ;;
+  710:ppid=) echo 700 ;;
+  700:comm=) echo shuvcode ;;
+  700:args=) echo 'shuvcode --session ses_parent' ;;
+  700:ppid=) echo 1 ;;
+  *:comm=) echo bash ;;
+  *:args=) echo bash ;;
+  *:ppid=) echo 710 ;;
+esac
+SH
+  chmod +x "$fakebin/ps"
+  if lib_eval "$fakebin" 'fm_harness_ancestry_pid'; then
+    fail "a shared-service child climbed through the service and adopted its unrelated TUI ancestor"
+  fi
+  pass "session-lock: shared service stops ancestry before an unrelated parent TUI"
 }
 
 # A tool subprocess under the shuvcode launch chain: either the node-interpreter
@@ -572,6 +603,7 @@ test_harness_beyond_a_gap_never_owns_the_lock
 test_competing_version_named_session_is_seen_as_live
 test_shuvcode_binary_session_is_identified_on_both_platforms
 test_shuvcode_shared_service_cannot_hold_a_session_lock
+test_shared_service_is_an_ancestry_barrier
 test_shuvcode_launcher_chain_is_found
 test_v1_opencode_still_matches_for_lock
 test_similar_named_node_process_is_never_claimed

@@ -42,9 +42,17 @@ if [ -r "$SCRIPT_DIR/fm-shuvcode-lib.sh" ]; then
   . "$SCRIPT_DIR/fm-shuvcode-lib.sh"
 else
   fm_shuvcode_process_matches() { return 1; }
+  fm_shuvcode_runtime_matches() { return 1; }
 fi
 
 detect_own() {
+  # A verified native lead's exact claim outranks a foreign marker inherited
+  # by the shared service. This is full ownership proof, not an env heuristic.
+  if [ -n "${OPENCODE_SESSION_ID:-}" ] && [ -f "$SCRIPT_DIR/fm-opencode-v2-owner.mjs" ] \
+    && node "$SCRIPT_DIR/fm-opencode-v2-owner.mjs" helper "${FM_STATE_OVERRIDE:-$FM_HOME/state}" acquire >/dev/null 2>&1; then
+    echo opencode-v2
+    return
+  fi
   # Layer 1: environment markers for verified harnesses.
   # Keep marker detection before ancestry detection as an explicit precedence rule.
   # Claude, Pi, Grok, and Cursor set verified markers of their own; codex,
@@ -144,7 +152,7 @@ detect_own() {
     # structural match and never executes a stranger binary. Its MainThread
     # exception is bounded by a whole shuvcode path component in args or argv0,
     # unlike the broad interpreter-name match forbidden below.
-    if fm_shuvcode_process_matches "$comm" "$args" "$argv0"; then
+    if fm_shuvcode_runtime_matches "$comm" "$args" "$argv0"; then
       echo opencode-v2
       return
     fi

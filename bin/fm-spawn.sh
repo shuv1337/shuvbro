@@ -882,7 +882,25 @@ RELAUNCH_REPLACEMENT_WT=
 CONFIG_INHERIT_LOCK=
 CONFIG_INHERIT_LOCK_HELD=0
 
+OPENCODE_V2_CANCEL_DONE=0
+OPENCODE_V2_CANCEL_NOTE=
+# An opencode-v2 prompt is admitted on the shared service before the pane
+# handshake, so pane death is not stopped execution. Every post-launch failure
+# cancels the exact recorded session once; returns 1 with a note if unproved.
+opencode_v2_cancel_admitted() {
+  local sidecar cancel
+  [ -n "${STATE_REAL:-}" ] && [ "$OPENCODE_V2_CANCEL_DONE" = 0 ] || return 0
+  sidecar="$STATE_REAL/$ID.opencode-v2-session.json"
+  [ -e "$sidecar" ] || [ -L "$sidecar" ] || return 0
+  OPENCODE_V2_CANCEL_DONE=1
+  cancel=$(fm_control_v2_interrupt "$STATE_REAL" "$ID" "${WT:-}" 2>&1) && return 0
+  OPENCODE_V2_CANCEL_NOTE="native worker cancellation unproved: ${cancel//$'\n'/ }"
+  return 1
+}
+
 spawn_fresh_commit_rollback() {
+  opencode_v2_cancel_admitted \
+    || echo "error: task $ID's $OPENCODE_V2_CANCEL_NOTE; the shared service may still execute it in ${WT:-its worktree}" >&2
   if fm_backlog_atomic_transition rollback "$STATE/$ID.meta" \
       "$FM_ROOT/bin/fm-busy-event.sh" "$STATE" "$ID" "${BUSY_GEN:-}"; then
     SPAWN_FRESH_COMMIT_PENDING=0
@@ -1206,6 +1224,26 @@ if [ "$KIND" = secondmate ]; then
   fi
   [ "$remote_spawn_rc" -eq 3 ] || exit "$remote_spawn_rc"
 fi
+# Probe V2 before even the transient spawn lock is published. Revalidate after
+# locked harness resolution below, so configuration/record changes cannot evade
+# the gate. This reads the same selector precedence without adopting a task.
+V2_CAPABILITY_PROBED=0
+if [ "$KIND" != secondmate ]; then
+  if [ -n "$HARNESS_ARG" ]; then
+    capability_harness=$HARNESS_ARG
+  elif [ "$RELAUNCH" -eq 1 ]; then
+    capability_harness=$(fm_meta_get "$STATE/$ID.meta" harness)
+  elif [ -n "${POS[2]:-}" ]; then
+    capability_harness=${POS[2]}
+  else
+    capability_harness=$("$FM_ROOT/bin/fm-harness.sh" crew)
+  fi
+  if [ "$capability_harness" = opencode-v2 ]; then
+    node "$FM_ROOT/bin/fm-opencode-v2-capability.mjs" "$FM_ROOT" >/dev/null || exit 1
+    V2_CAPABILITY_PROBED=1
+  fi
+fi
+
 # Backend selection (data/fm-backend-design-d7): explicit --backend, else
 # FM_BACKEND env, else config/backend, else runtime auto-detection, else
 # default tmux (fm_backend_name). fm_backend_validate_spawn refuses unknown or
@@ -1632,6 +1670,16 @@ case "$ARG3" in
     LAUNCH=$(launch_template "$HARNESS" "$KIND") || { echo "error: unknown harness '$HARNESS'; pass a raw launch command to use an unverified adapter" >&2; exit 1; }
     ;;
 esac
+
+if [ "$HARNESS" = opencode-v2 ] && [ "$V2_CAPABILITY_PROBED" -ne 1 ]; then
+  node "$FM_ROOT/bin/fm-opencode-v2-capability.mjs" "$FM_ROOT" >/dev/null || exit 1
+fi
+# The launch helper remains the authority; this refuses before any window so the
+# caller sees the exact lead-endpoint diagnostic instead of a pane timeout.
+if [ "$HARNESS" = opencode-v2 ] && [ -d "$STATE" ]; then
+  V2_LEAD_ENDPOINT=$(node "$FM_ROOT/bin/fm-opencode-v2-owner.mjs" lead-endpoint "$(cd "$STATE" && pwd -P)") || exit 1
+  [ -z "$V2_LEAD_ENDPOINT" ] || node "$FM_ROOT/bin/fm-opencode-v2-owner.mjs" service "$V2_LEAD_ENDPOINT" >/dev/null || exit 1
+fi
 
 # muse and gemini are verified as CREWMATE/SCOUT adapters only. A secondmate is
 # a firstmate instance, so it needs a primary supervision protocol.
@@ -3127,8 +3175,10 @@ opencode_v2_submit_prefill() {
 # Same orphan hazard as rovo: a launched --auto worker with no published task
 # record must not outlive a failed spawn.
 opencode_v2_spawn_fail() {  # <detail>
-  printf 'failed: %s\n' "$1" >> "$STATE/$ID.status"
-  echo "error: $1; inspect window $T" >&2
+  local detail=$1
+  opencode_v2_cancel_admitted || detail="$detail; $OPENCODE_V2_CANCEL_NOTE"
+  printf 'failed: %s\n' "$detail" >> "$STATE/$ID.status"
+  echo "error: $detail; inspect window $T" >&2
   rovo_endpoint_cleanup
 }
 
@@ -3396,7 +3446,7 @@ PKG
 // worker's busy state. Each owned terminal event touches the watcher's wake
 // NOTIFICATION; that marker is never current-state truth.
 import { execFile } from "node:child_process";
-import { realpathSync } from "node:fs";
+import { realpathSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 const busyEvent = (state, event) =>
   new Promise((resolve) => {
@@ -3437,7 +3487,7 @@ export const FmBusyState = async () => {
     },
   };
 };
-async function setupBusyStateV2(ctx) {
+export async function setupBusyStateV2(ctx) {
   const abort = new AbortController();
   const normalizeDir = (dir) => {
     if (!dir) return "";
@@ -3453,7 +3503,10 @@ async function setupBusyStateV2(ctx) {
   const sessionData = (event) => event.data || event.properties || {};
   async function owns(sessionID) {
     if (!sessionID) return false;
-    if (owned.has(sessionID)) return true;
+    try {
+      const assigned = JSON.parse(readFileSync("$STATE_REAL/$ID.opencode-v2-session.json", "utf8"));
+      if (assigned.sessionID !== sessionID) return false;
+    } catch { return false; }
     if (!ctx.session || typeof ctx.session.get !== "function") return false;
     try {
       const result = await ctx.session.get({ sessionID });
@@ -3501,14 +3554,29 @@ async function setupBusyStateV2(ctx) {
   return () => abort.abort();
 }
 export default {
-  id: "fm-busy-state",
-  setup: setupBusyStateV2,
+  id: "firstmate.v1.compat.worker",
+  setup() {},
   async server() {
     return FmBusyState();
   },
 };
 EOF
       exclude_path '.opencode/plugins/fm-busy-state.js'
+      if [ "$HARNESS" = opencode-v2 ]; then
+        if [ -d "$WT/.opencode/plugins/fm-worker-v2" ]; then
+          if ! jq -e --arg state "$STATE_REAL" --arg id "$ID" '.state==$state and .id==$id' \
+            "$WT/.opencode/plugins/fm-worker-v2/.fm-owned.json" >/dev/null 2>&1; then
+            echo 'error: existing native worker package is not owned by this task; refusing to overwrite it' >&2
+            exit 1
+          fi
+        fi
+        mkdir -p "$WT/.opencode/plugins/fm-worker-v2"
+        jq -cn --arg state "$STATE_REAL" --arg id "$ID" '{state:$state,id:$id}' > "$WT/.opencode/plugins/fm-worker-v2/.fm-owned.json"
+        printf '%s\n' 'import {setupBusyStateV2} from "../fm-busy-state.js";' \
+          'export default {id:"firstmate.worker.v2",setup:setupBusyStateV2};' > "$WT/.opencode/plugins/fm-worker-v2/server.js"
+        printf '%s\n' '{"name":"firstmate-worker-v2","private":true,"type":"module","exports":{"./server":"./server.js"}}' > "$WT/.opencode/plugins/fm-worker-v2/package.json"
+        exclude_path '.opencode/plugins/fm-worker-v2/'
+      fi
       ;;
     pi|pi-signed)
       # Written OUTSIDE the worktree: pi's project-trust gate fires on any extension
@@ -3939,10 +4007,10 @@ MODELFLAG=$(model_flag_for_harness "$HARNESS" "$MODEL") || exit 1
 EFFORTFLAG=$(effort_flag_for_harness "$HARNESS" "$EFFORT" "$MODEL") || exit 1
 # Preserve the root TUI's unattended permissions and composer handshake while
 # binding an explicitly requested model before its first prompt.
-if [ "$HARNESS" = opencode-v2 ] && [ -n "$MODELFLAG" ]; then
+if [ "$HARNESS" = opencode-v2 ]; then
   case "$LAUNCH" in
     'shuvcode --standalone --auto --prompt '*)
-      LAUNCH="$(shell_quote "$FM_ROOT/bin/fm-opencode-v2-launch.sh") ${MODELFLAG}${LAUNCH#shuvcode --standalone --auto }"
+      LAUNCH="env -u FM_V2_ACTIVATION $(shell_quote "$FM_ROOT/bin/fm-opencode-v2-launch.sh") --session-record $(shell_quote "$STATE_REAL/$ID.opencode-v2-session.json") ${MODELFLAG}${LAUNCH#shuvcode --standalone --auto }"
       ;;
     *)
       echo "error: opencode-v2 model launch could not use the model-bound root session helper" >&2

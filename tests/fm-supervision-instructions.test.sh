@@ -7,6 +7,26 @@ set -u
 
 TMP_ROOT=$(fm_test_tmproot fm-supervision-instructions)
 RENDER="$ROOT/bin/fm-supervision-instructions.sh"
+unset OPENCODE_SESSION_ID FM_V2_ACTIVATION
+
+# make_plain_checkout <dir>: a disposable plain (non-linked) primary checkout
+# carrying this tree's bin/, supervision protocols, and AGENTS.md, plus state/.
+make_plain_checkout() {
+  local dir=$1
+  mkdir -p "$dir/docs" "$dir/state" "$dir/config"
+  git init -q -b main "$dir"
+  cp -R "$ROOT/bin" "$dir/bin"
+  cp -R "$ROOT/docs/supervision-protocols" "$dir/docs/supervision-protocols"
+  cp "$ROOT/AGENTS.md" "$dir/AGENTS.md"
+  printf 'state/\nconfig/\n' > "$dir/.gitignore"
+  git -C "$dir" add -A
+  git -C "$dir" -c user.name=t -c user.email=t@example.invalid commit -q -m fixture
+}
+
+# The runner's own checkout may be a linked worktree with a live state/, so
+# cases that expect the plain-primary OpenCode V2 block pin a plain checkout.
+PLAIN_PRIMARY="$TMP_ROOT/plain-primary"
+make_plain_checkout "$PLAIN_PRIMARY"
 
 test_selected_harness_block_only() {
   local out
@@ -103,13 +123,13 @@ test_cross_harness_ordinary_continuation_and_repair_matrix() {
   out=$("$RENDER" --harness opencode --repair-line)
   assert_contains "$out" "manual recovery probe" "opencode recovery line lost its manual probe"
 
-  out=$("$RENDER" --harness opencode-v2)
+  out=$(FM_ROOT_OVERRIDE="$PLAIN_PRIMARY" "$RENDER" --harness opencode-v2)
   assert_contains "$out" "primary harness: opencode-v2" "opencode-v2 heading missing"
-  assert_contains "$out" "Mode: OpenCode V2 plugin background wake." "opencode-v2 snippet missing"
+  assert_contains "$out" "Mode: Unknown harness fallback." "unactivated plain V2 client lacks fallback"
   ordinary=$(printf '%s\n' "$out" | grep -F -- '- Ordinary wake:')
-  assert_contains "$ordinary" "plugin already owns watcher continuity" "opencode-v2 ordinary-wake line does not leave continuity to the plugin"
-  out=$("$RENDER" --harness opencode-v2 --repair-line)
-  assert_contains "$out" "manual recovery probe" "opencode-v2 recovery line lost its manual probe"
+  assert_contains "$ordinary" "automatic OpenCode V2 supervision is inactive" "unactivated plain V2 client claims ownership"
+  out=$(FM_ROOT_OVERRIDE="$PLAIN_PRIMARY" "$RENDER" --harness opencode-v2 --repair-line)
+  assert_contains "$out" "fm-opencode-v2-primary.sh" "unactivated V2 recovery line lost explicit launcher"
 
   out=$("$RENDER" --harness claude)
   ordinary=$(printf '%s\n' "$out" | grep -F -- '- Ordinary wake:')
@@ -201,6 +221,70 @@ test_pi_snippet_uses_effective_extension_path() {
   pass "pi supervision snippet renders the effective extension path"
 }
 
+# Each checkout renders through its own copy of the real script, exactly as a
+# session start in that checkout would.
+test_opencode_v2_linked_checkout_reports_inactive_supervision() {
+  local plain="$TMP_ROOT/v2-scope-plain" linked="$TMP_ROOT/v2-scope-linked" out ordinary
+  make_plain_checkout "$plain"
+  git -C "$plain" worktree add -q "$linked" -b linked-home
+  mkdir -p "$linked/state" "$linked/config"
+  [ "$(git -C "$linked" rev-parse --git-dir)" != "$(git -C "$linked" rev-parse --git-common-dir)" ] \
+    || fail "fixture vacuous: the linked checkout is not a linked worktree"
+
+  out=$("$plain/bin/fm-supervision-instructions.sh" --harness opencode-v2)
+  assert_contains "$out" "INACTIVE" "unactivated plain primary incorrectly claims native ownership"
+  assert_not_contains "$out" "plugin already owns watcher continuity" "unactivated plain primary claims plugin continuity"
+
+  out=$("$linked/bin/fm-supervision-instructions.sh" --harness opencode-v2)
+  ordinary=$(printf '%s\n' "$out" | grep -F -- '- Ordinary wake:')
+  assert_not_contains "$out" "plugin already owns watcher continuity" "linked checkout still claims the inert plugin owns continuity"
+  assert_not_contains "$out" "Mode: OpenCode V2 plugin background wake." "linked checkout still renders the plugin wake protocol"
+  assert_contains "$ordinary" "automatic OpenCode V2 supervision is inactive in this checkout" "linked ordinary-wake line does not state inactivity"
+  assert_contains "$out" "OpenCode V2 automatic supervision: INACTIVE in this checkout." "linked checkout lacks the inactive notice"
+  assert_contains "$out" "fm-opencode-v2-primary.sh" "linked checkout lacks explicit activation instructions"
+  assert_contains "$out" "Mode: Unknown harness fallback." "linked checkout lacks the unverified-wake fallback protocol"
+  assert_contains "$out" "bounded foreground wait over \`bin/fm-watch.sh\`" "linked fallback lost its bounded foreground wait"
+
+  out=$("$linked/bin/fm-supervision-instructions.sh" --harness opencode-v2 --repair-line)
+  assert_not_contains "$out" "letting the OpenCode TUI plugin arm" "linked repair line defers to the inert plugin"
+  assert_contains "$out" "inactive without exact activation" "linked repair line does not state inactivity"
+  out=$("$plain/bin/fm-supervision-instructions.sh" --harness opencode-v2 --repair-line)
+  assert_contains "$out" "inactive without exact activation" "unactivated plain repair claims plugin ownership"
+
+  rm -rf "$linked/state"
+  out=$("$linked/bin/fm-supervision-instructions.sh" --harness opencode-v2)
+  assert_contains "$out" "INACTIVE" "missing state incorrectly grants activation eligibility"
+  pass "opencode-v2 supervision instructions report inactive automatic supervision in a linked checkout and keep the plain primary block"
+}
+
+test_opencode_v2_secondmate_home_reports_inactive_supervision() {
+  local home="$TMP_ROOT/v2-secondmate" out
+  make_plain_checkout "$home"
+  printf 'mate1\n' > "$home/.fm-secondmate-home"
+  out=$("$home/bin/fm-supervision-instructions.sh" --harness opencode-v2)
+  assert_not_contains "$out" "plugin already owns watcher continuity" "secondmate home still claims the inert plugin owns continuity"
+  assert_contains "$out" "OpenCode V2 secondmates are not qualified" "secondmate home lacks the qualification reason"
+  out=$("$home/bin/fm-supervision-instructions.sh" --harness opencode-v2 --repair-line)
+  assert_contains "$out" "inactive in a secondmate home" "secondmate repair line does not state inactivity"
+  pass "opencode-v2 supervision instructions report inactive automatic supervision in a secondmate home"
+}
+
+test_other_harnesses_render_identically_in_linked_and_plain_checkouts() {
+  local plain="$TMP_ROOT/other-plain" linked="$TMP_ROOT/other-linked" harness a b
+  make_plain_checkout "$plain"
+  git -C "$plain" worktree add -q "$linked" -b other-linked
+  mkdir -p "$linked/state" "$linked/config"
+  for harness in claude codex opencode pi pi-signed grok cursor omp not-real; do
+    a=$("$plain/bin/fm-supervision-instructions.sh" --harness "$harness")
+    b=$("$linked/bin/fm-supervision-instructions.sh" --harness "$harness")
+    assert_equals "$a" "${b//$linked/$plain}" "$harness block changed between a plain and a linked checkout"
+    a=$("$plain/bin/fm-supervision-instructions.sh" --harness "$harness" --repair-line)
+    b=$("$linked/bin/fm-supervision-instructions.sh" --harness "$harness" --repair-line)
+    assert_equals "$a" "${b//$linked/$plain}" "$harness repair line changed between a plain and a linked checkout"
+  done
+  pass "every other harness renders the same block and repair line in linked and plain checkouts"
+}
+
 test_selected_harness_block_only
 test_unknown_fallback
 test_conditional_stanzas
@@ -210,3 +294,32 @@ test_pi_signed_preserves_identity_with_pi_supervision_protocol
 test_grok_is_background_notify
 test_grok_command_sources_effective_config
 test_pi_snippet_uses_effective_extension_path
+test_opencode_v2_linked_checkout_reports_inactive_supervision
+test_opencode_v2_secondmate_home_reports_inactive_supervision
+test_other_harnesses_render_identically_in_linked_and_plain_checkouts
+
+test_activated_linked_external_home() {
+  local plain="$TMP_ROOT/activated-plain" linked="$TMP_ROOT/activated-linked" home="$TMP_ROOT/activated-external" out
+  make_plain_checkout "$plain"
+  git -C "$plain" worktree add -q "$linked" -b activated-linked
+  mkdir -p "$home/state" "$home/config"
+  out=$(CODE="$ROOT" LEAD_ROOT="$linked" LEAD_HOME="$home" FM_V2_REGISTRY_NAMESPACE="test-render-$$-$RANDOM" node --input-type=module <<'JS'
+import assert from 'node:assert/strict';
+import {spawnSync} from 'node:child_process';
+import {pathToFileURL} from 'node:url';
+const owner=await import(pathToFileURL(process.env.CODE+'/bin/fm-opencode-v2-owner.mjs'));
+const me=owner.identity(process.pid), root=process.env.LEAD_ROOT, home=process.env.LEAD_HOME;
+const r={version:1,sessionID:'ses_render',claimID:'e'.repeat(48),root,home,state:home+'/state',config:home+'/config',ownerPID:me.pid,ownerStart:me.start,hostBootID:me.boot,servicePID:me.pid,serviceStart:me.start,serviceURL:'http://127.0.0.1:12345',lifecycle:'claimed'};
+owner.publish('claim',r);
+try {
+ const result=spawnSync(root+'/bin/fm-supervision-instructions.sh',['--harness','opencode-v2'],{encoding:'utf8',env:{...process.env,OPENCODE_SESSION_ID:r.sessionID,FM_ROOT_OVERRIDE:root,FM_HOME:home,FM_STATE_OVERRIDE:r.state,FM_CONFIG_OVERRIDE:r.config}});
+ assert.equal(result.status,0,result.stderr);
+ assert.match(result.stdout,/plugin already owns watcher continuity/);
+ assert.doesNotMatch(result.stdout,/INACTIVE/);
+ console.log('activated linked external-home lead retains native protocol');
+} finally {owner.publish('retire',r);owner.publish('cleanup-test-namespace',{});}
+JS
+  ) || fail "activated linked/external-home renderer failed: $out"
+  pass "$out"
+}
+test_activated_linked_external_home

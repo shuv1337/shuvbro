@@ -58,6 +58,12 @@ fm_control_verb_allowed() {  # <verb>
   return 1
 }
 
+# Native shared execution outlives its pane. Query/interrupt the recorded session
+# before any pane lifecycle action; callers must stop on an unproved outcome.
+fm_control_v2_interrupt() {  # <state> <id> <worktree>
+  node "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/fm-opencode-v2-session.mjs" interrupt "$1/$2.opencode-v2-session.json" "$3"
+}
+
 # The harnesses whose control mechanics are verified. Mirrors AGENTS.md
 # section 4's verified-adapter list; an unverified adapter is refused rather
 # than guessed at, exactly as a spawn on it would be.

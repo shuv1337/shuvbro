@@ -37,9 +37,22 @@ fm_shuvcode_path_has_component() {  # <path>
 # shuvcode-helper, not-shuvcode, and a mention embedded in another word never
 # match.
 fm_shuvcode_args_are_shuvcode() {  # <args>
-  local args=$1
+  local args=$1 token
   [ -n "$args" ] || return 1
-  printf '%s' "$args" | grep -qE '(^|[[:space:]/])shuvcode([[:space:]/]|$)' || return 1
+  # Only the interpreter's script token can identify its launcher. A fixture
+  # like node /tmp/shuvcode/lab/run.mjs is NOT the native npm launcher merely
+  # because an ancestor directory happens to be called shuvcode.
+  local -a tokens
+  read -r -a tokens <<< "$args"
+  for token in "${tokens[@]:1}"; do
+    case "$token" in
+      -*) continue ;;
+      */shuvcode|shuvcode) return 0 ;;
+      */shuvcode/bin/shuvcode.js) return 0 ;;
+      *) return 1 ;;
+    esac
+  done
+  return 1
 }
 
 # True when the process described by command name $1 and argument string $2
@@ -76,7 +89,7 @@ fm_shuvcode_process_matches() {  # <comm> <args> [argv0]
     # searchable. MainThread alone carries no identity.
     node|node-*|node[0-9]*|nodejs|MainThread)
       fm_shuvcode_args_are_shuvcode "$args" && return 0
-      fm_shuvcode_path_has_component "$argv0" && return 0
+       case "$argv0" in */shuvcode|*/shuvcode/bin/shuvcode.js) return 0 ;; esac
       return 1
       ;;
   esac
@@ -84,4 +97,10 @@ fm_shuvcode_process_matches() {  # <comm> <args> [argv0]
   # the same widening fm_harness_path_name applies to the table harnesses.
   fm_shuvcode_path_has_component "$comm" && return 0
   return 1
+}
+
+# Runtime detection is not session-lock authority. A shared service correctly
+# identifies the tool runtime even though it is excluded from lock ancestry.
+fm_shuvcode_runtime_matches() {
+  fm_shuvcode_process_matches "$1" "${2/--service/}" "${3:-}"
 }
