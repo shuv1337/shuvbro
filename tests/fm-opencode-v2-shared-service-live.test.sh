@@ -401,12 +401,16 @@ fi
 
 # Leg C: two workers on the shared service.
 if leg C; then
+# Worker 1 names its model; worker 2 relies on the lab's configured default
+# (mock/echo), which must win over the native model.default fallback (D3).
 for w in 1 2; do
   WDIR="$LAB/worker-$w"
   mkdir -p "$WDIR"
   git init -q "$WDIR"
+  model_arg="--model mock/echo"
+  [ "$w" = 2 ] && model_arg=""
   termctrl start "worker-$w" --cols 120 --rows 30 -- "${ISO[@]}" bash -c \
-    "cd '$WDIR' && exec '$PRIMARY/bin/fm-opencode-v2-launch.sh' --model mock/echo --prompt 'RUN: touch $LAB/worker-$w-ran' --session-record '$LAB/worker-$w.json'" >/dev/null \
+    "cd '$WDIR' && exec '$PRIMARY/bin/fm-opencode-v2-launch.sh' $model_arg --prompt 'RUN: touch $LAB/worker-$w-ran' --session-record '$LAB/worker-$w.json'" >/dev/null \
     || live_fail "could not start worker $w"
   TERMS+=("worker-$w")
 done
@@ -414,12 +418,16 @@ workers_ran() { [ -e "$LAB/worker-1-ran" ] && [ -e "$LAB/worker-2-ran" ]; }
 if wait_until 120 workers_ran; then
   W1=$(jq -r .sessionID "$LAB/worker-1.json"); W2=$(jq -r .sessionID "$LAB/worker-2.json")
   [ "$W1" != "$W2" ] && [ -n "$W1" ] || live_fail "workers did not record distinct exact sessions"
+  for w in 1 2; do
+    jq -e '.model.providerID == "mock" and .model.id == "echo"' "$LAB/worker-$w.json" >/dev/null \
+      || live_fail "worker $w ran on model $(jq -c .model "$LAB/worker-$w.json"), not the explicit/configured mock/echo"
+  done
   [ "$(jq -r .pid "$LAB/xdg/state/shuvcode/service.json")" = "$SERVICE_PID" ] || live_fail "a worker started another service"
   run_in_session "$W1" "FM_HOME=$HOME_A FM_STATE_OVERRIDE=$HOME_A/state FM_CONFIG_OVERRIDE=$HOME_A/config FM_ROOT_OVERRIDE=$PRIMARY OPENCODE_SESSION_ID=$LEAD_A bash $PRIMARY/bin/fm-lock.sh; echo rc=\$? > $LAB/worker-claim" || true
   if grep -q '^rc=0$' "$LAB/worker-claim" 2>/dev/null; then
     live_fail "a worker shell claimed the lead's home through the shared service"
   else
-    pass "live leg C: two workers ran on the one shared service with exact recorded sessions; a worker shell cannot claim the lead home"
+    pass "live leg C: two workers (explicit and configured-default model, both mock/echo) ran on the one shared service with exact recorded sessions; a worker shell cannot claim the lead home"
   fi
 else
   live_fail "workers did not both execute on the shared service: $(printf '%s ' "$LAB"/worker-*)"
@@ -485,13 +493,26 @@ NEW_SERVICE=$(jq -r '.pid' "$LAB/xdg/state/shuvcode/service.json")
 if [ "$NEW_SERVICE" = "$SERVICE_PID" ] || ! live_pid "$NEW_SERVICE"; then
   live_fail "service restart did not produce a new live service incarnation"
 else
-  sleep 5
-  termctrl send lead-a text:/firstmate-rebind enter >/dev/null 2>&1 || true
-  rebound() { [ "$(record_field "$PRIMARY" "$LEAD_A" servicePID)" = "$NEW_SERVICE" ]; }
+  # Negative control: before the explicit rebind the stale registration
+  # refuses the lead's shell commands with the rebind diagnostic.
+  run_in_session "$LEAD_A" "touch $LAB/pre-rebind" || true
+  pre_state=$(tool_state "$LEAD_A" "touch $LAB/pre-rebind")
+  if [ ! -e "$LAB/pre-rebind" ] && printf '%s' "$pre_state" | jq -e '.status == "error" and (.error | test("rebind"))' >/dev/null; then
+    pass "live leg E: after the service restart and before rebind the lead's command was refused with the rebind diagnostic"
+  else
+    live_fail "before rebind: marker=$([ -e "$LAB/pre-rebind" ] && echo present || echo absent) tool=$pre_state"
+  fi
+  # Type the command, wait until the real UI lists it, then submit; a
+  # back-to-back Enter can race the command list.
+  termctrl send lead-a text:/firstmate-rebind >/dev/null 2>&1 || true
+  termctrl wait lead-a "Rebind Firstmate execution service" --timeout 15000 >/dev/null 2>&1 \
+    || live_fail "the real UI never listed /firstmate-rebind"
+  termctrl send lead-a enter >/dev/null 2>&1 || true
+  rebound() { [ "$(record_field "$PRIMARY" "$LEAD_A" servicePID)" = "$NEW_SERVICE" ] && lead_active "$PRIMARY" "$HOME_A" "$LEAD_A"; }
   if wait_until 60 rebound; then
     run_in_session "$LEAD_A" "bash bin/fm-lock.sh; echo rc=\$? > $LAB/rebind-lock" || true
     if grep -q '^rc=0$' "$LAB/rebind-lock" 2>/dev/null; then
-      pass "live leg E: after a service restart the owner's /firstmate-rebind republished service $NEW_SERVICE and its shell holds the lock"
+      pass "live leg E: the owner's /firstmate-rebind republished service $NEW_SERVICE as active with a live watcher, and its shell holds the lock"
     else
       live_fail "after rebind the lead shell could not hold its lock: $(cat "$LAB/rebind-lock" 2>/dev/null)"
     fi
@@ -514,11 +535,13 @@ elif [ "${FM_OPENCODE_V2_HERDR_LIVE:-0}" = 1 ]; then
   owner_cmd=$(lead_command "$PRIMARY_H" "$HOME_H" "$LEAD_H" | while IFS= read -r a; do printf '%q ' "$a"; done)
   reg="${ISO[*]@Q} FM_V2_REGISTRY_NAMESPACE=$FM_V2_REGISTRY_NAMESPACE node $PRIMARY_H/bin/fm-opencode-v2-owner.mjs read $LEAD_H"
   api_cmd="cd $LAB && ${ISO[*]@Q} $SC api post /api/session/$EXEC_SES/prompt --data"
+  # The sentinel records the exact live watcher; retirement requires that same
+  # process gone, so a removed pid file cannot make the check vacuous.
   # shellcheck disable=SC2016 # $LAB below is the Herdr leg's own lab, expanded when the knob runs
   FM_V2_HERDR_OWNER_CMD="$owner_cmd" \
   FM_V2_HERDR_OWNER_PID_CMD="cat $HOME_H/state/.lock" \
-  FM_V2_HERDR_SENTINEL_CMD="[ \"\$($reg | jq -r .lifecycle)\" = active ] && kill -0 \"\$(cat $HOME_H/state/.watch.lock/pid)\"" \
-  FM_V2_HERDR_RETIRED_CMD="[ \"\$($reg | jq -r .lifecycle)\" = retired ] && ! kill -0 \"\$(cat $HOME_H/state/.watch.lock/pid 2>/dev/null)\" 2>/dev/null" \
+  FM_V2_HERDR_SENTINEL_CMD="[ \"\$($reg | jq -r .lifecycle)\" = active ] && w=\$(cat $HOME_H/state/.watch.lock/pid) && kill -0 \"\$w\" && echo \"\$w\" > $LAB/herdr-watcher.pid" \
+  FM_V2_HERDR_RETIRED_CMD="[ \"\$($reg | jq -r .lifecycle)\" = retired ] && w=\$(cat $LAB/herdr-watcher.pid) && [ -n \"\$w\" ] && ! kill -0 \"\$w\" 2>/dev/null" \
   FM_V2_HERDR_OWNER_EXIT_KEYS="ctrl+c ctrl+c" \
   FM_V2_HERDR_EXEC_CMD="$api_cmd \"\$(jq -nc --arg t \"RUN: while :; do date +%s%N > \$LAB/exec.beat; sleep 0.2; done\" '{text: \$t, delivery: \"queue\"}')\" >/dev/null; for i in \$(seq 1 100); do [ -s \$LAB/exec.beat ] && break; sleep 0.2; done; pgrep -n -f 'exec.beat; sleep 0.2'" \
   FM_V2_HERDR_OWNER_READY_TRIES=300 FM_V2_HERDR_RETIRE_TRIES=300 \
