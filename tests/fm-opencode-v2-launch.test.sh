@@ -41,7 +41,8 @@ case "$operation" in
       echo '{"data":{"id":"test-model","providerID":"fixture","variants":[{"id":"high"}]}}'
     else
       echo '{"data":[{"id":"test-model","providerID":"fixture","variants":[{"id":"high"}]}]}'
-    fi ;;
+    fi
+    [ "${TEST_DROP_REGISTRY:-}" != after-model ] || rm -f "$TEST_NATIVE_STATE/service.json" ;;
   session.create)
     printf '%s\n' "$body" > "$TEST_CREATE"
     jq -e --arg root "$TEST_WORK" '.location.directory==$root and .permissions==[{action:"*",resource:"*",effect:"allow"}]' <<< "$body" >/dev/null
@@ -51,7 +52,8 @@ case "$operation" in
     [ -f "$TEST_RECORD" ] && [ "$session_param" = sessionID=ses_worker_exact ] && [ "$param" = "location[directory]=$TEST_WORK" ] || exit 95
     jq -e '.sessionID=="ses_worker_exact" and .text=="exact worker brief" and .delivery=="queue"' <<< "$body" >/dev/null
     echo admitted >> "$TEST_LOG"
-    echo '{"id":"msg_worker"}' ;;
+    echo '{"id":"msg_worker"}'
+    [ "${TEST_DROP_REGISTRY:-}" != after-prompt ] || rm -f "$TEST_NATIVE_STATE/service.json" ;;
   session.environment)
     [ "$param" = sessionID=ses_worker_exact ] || exit 95
     jq -e '.variables.TEST_WORK!=null and .variables.FM_V2_ACTIVATION==null and .variables.OPENCODE_SESSION_ID==null and .variables.OPENCODE_PASSWORD==null and .variables.OPENCODE_SERVER_PASSWORD==null' <<< "$body" >/dev/null
@@ -96,3 +98,25 @@ if (cd "$TEST_WORK" && "$ROOT/bin/fm-opencode-v2-launch.sh" --model 'fixture/tes
 fi
 [ ! -s "$TEST_LOG" ] || fail 'unavailable model variant created or admitted a worker'
 pass 'unavailable variant refuses before worker session creation'
+
+# A registered endpoint can vanish between short API calls or after admission
+# before attachment. Neither path may run default Service.ensure/auto-start.
+cp "$TEST_NATIVE_STATE/service.json" "$TMP_ROOT/saved-registration.json"
+for stage in after-model after-prompt; do
+  : > "$TEST_LOG"
+  rm -f "$TEST_RECORD"
+  if (cd "$TEST_WORK" && TEST_DROP_REGISTRY="$stage" "$ROOT/bin/fm-opencode-v2-launch.sh" --model fixture/test-model --prompt 'exact worker brief' --session-record "$TEST_RECORD" < "$TMP_ROOT/input") 2> "$TMP_ROOT/disappeared-$stage"; then
+    fail "$stage endpoint disappearance was accepted"
+  fi
+  assert_contains "$(cat "$TMP_ROOT/disappeared-$stage")" unregistered "$stage did not refuse the missing exact registration"
+  assert_not_contains "$(cat "$TEST_LOG")" unsafe-default-autostart "$stage attempted default service startup"
+  assert_not_contains "$(cat "$TEST_LOG")" attached "$stage attached to a default/replacement service"
+  if [ "$stage" = after-model ]; then
+    [ ! -f "$TEST_RECORD" ] && [ ! -s "$TEST_LOG" ] || fail 'pre-admission disappearance created a session or sidecar'
+  else
+    [ -f "$TEST_RECORD" ] || fail 'post-admission disappearance lost its recorded session'
+  fi
+  cp "$TMP_ROOT/saved-registration.json" "$TEST_NATIVE_STATE/service.json"
+  chmod 600 "$TEST_NATIVE_STATE/service.json"
+  pass "$stage registration disappearance refuses without default service auto-start"
+done

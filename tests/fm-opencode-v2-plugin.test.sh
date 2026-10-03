@@ -298,6 +298,61 @@ try {
  const cancel=spawnSync(root+'/bin/fm-control.sh',[task,'interrupt'],{encoding:'utf8',env:lifecycleEnv});
  assert.equal(cancel.status,0,cancel.stderr);assert.match(cancel.stdout,/verified=native-session cancel=confirmed/);assert.equal(fs.existsSync(process.env.FIXTURE_ACTIVE),false);
  assert.doesNotMatch(fs.readFileSync(process.env.FIXTURE_LOG,'utf8'),/unsafe-pane-action|unsafe-return/);
+ // Failed-launch lifecycle: real isolated git copies, actual launcher refusal,
+ // no sidecar/prompt, then successful exact exit and ordinary/forced cleanup.
+ const repo=lab+'/failed-project';
+ const git=(...args)=>{const result=spawnSync('git',args,{encoding:'utf8'});assert.equal(result.status,0,result.stderr);};
+ git('init','-q','-b','main',repo);git('-C',repo,'config','user.name','Fixture');git('-C',repo,'config','user.email','fixture@example.invalid');
+ fs.writeFileSync(repo+'/README.md','fixture\n');git('-C',repo,'add','README.md');git('-C',repo,'commit','-qm','fixture base');
+ fs.writeFileSync(lab+'/bin/treehouse','#!/bin/bash\nset -eu\n[ "$1" = return ] && [ "$2" = --force ] || exit 91\ngit worktree remove --force "$3"\n',{mode:0o700});
+ fs.writeFileSync(lab+'/bin/tmux','#!/bin/bash\nif [ "$1" = list-windows ]; then echo "fm-$FIXTURE_TASK"; elif [ "$1" = send-keys ]; then echo unsafe-pane-action >> "$FIXTURE_LOG"; else echo bash; fi\n',{mode:0o700});
+ for (const phase of ['absent-normal','absent-force','gone-force']) {
+   const forced=phase!=='absent-normal',id='failed-'+phase,wt=lab+'/'+id,sidecar=state+'/'+id+'.opencode-v2-session.json';
+   git('-C',repo,'worktree','add','-q','-b',id,wt);
+   const meta=spawnSync('bash',['-c','. "$1/tests/lib.sh"; fm_write_meta "$2/$3.meta" "window=firstmate:fm-$3" "endpoint_task_id=$3" "backend=tmux" "harness=opencode-v2" "kind=ship" "mode=local-only" "spawn_gen=failed-launch-test" "worktree=$4" "project=$5"','fixture',root,state,id,wt,repo],{encoding:'utf8',env:process.env});assert.equal(meta.status,0,meta.stderr);
+   const failedEnv={...lifecycleEnv,FIXTURE_TASK:id};
+   const before=fs.readFileSync(process.env.FIXTURE_LOG,'utf8');
+   const launch=spawnSync(root+'/bin/fm-opencode-v2-launch.sh',['--model','fixture/missing','--prompt','must not run','--session-record',sidecar],{cwd:wt,encoding:'utf8',env:lifecycleEnv});
+   assert.notEqual(launch.status,0);assert.equal(fs.existsSync(sidecar),false);assert.doesNotMatch(fs.readFileSync(process.env.FIXTURE_LOG,'utf8').slice(before.length),/session.prompt/);
+   fs.writeFileSync(state+'/'+id+'.status','failed: launch refused before prompt admission\n');
+   if(phase==='gone-force') owner.writePrivate(sidecar,{...owner.readPrivate(worker),location:{directory:wt},serviceStart:'0'});
+   const verdict=await session.reconcileWorker('status',sidecar,wt);
+   if(phase==='gone-force') assert.equal(verdict.incarnation,'gone'); else assert.deepEqual(verdict,{executing:false,recorded:false});
+   const exit=spawnSync(root+'/bin/fm-control.sh',[id,'exit'],{encoding:'utf8',env:failedEnv});assert.equal(exit.status,0,exit.stderr);
+   if(phase!=='gone-force') assert.match(exit.stderr,/no recorded native session/);
+   const teardown=spawnSync(root+'/bin/fm-teardown.sh',[id,...(forced?['--force']:[])],{encoding:'utf8',env:failedEnv});
+   assert.equal(teardown.status,0,teardown.stderr+'\n'+teardown.stdout);assert.equal(fs.existsSync(wt),false);assert.equal(fs.existsSync(state+'/'+id+'.meta'),false);
+ }
+ // Absence is distinct from a present unsafe/malformed record, even after the
+ // service is gone. No damaged proof is permitted to claim "not executing".
+ const damaged=lab+'/damaged.json';fs.writeFileSync(damaged,'{',{mode:0o600});await assert.rejects(session.reconcileWorker('discard',damaged,root),SyntaxError);fs.unlinkSync(damaged);
+ owner.writePrivate(damaged,{...owner.readPrivate(worker),servicePID:1});await assert.rejects(session.reconcileWorker('discard',damaged,root),/invalid recorded/);
+ owner.writePrivate(damaged,{...owner.readPrivate(worker),serviceStart:'000'});await assert.rejects(session.reconcileWorker('discard',damaged,root),/invalid recorded/);
+ owner.writePrivate(damaged,owner.readPrivate(worker));fs.chmodSync(damaged,0o644);await assert.rejects(session.reconcileWorker('teardown',damaged,root),/unsafe record/);fs.chmodSync(damaged,0o600);
+ // Confirm a real recorded process has exited. Never query/interrupt the
+ // replacement service, nor use API/registration failure alone as proof.
+ const deadService=spawn(process.execPath,['-e','setInterval(()=>{},10000)'],{stdio:'ignore'});
+ const birth=owner.identity(deadService.pid),deadRecord={...owner.readPrivate(worker),servicePID:birth.pid,serviceStart:birth.start,hostBootID:birth.boot};
+ const closed=new Promise(resolve=>deadService.on('close',resolve));deadService.kill();await closed;
+ owner.writePrivate(damaged,deadRecord);
+ let proofLog=fs.readFileSync(process.env.FIXTURE_LOG,'utf8');
+ for(const action of ['status','teardown','interrupt','discard']) assert.deepEqual(await session.reconcileWorker(action,damaged,root),{sessionID:r.sessionID,executing:false,recorded:true,incarnation:'gone'});
+ assert.equal(fs.readFileSync(process.env.FIXTURE_LOG,'utf8'),proofLog,'gone service must not query or interrupt a replacement');
+ owner.writePrivate(damaged,{...owner.readPrivate(worker),serviceStart:'0'});assert.equal((await session.reconcileWorker('discard',damaged,root)).incarnation,'gone');
+ owner.writePrivate(damaged,{...owner.readPrivate(worker),hostBootID:'00000000-0000-0000-0000-000000000000'});assert.equal((await session.reconcileWorker('discard',damaged,root)).incarnation,'gone');
+ assert.equal(fs.readFileSync(process.env.FIXTURE_LOG,'utf8'),proofLog);
+ owner.writePrivate(damaged,owner.readPrivate(worker));
+ fs.renameSync(lab+'/native/service.json',lab+'/native/retained.json');
+ await assert.rejects(session.reconcileWorker('discard',damaged,root),/unregistered/); // matching original process still lives
+ fs.renameSync(lab+'/native/retained.json',lab+'/native/service.json');
+ assert.equal(fs.readFileSync(process.env.FIXTURE_LOG,'utf8'),proofLog,'live unverifiable service must refuse without cancellation');
+ const replacement=spawn(process.execPath,['-e','setInterval(()=>{},10000)'],{stdio:'ignore'}),replacementClosed=new Promise(resolve=>replacement.on('close',resolve));
+ const originalRegistration=owner.readPrivate(lab+'/native/service.json');
+ try {
+   owner.writePrivate(lab+'/native/service.json',{...originalRegistration,pid:replacement.pid});
+   await assert.rejects(session.reconcileWorker('discard',damaged,root),/different service incarnation/);
+   assert.equal(fs.readFileSync(process.env.FIXTURE_LOG,'utf8'),proofLog,'registration replacement must not prove the still-live original service stopped');
+ } finally {owner.writePrivate(lab+'/native/service.json',originalRegistration);replacement.kill();await replacementClosed;}
  const log=fs.readFileSync(process.env.FIXTURE_LOG,'utf8');assert.match(log,/shell.list/);assert.equal(log.split('session.interrupt').length-1,3);
  console.log('frozen registered endpoint, cwd/session divergence and exact worker execution/cancellation passed');
 } finally {child.kill();await new Promise(resolve=>child.on('close',resolve));owner.publish('cleanup-test-namespace',{});}

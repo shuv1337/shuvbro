@@ -2710,7 +2710,9 @@ validate_firstmate_home_children_removal() {
     child_wt=$(meta_value "$child_meta" worktree)
     child_kind=$(meta_value "$child_meta" kind)
     if [ "$(meta_value "$child_meta" harness)" = opencode-v2 ]; then
-      node "$SCRIPT_DIR/fm-opencode-v2-session.mjs" discard "$sub_state/$child_id.opencode-v2-session.json" "$child_wt" >/dev/null || return 1
+      # Read-only preflight: forced cleanup may cancel a verified active child,
+      # but only after every remaining lock/path validation has passed.
+      node "$SCRIPT_DIR/fm-opencode-v2-session.mjs" status "$sub_state/$child_id.opencode-v2-session.json" "$child_wt" >/dev/null || return 1
     fi
     [ -n "$child_kind" ] || child_kind=ship
     child_backend=$(fm_backend_of_meta "$child_meta")

@@ -62,10 +62,13 @@ export function identity(pid) {
   if (process.platform !== "linux" || !Number.isSafeInteger(Number(pid)) || Number(pid) < 2) throw new Error("V2 requires a local Linux process identity");
   const raw = fs.readFileSync(`/proc/${pid}/stat`, "utf8");
   const text = raw.slice(raw.lastIndexOf(")") + 2).split(" ");
-  if (["Z", "X"].includes(text[0])) throw new Error("process has exited");
+  if (!/^[A-Za-z]$/.test(text[0]) || !/^[0-9]+$/.test(text[19]) || !/^[0-9]+$/.test(text[1])) throw new Error("unreadable Linux process identity");
+  if (["Z", "X"].includes(text[0])) throw Object.assign(new Error("process has exited"), { code: "ESRCH" });
   const ownerUID = fs.statSync(`/proc/${pid}`).uid;
   if (ownerUID !== uid) throw new Error("foreign execution user");
-  return { pid: Number(pid), start: text[19], boot: fs.readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim(), parent: Number(text[1]) };
+  const boot = fs.readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim();
+  if (!/^[a-f0-9-]{36}$/.test(boot)) throw new Error("unreadable Linux boot identity");
+  return { pid: Number(pid), start: text[19], boot, parent: Number(text[1]) };
 }
 
 function directories(path, create = false, privateLeaf = false) {
