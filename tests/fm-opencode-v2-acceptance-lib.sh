@@ -83,8 +83,10 @@ v2_teardown() {
       chmod 700 "$dir" 2>/dev/null
       FM_V2_REGISTRY_NAMESPACE="$ns" "$V2_NODE_BIN" "$V2_CODE_ROOT/bin/fm-opencode-v2-owner.mjs" cleanup-test-namespace >/dev/null 2>&1 \
         || printf 'note: test namespace %s cleanup refused\n' "$ns" >&2
+      # The owner command may already remove the namespace directory itself.
+      [ -d "$dir" ] || continue
       rm -f "$dir/.claims.lock/pid" 2>/dev/null; rmdir "$dir/.claims.lock" 2>/dev/null
-      rmdir "$dir" 2>/dev/null || printf 'note: test namespace directory %s not empty after cleanup\n' "$dir" >&2
+      rmdir "$dir" 2>/dev/null || printf 'note: test namespace directory %s not empty after cleanup: %s\n' "$dir" "$(find "$dir" -mindepth 1 -maxdepth 1 -printf '%f ')" >&2
     done
   fi
   rm -rf "$V2_STATE_DIR"
@@ -96,6 +98,8 @@ trap v2_exit EXIT
 v2_run_cases() {  # <case-function>...
   local t rc
   for t in "$@"; do
+    # FM_V2_ONLY=<regex> runs a subset while developing; never set it in CI.
+    [ -z "${FM_V2_ONLY:-}" ] || [[ "$t" =~ $FM_V2_ONLY ]] || continue
     rc=0
     ( "$t" ) || rc=$?
     case "$rc" in

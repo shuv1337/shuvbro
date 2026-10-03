@@ -42,15 +42,19 @@ LIVE_FAILED=0
 # isolated service. Put the real node directory first so the service's helper
 # subprocesses evaluate exactly as on the operator's host.
 NODE_DIR=$(dirname "$(node -p process.execPath)")
-isolated() {
-  env -u OPENCODE_CONFIG_DIR -u OPENCODE_SESSION_ID -u OPENCODE -u OPENCODE_TERMINAL \
-    -u FM_HOME -u FM_ROOT_OVERRIDE -u FM_STATE_OVERRIDE -u FM_CONFIG_OVERRIDE \
-    PATH="$NODE_DIR:$PATH" XDG_CONFIG_HOME="$LAB/xdg/config" XDG_STATE_HOME="$LAB/xdg/state" \
-    XDG_DATA_HOME="$LAB/xdg/data" XDG_CACHE_HOME="$LAB/xdg/cache" "$@"
-}
+ISO=(env -u OPENCODE_CONFIG_DIR -u OPENCODE_SESSION_ID -u OPENCODE -u OPENCODE_TERMINAL
+  -u FM_HOME -u FM_ROOT_OVERRIDE -u FM_STATE_OVERRIDE -u FM_CONFIG_OVERRIDE -u FM_V2_ACTIVATION
+  -u HERDR_SOCKET_PATH -u HERDR_PANE_ID -u HERDR_TAB_ID -u HERDR_WORKSPACE_ID -u HERDR_ENV
+  PATH="$NODE_DIR:$PATH" XDG_CONFIG_HOME="$LAB/xdg/config" XDG_STATE_HOME="$LAB/xdg/state"
+  XDG_DATA_HOME="$LAB/xdg/data" XDG_CACHE_HOME="$LAB/xdg/cache")
+isolated() { "${ISO[@]}" "$@"; }
+export TERMCTRL_RUNTIME_DIR="$LAB/tc"
+mkdir -p "$TERMCTRL_RUNTIME_DIR"
+TERMS=()
 
 cleanup() {
-  local status=$? reg_pid=
+  local status=$? reg_pid='' term
+  for term in "${TERMS[@]}"; do termctrl stop "$term" >/dev/null 2>&1 || true; done
   if [ "$SERVICE_STARTED" = 1 ]; then
     reg_pid=$(jq -r '.pid // empty' "$LAB/xdg/state/shuvcode/service.json" 2>/dev/null)
     (cd "$LAB" && isolated "$SC" service stop >/dev/null 2>&1) || true
@@ -122,7 +126,11 @@ http.createServer((req, res) => {
     const messages = parsed.messages || [];
     const lastUser = [...messages].reverse().find((m) => m.role === "user");
     const lastIsTool = messages.length > 0 && messages[messages.length - 1].role === "tool";
-    const match = lastUser && /RUN: ([^\n]+)/.exec(text(lastUser.content));
+    const userText = lastUser ? text(lastUser.content) : "";
+    // The startup nudge from a real activated TUI maps to the minimal canonical
+    // ownership step (MOCK_STARTUP_CMD), so the lead acquires its home lock.
+    const match = /RUN: ([^\n]+)/.exec(userText)
+      || (process.env.MOCK_STARTUP_CMD && userText.includes("bin/fm-session-start.sh") ? [null, process.env.MOCK_STARTUP_CMD] : null);
     const tools = (parsed.tools || []).map((t) => t.function?.name);
     appendFileSync(log, JSON.stringify({ messages: messages.length, lastIsTool, run: match ? match[1] : null }) + "\n");
     res.writeHead(200, { "content-type": "text/event-stream" });
@@ -140,7 +148,7 @@ http.createServer((req, res) => {
   });
 }).listen(Number(port), "127.0.0.1");
 EOF
-node "$LAB/mock.mjs" "$MOCK_PORT" "$LAB/mock.log" >/dev/null 2>&1 &
+MOCK_STARTUP_CMD='bash bin/fm-lock.sh' node "$LAB/mock.mjs" "$MOCK_PORT" "$LAB/mock.log" >/dev/null 2>&1 &
 MOCK_PID=$!
 
 mkdir -p "$LAB/xdg/config/shuvcode"
@@ -188,19 +196,23 @@ create_session() {  # <directory> [parent-id] [metadata-json]
   api post /api/session "$body" | jq -r '.data.id'
 }
 
-# Prompt one RUN command into a session and wait for its execution to settle.
-run_in_session() {  # <session-id> <command> <done-file>
-  api post "/api/session/$1/prompt" "$(jq -nc --arg t "RUN: $2" '{text: $t, delivery: "queue"}')" >/dev/null \
+# Prompt one RUN command into a session and wait until that turn settled: the
+# session transcript ends idle after a user message carrying exactly this text.
+run_in_session() {  # <session-id> <command> [unused]
+  local text="RUN: $2"
+  api post "/api/session/$1/prompt" "$(jq -nc --arg t "$text" '{text: $t, delivery: "queue"}')" >/dev/null \
     || { live_fail "prompt admission failed for $1"; return 1; }
-  for _ in $(seq 1 100); do
-    if [ "$(grep -c '"lastIsTool":true' "$LAB/mock.log" 2>/dev/null)" -ge "$3" ]; then
-      sleep 0.5
-      api get "/api/experimental/session/$1/export" > "$LAB/transcript-$1.json" || true
+  for _ in $(seq 1 150); do
+    api get "/api/experimental/session/$1/export" > "$LAB/transcript-$1.json" 2>/dev/null || true
+    if jq -e --arg t "$text" '.data.messages as $m
+        | ([$m | to_entries[] | select(.value.type == "user" and .value.text == $t) | .key] | max) as $u
+        | $u != null and ([$m | to_entries[] | select(.value.type == "idle") | .key] | max // -1) > $u' \
+        "$LAB/transcript-$1.json" >/dev/null 2>&1; then
       return 0
     fi
     sleep 0.2
   done
-  live_fail "session $1 did not complete its live tool turn"
+  live_fail "session $1 did not complete its live tool turn for: $2"
   return 1
 }
 
@@ -278,15 +290,193 @@ else
   live_fail "lead identity probe did not run"
 fi
 
-# --- phase 5: pending integration -------------------------------------------
-for item in \
-  "registered lead lock and guard deny/allow on the real host:registration writer and launch helper" \
-  "two homes on one service:registration writer" \
-  "TUI owner arm, quiet attach and wake delivery:TUI entry and launch helper" \
-  "observer client stays inert:TUI entry" \
-  "Herdr detach keeps the owner, TUI exit retires supervision:TUI entry with bin/fm-herdr-lab.sh named lab"; do
-  printf 'pending - live %s: integration pending (%s)\n' "${item%%:*}" "${item#*:}"
-  [ "${FM_V2_ACCEPT_STRICT:-0}" != 1 ] || live_fail "strict: ${item%%:*} pending"
+# --- phase 5: real owner matrix ---------------------------------------------
+# Real native TUIs activated through bin/fm-opencode-v2-primary.sh in PTYs,
+# real workers through bin/fm-opencode-v2-launch.sh, an observer TUI, a
+# service restart with the owner's /firstmate-rebind, and the Herdr leg with
+# the real owner. Model turns come from the mock; the startup nudge maps to the
+# minimal canonical ownership step (bin/fm-lock.sh).
+owner() {  # <primary> <op> <arg...>
+  local primary=$1
+  shift
+  isolated FM_V2_REGISTRY_NAMESPACE="$FM_V2_REGISTRY_NAMESPACE" node "$primary/bin/fm-opencode-v2-owner.mjs" "$@" 2>/dev/null
+}
+record_field() { owner "$1" read "$2" | jq -r --arg f "$3" '.[$f] // empty'; }
+live_pid() { [ -n "$1" ] && kill -0 "$1" 2>/dev/null; }
+wait_until() {  # <tries> <command...>
+  local n=$1
+  shift
+  while [ "$n" -gt 0 ]; do "$@" && return 0; sleep 0.5; n=$((n - 1)); done
+  return 1
+}
+lead_active() {  # <primary> <home> <session>
+  [ "$(record_field "$1" "$3" lifecycle)" = active ] \
+    && [ "$(cat "$2/state/.lock" 2>/dev/null)" = "$(record_field "$1" "$3" ownerPID)" ] \
+    && live_pid "$(cat "$2/state/.watch.lock/pid" 2>/dev/null)"
+}
+lead_command() {  # <primary> <home> <session>: the activation launch as argv
+  printf '%s\n' "${ISO[@]}" FM_HOME="$2" FM_STATE_OVERRIDE="$2/state" FM_CONFIG_OVERRIDE="$2/config" \
+    FM_V2_REGISTRY_NAMESPACE="$FM_V2_REGISTRY_NAMESPACE" bash "$1/bin/fm-opencode-v2-primary.sh" --session "$3" --native-binary "$SC"
+}
+launch_lead() {  # <term> <primary> <home> <session>
+  local -a argv
+  mapfile -t argv < <(lead_command "$2" "$3" "$4")
+  termctrl start "$1" --cols 140 --rows 40 -- "${argv[@]}" >/dev/null || return 1
+  TERMS+=("$1")
+}
+make_home() {  # <dir>: external home with one in-flight task record (supervision need)
+  mkdir -p "$1/state" "$1/config" "$1/data"
+  printf 'kind=ship\n' > "$1/state/t1.meta"
+  (cd -P "$1" && pwd -P)
+}
+
+# FM_V2_LIVE_LEGS (e.g. "AF") runs a subset while developing; leg A is the
+# lead every other leg builds on and always runs.
+leg() { [ -z "${FM_V2_LIVE_LEGS:-}" ] || [[ "$FM_V2_LIVE_LEGS" == *"$1"* ]]; }
+
+# Leg A: registered lead with a real activated UI.
+HOME_A=$(make_home "$LAB/home-a")
+LEAD_A=$(create_session "$PRIMARY")
+launch_lead lead-a "$PRIMARY" "$HOME_A" "$LEAD_A" || live_fail "could not start the lead UI in a PTY"
+if wait_until 120 lead_active "$PRIMARY" "$HOME_A" "$LEAD_A"; then
+  OWNER_A=$(record_field "$PRIMARY" "$LEAD_A" ownerPID)
+  case "$(ps -o args= -p "$OWNER_A")" in
+    "$SC"*) pass "live leg A: activated UI pid $OWNER_A owns lead $LEAD_A: active registration, .lock is the UI pid, watcher armed" ;;
+    *) live_fail "registered owner pid $OWNER_A is not the native UI binary: $(ps -o args= -p "$OWNER_A")" ;;
+  esac
+  [ "$OWNER_A" != "$SERVICE_PID" ] || live_fail ".lock names the shared service"
+  run_in_session "$LEAD_A" "cd projects/x && touch $LAB/reg-deny" || true
+  run_in_session "$LEAD_A" "touch $LAB/reg-allow" || true
+  if [ ! -e "$LAB/reg-deny" ] && [ -e "$LAB/reg-allow" ]; then
+    pass "live leg A: the registered lead's protected command was blocked and its allowed command ran"
+  else
+    live_fail "registered lead guard: deny-marker=$([ -e "$LAB/reg-deny" ] && echo present || echo absent) allow-marker=$([ -e "$LAB/reg-allow" ] && echo present || echo absent)"
+  fi
+else
+  live_fail "lead A never became active: record=$(owner "$PRIMARY" read "$LEAD_A") lock=$(cat "$HOME_A/state/.lock" 2>/dev/null) failure=$(cat "$HOME_A/state/.opencode-v2-failure.json" 2>/dev/null)"
+  termctrl show lead-a > "$LAB/lead-a-screen.txt" 2>&1 || true
+fi
+
+# Leg B: a second home on the same service.
+if leg B; then
+PRIMARY_B="$LAB/primary-b"
+make_live_primary "$PRIMARY_B"
+HOME_B=$(make_home "$LAB/home-b")
+LEAD_B=$(create_session "$PRIMARY_B")
+launch_lead lead-b "$PRIMARY_B" "$HOME_B" "$LEAD_B" || live_fail "could not start lead B"
+if wait_until 120 lead_active "$PRIMARY_B" "$HOME_B" "$LEAD_B"; then
+  OWNER_B=$(record_field "$PRIMARY_B" "$LEAD_B" ownerPID)
+  [ "$OWNER_B" != "${OWNER_A:-}" ] || live_fail "two homes share one owner pid"
+  run_in_session "$LEAD_A" "FM_HOME=$HOME_B FM_STATE_OVERRIDE=$HOME_B/state FM_CONFIG_OVERRIDE=$HOME_B/config bash bin/fm-lock.sh; echo rc=\$? > $LAB/cross-home" || true
+  if grep -q '^rc=0$' "$LAB/cross-home" 2>/dev/null || [ "$(cat "$HOME_B/state/.lock")" != "$OWNER_B" ]; then
+    live_fail "lead A's shell took or disturbed home B's lock: $(cat "$LAB/cross-home" 2>/dev/null) lockB=$(cat "$HOME_B/state/.lock")"
+  else
+    pass "live leg B: two homes on one service each have their own active owner; lead A cannot take home B"
+  fi
+else
+  live_fail "lead B never became active: $(owner "$PRIMARY_B" read "$LEAD_B")"
+fi
+fi
+
+# Leg C: two workers on the shared service.
+if leg C; then
+for w in 1 2; do
+  WDIR="$LAB/worker-$w"
+  mkdir -p "$WDIR"
+  git init -q "$WDIR"
+  termctrl start "worker-$w" --cols 120 --rows 30 -- "${ISO[@]}" bash -c \
+    "cd '$WDIR' && exec '$PRIMARY/bin/fm-opencode-v2-launch.sh' --model mock/echo --prompt 'RUN: touch $LAB/worker-$w-ran' --session-record '$LAB/worker-$w.json'" >/dev/null \
+    || live_fail "could not start worker $w"
+  TERMS+=("worker-$w")
 done
+workers_ran() { [ -e "$LAB/worker-1-ran" ] && [ -e "$LAB/worker-2-ran" ]; }
+if wait_until 120 workers_ran; then
+  W1=$(jq -r .sessionID "$LAB/worker-1.json"); W2=$(jq -r .sessionID "$LAB/worker-2.json")
+  [ "$W1" != "$W2" ] && [ -n "$W1" ] || live_fail "workers did not record distinct exact sessions"
+  [ "$(jq -r .pid "$LAB/xdg/state/shuvcode/service.json")" = "$SERVICE_PID" ] || live_fail "a worker started another service"
+  run_in_session "$W1" "FM_HOME=$HOME_A FM_STATE_OVERRIDE=$HOME_A/state FM_CONFIG_OVERRIDE=$HOME_A/config FM_ROOT_OVERRIDE=$PRIMARY OPENCODE_SESSION_ID=$LEAD_A bash $PRIMARY/bin/fm-lock.sh; echo rc=\$? > $LAB/worker-claim" || true
+  if grep -q '^rc=0$' "$LAB/worker-claim" 2>/dev/null; then
+    live_fail "a worker shell claimed the lead's home through the shared service"
+  else
+    pass "live leg C: two workers ran on the one shared service with exact recorded sessions; a worker shell cannot claim the lead home"
+  fi
+else
+  live_fail "workers did not both execute on the shared service: $(printf '%s ' "$LAB"/worker-*)"
+fi
+fi
+
+# Leg D: an observer UI on the lead session replaces its environment; the owner
+# restores routing and keeps its claim.
+if leg D; then
+CLAIM_A=$(record_field "$PRIMARY" "$LEAD_A" claimID)
+termctrl start observer --cols 120 --rows 30 -- "${ISO[@]}" FM_V2_REGISTRY_NAMESPACE="$FM_V2_REGISTRY_NAMESPACE" "$SC" --session "$LEAD_A" >/dev/null \
+  || live_fail "could not start the observer UI"
+TERMS+=(observer)
+sleep 6
+run_in_session "$LEAD_A" "bash bin/fm-lock.sh; echo rc=\$? > $LAB/observer-lock" || true
+if grep -q '^rc=0$' "$LAB/observer-lock" 2>/dev/null && [ "$(record_field "$PRIMARY" "$LEAD_A" claimID)" = "$CLAIM_A" ] \
+  && [ "$(record_field "$PRIMARY" "$LEAD_A" ownerPID)" = "${OWNER_A:-x}" ]; then
+  pass "live leg D: with an observer UI attached, the lead keeps its claim and its shell still holds the home lock"
+else
+  live_fail "observer leg: lock=$(cat "$LAB/observer-lock" 2>/dev/null) claim=$(record_field "$PRIMARY" "$LEAD_A" claimID) owner=$(record_field "$PRIMARY" "$LEAD_A" ownerPID)"
+fi
+termctrl stop observer >/dev/null 2>&1 || true
+fi
+
+# Leg E: service restart, then the same owner's /firstmate-rebind.
+if leg E; then
+(cd "$LAB" && isolated FM_LIVE_MOCK_KEY=mock "$SC" service restart >/dev/null 2>&1) || live_fail "isolated service restart failed"
+NEW_SERVICE=$(jq -r '.pid' "$LAB/xdg/state/shuvcode/service.json")
+if [ "$NEW_SERVICE" = "$SERVICE_PID" ] || ! live_pid "$NEW_SERVICE"; then
+  live_fail "service restart did not produce a new live service incarnation"
+else
+  sleep 5
+  termctrl send lead-a text:/firstmate-rebind enter >/dev/null 2>&1 || true
+  rebound() { [ "$(record_field "$PRIMARY" "$LEAD_A" servicePID)" = "$NEW_SERVICE" ]; }
+  if wait_until 60 rebound; then
+    run_in_session "$LEAD_A" "bash bin/fm-lock.sh; echo rc=\$? > $LAB/rebind-lock" || true
+    if grep -q '^rc=0$' "$LAB/rebind-lock" 2>/dev/null; then
+      pass "live leg E: after a service restart the owner's /firstmate-rebind republished service $NEW_SERVICE and its shell holds the lock"
+    else
+      live_fail "after rebind the lead shell could not hold its lock: $(cat "$LAB/rebind-lock" 2>/dev/null)"
+    fi
+  else
+    termctrl show lead-a > "$LAB/lead-a-rebind-screen.txt" 2>&1 || true
+    live_fail "the owner did not republish the new service after /firstmate-rebind: record=$(owner "$PRIMARY" read "$LEAD_A")"
+  fi
+  SERVICE_PID=$NEW_SERVICE
+fi
+fi
+
+# Leg F: Herdr detach/attach with the real owner (bin/fm-herdr-lab.sh).
+if ! leg F; then :
+elif [ "${FM_OPENCODE_V2_HERDR_LIVE:-0}" = 1 ]; then
+  PRIMARY_H="$LAB/primary-h"
+  make_live_primary "$PRIMARY_H"
+  HOME_H=$(make_home "$LAB/home-h")
+  LEAD_H=$(create_session "$PRIMARY_H")
+  EXEC_SES=$(create_session "$PRIMARY_H")
+  owner_cmd=$(lead_command "$PRIMARY_H" "$HOME_H" "$LEAD_H" | while IFS= read -r a; do printf '%q ' "$a"; done)
+  reg="${ISO[*]@Q} FM_V2_REGISTRY_NAMESPACE=$FM_V2_REGISTRY_NAMESPACE node $PRIMARY_H/bin/fm-opencode-v2-owner.mjs read $LEAD_H"
+  api_cmd="cd $LAB && ${ISO[*]@Q} $SC api post /api/session/$EXEC_SES/prompt --data"
+  # shellcheck disable=SC2016 # $LAB below is the Herdr leg's own lab, expanded when the knob runs
+  FM_V2_HERDR_OWNER_CMD="$owner_cmd" \
+  FM_V2_HERDR_OWNER_PID_CMD="cat $HOME_H/state/.lock" \
+  FM_V2_HERDR_SENTINEL_CMD="[ \"\$($reg | jq -r .lifecycle)\" = active ] && kill -0 \"\$(cat $HOME_H/state/.watch.lock/pid)\"" \
+  FM_V2_HERDR_RETIRED_CMD="[ \"\$($reg | jq -r .lifecycle)\" = retired ] && ! kill -0 \"\$(cat $HOME_H/state/.watch.lock/pid 2>/dev/null)\" 2>/dev/null" \
+  FM_V2_HERDR_OWNER_EXIT_KEYS="ctrl+c ctrl+c" \
+  FM_V2_HERDR_EXEC_CMD="$api_cmd \"\$(jq -nc --arg t \"RUN: while :; do date +%s%N > \$LAB/exec.beat; sleep 0.2; done\" '{text: \$t, delivery: \"queue\"}')\" >/dev/null; for i in \$(seq 1 100); do [ -s \$LAB/exec.beat ] && break; sleep 0.2; done; pgrep -n -f 'exec.beat; sleep 0.2'" \
+  FM_V2_HERDR_OWNER_READY_TRIES=300 FM_V2_HERDR_RETIRE_TRIES=300 \
+    bash "$ROOT/tests/fm-opencode-v2-herdr-detach-live.test.sh" > "$LAB/herdr-leg.log" 2>&1
+  herdr_status=$?
+  if [ "$herdr_status" -eq 0 ]; then
+    pass "live leg F: Herdr detach/attach with the real owner ($(grep -c '^ok' "$LAB/herdr-leg.log") checks)"
+  else
+    live_fail "Herdr leg with the real owner failed: $(grep -E '^(not ok|note)' "$LAB/herdr-leg.log" | head -5) registry=$(owner "$PRIMARY_H" read "$LEAD_H") sidecar=$(cat "$HOME_H/state/.opencode-v2-owner.json" 2>/dev/null)"
+  fi
+else
+  printf 'pending - live leg F (Herdr detach/attach with the real owner): set FM_OPENCODE_V2_HERDR_LIVE=1\n'
+  [ "${FM_V2_ACCEPT_STRICT:-0}" != 1 ] || live_fail "strict: Herdr leg not requested"
+fi
 
 [ "$LIVE_FAILED" -eq 0 ] || { printf 'not ok - %s live qualification check(s) failed\n' "$LIVE_FAILED" >&2; exit 1; }

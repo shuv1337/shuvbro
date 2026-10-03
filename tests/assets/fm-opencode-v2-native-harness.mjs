@@ -69,6 +69,18 @@ async function serviceRole([codeRoot, socket, sessionsFile]) {
   const server = await import(pathToFileURL(`${codeRoot}/.opencode/plugins/fm-native-v2/server.js`).href);
   const environments = new Map();
   const api = sessionAPI(sessionsFile, environments);
+  // Native shell inventory (`shuvcode api shell.list`): every model shell this
+  // service spawned, with the server-set session metadata and its kernel pid.
+  // Model shells reach it through a `shuvcode` on PATH that queries this
+  // service, as a real shell's `shuvcode api` reaches its own service.
+  const shells = new Map();
+  const { mkdtempSync, chmodSync } = await import("node:fs");
+  const apiBin = mkdtempSync(`${socket}.bin-`);
+  writeFileSync(`${apiBin}/shuvcode`, `#!/usr/bin/env bash
+[ "$1" = api ] || { echo "stand-in shuvcode supports only api" >&2; exit 2; }
+exec ${JSON.stringify(process.execPath)} ${JSON.stringify(process.argv[1])} call ${JSON.stringify(socket)} "$(printf '{"op":"api","operation":"%s"}' "$2")"
+`);
+  chmodSync(`${apiBin}/shuvcode`, 0o755);
   const handlers = {
     pid: async () => ({ pid: process.pid }),
     bindingStatus: async ({ input }) => server.bindingStatus(api, input),
@@ -84,16 +96,23 @@ async function serviceRole([codeRoot, socket, sessionsFile]) {
       finally { for (const key of Object.keys(process.env)) if (!(key in saved)) delete process.env[key]; Object.assign(process.env, saved); }
     },
     environment: async ({ sessionID, variables }) => ({ variables: await api.environment({ sessionID, variables }) ?? null }),
+    api: async ({ operation }) => {
+      if (operation === "server.info") return { pid: process.pid };
+      if (operation === "shell.list") return { data: [...shells.entries()].map(([pid, sessionID]) => ({ pid, status: "running", metadata: { sessionID } })) };
+      return { error: "unsupported operation" };
+    },
     // A model shell tool: the session's pushed environment replaces the
     // service environment, and the server then sets OPENCODE_SESSION_ID.
     shell: ({ sessionID, command, extraEnv }) => new Promise((resolve) => {
       const base = environments.get(sessionID) ?? process.env;
       const env = { ...base, TERM: "xterm-256color", OPENCODE_TERMINAL: "1", OPENCODE_SESSION_ID: sessionID, ...(extraEnv || {}) };
+      env.PATH = `${apiBin}:${env.PATH || "/usr/local/bin:/usr/bin:/bin"}`;
       const child = spawn("/bin/bash", ["-c", command], { cwd: codeRoot, env, stdio: ["ignore", "pipe", "pipe"] });
+      shells.set(child.pid, sessionID);
       let stdout = "", stderr = "";
       child.stdout.on("data", (c) => (stdout += c));
       child.stderr.on("data", (c) => (stderr += c));
-      child.on("close", (code, signal) => resolve({ code, signal, stdout, stderr }));
+      child.on("close", (code, signal) => { shells.delete(child.pid); resolve({ code, signal, stdout, stderr }); });
     }),
   };
   const srv = net.createServer({ allowHalfOpen: true }, (conn) => {
@@ -152,7 +171,10 @@ async function tuiRole([codeRoot, socketFile, specFile, outFile]) {
   let lostAcks = spec.lostAckPrompts || 0;
   const events = [];
   let notify = null;
+  const commands = new Map();
   const ctx = {
+    keymap: { layer(fn) { for (const command of fn().commands || []) commands.set(command.slash?.name || command.id, command); return () => {}; } },
+    ui: { toast: { show(t) { record.toasts = [...(record.toasts || []), t]; } } },
     client: {
       session: {
         async get({ sessionID }) {
@@ -228,6 +250,10 @@ async function tuiRole([codeRoot, socketFile, specFile, outFile]) {
       try { process.kill(old, "SIGTERM"); } catch {}
       entry.oldPid = old;
       entry.newPid = child.pid;
+    } else if (step.do === "command") {
+      const command = commands.get(step.name);
+      if (!command) entry.error = "command not registered";
+      else { try { await command.run(); entry.ok = true; } catch (error) { entry.threw = String(error.message); } }
     } else if (step.do === "registration") {
       try { entry.record = owner.readRegistration(spec.sessionID); } catch (error) { entry.error = String(error.message); }
     }

@@ -25,7 +25,12 @@
 #                               (later: registry lifecycle retired, watcher gone)
 #   FM_V2_HERDR_OWNER_EXIT_KEYS Herdr key names that exit the owner (default ctrl+c)
 #   FM_V2_HERDR_EXEC_CMD     starts the stand-in shared-service execution
-#                            process and prints its pid
+#                            process and prints its pid; it must refresh
+#                            "$LAB/exec.beat" while it runs
+#   FM_V2_HERDR_OWNER_READY_TRIES  0.2 s polls to wait for the owner's live
+#                            sentinel (default 100; a real activated UI needs more)
+#   FM_V2_HERDR_RETIRE_TRIES 0.2 s polls to wait for retirement after the exit keys
+#                            (default 100)
 # Each command runs with LAB exported so it can address lab-local files.
 set -u
 
@@ -164,7 +169,7 @@ if [ -z "$EXEC_PID" ] || ! kill -0 "$EXEC_PID" 2>/dev/null; then fail "stand-in 
 EXEC_TOKEN=$(start_token "$EXEC_PID")
 
 lab pane run "$PANE" "$OWNER_CMD" >/dev/null || fail "could not start the owner in lab pane $PANE"
-wait_for 100 sentinel_live || fail "the owner never published its live supervision sentinel"
+wait_for "${FM_V2_HERDR_OWNER_READY_TRIES:-100}" sentinel_live || fail "the owner never published its live supervision sentinel"
 OWNER=$(owner_pid)
 OWNER_TOKEN=$(start_token "$OWNER")
 [ -n "$OWNER" ] && [ -n "$OWNER_TOKEN" ] || fail "could not read the owner pid and start token"
@@ -203,7 +208,8 @@ termctrl stop "$CLIENT" >/dev/null 2>&1 || true
 # --- exit the owner: supervision retires, shared execution continues --------
 # shellcheck disable=SC2086 # key list is intentionally word-split
 lab pane send-keys "$PANE" $EXIT_KEYS >/dev/null || fail "could not send the owner exit keys"
-check "owner exit fires the retirement observable" wait_for 100 retired
+check "owner exit fires the retirement observable" wait_for "${FM_V2_HERDR_RETIRE_TRIES:-100}" retired \
+  || bash -xc "$RETIRED_CMD" > "$LAB/retired-debug.txt" 2>&1
 check "the owner process is gone after exit" wait_for 50 owner_gone
 check "the separately started shared execution keeps running with the same start token" \
   same_process "$EXEC_PID" "$EXEC_TOKEN"

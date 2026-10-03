@@ -15,6 +15,10 @@
 # (B2) pass PATH explicitly, so a B2 failure cannot mask the case under test.
 set -u
 
+# Spawn-world fixtures first: sourcing them re-installs tests/lib.sh's EXIT trap,
+# which the acceptance library then extends with its own teardown.
+# shellcheck source=tests/fixtures.sh
+. "$(dirname "${BASH_SOURCE[0]}")/fixtures.sh"
 # shellcheck source=tests/fm-opencode-v2-acceptance-lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/fm-opencode-v2-acceptance-lib.sh"
 
@@ -31,7 +35,10 @@ tui_case() {  # <case> [supervision-needed:0|1]
   v2_namespace "$1"
   HOME_DIR=$(v2_make_home "$CASE/home")
   mkdir -p "$HOME_DIR/data"
-  [ "${2:-0}" = 0 ] || : > "$HOME_DIR/config/x-mode.env"
+  # Supervision need comes from the canonical owner (fm-supervision-lib): one
+  # in-flight task record. It names no endpoint, so the watcher raises no
+  # stale or missing-endpoint wakes for it.
+  [ "${2:-0}" = 0 ] || printf 'kind=ship\n' > "$HOME_DIR/state/t1.meta"
   v2_start_service "$CASE"
   v2_session "$CASE" ses_lead "$V2_CODE_ROOT"
 }
@@ -167,15 +174,16 @@ test_same_owner_republishes_after_service_restart() {
   tui_case service-restart
   local out="$CASE/out.json" steps
   steps=$(jq -nc --argjson l "$(lock_step)" --argjson h "$(helper_step)" --argjson e "$(lead_env_with_path)" \
-    '[{do: "sleep", ms: 300}, $l, {do: "sleep", ms: 2500}, $h, {do: "restart-service"}, {do: "sleep", ms: 6000},
-      ($h + {extraEnv: $e}), {do: "registration"}]')
+    '[{do: "sleep", ms: 300}, $l, {do: "sleep", ms: 2500}, $h, {do: "restart-service"}, {do: "sleep", ms: 2500},
+      {do: "command", name: "firstmate-rebind"}, {do: "sleep", ms: 3000}, ($h + {extraEnv: $e}), {do: "registration"}]')
   v2_tui "$CASE" "$(spec "$(jq -nc --argjson s "$steps" '{steps: $s}')")" "$out"
   jq -e '.steps[1].code == 0 and .steps[3].code == 0' "$out" >/dev/null || fail "positive control: lead could not lock and prove: $(jq -c '.steps[1,3]' "$out")"
-  jq -e '.steps[6].code == 0' "$out" >/dev/null \
-    || fail "after a service restart the live owner did not republish; lead shells stay refused: $(jq -c '.steps[6]' "$out") record=$(jq -c '.steps[7]' "$out")"
-  jq -e --argjson n "$(jq '.steps[4].newPid' "$out")" '.steps[7].record.servicePID == $n' "$out" >/dev/null \
-    || fail "the registration does not name the new service incarnation: $(jq -c '.steps[7]' "$out")"
-  pass "tui: after a service restart the same owner republishes and its shells recover"
+  jq -e '.steps[6].ok' "$out" >/dev/null || fail "the owner's /firstmate-rebind command did not complete: $(jq -c '{c: .steps[6], failures}' "$out")"
+  jq -e '.steps[8].code == 0' "$out" >/dev/null \
+    || fail "after a service restart and same-owner rebind the lead shells stay refused: $(jq -c '.steps[8]' "$out") record=$(jq -c '.steps[9]' "$out")"
+  jq -e --argjson n "$(jq '.steps[4].newPid' "$out")" '.steps[9].record.servicePID == $n' "$out" >/dev/null \
+    || fail "the registration does not name the new service incarnation: $(jq -c '.steps[9]' "$out")"
+  pass "tui: after a service restart the same owner's /firstmate-rebind republishes and its shells recover"
 }
 
 wake_admissions() {  # <out>
@@ -311,7 +319,13 @@ const journal = createAdmissionJournal(paths, "ses_lead", admit, (r) => failures
 const result = { mode: process.env.MODE };
 if (process.env.MODE === "acked") {
   const coordinator = createWatchArmCoordinator(paths, () => {}, { owns: () => true, admission: journal, failure: (r) => failures.push(String(r)) });
-  journal.prepare("pending wake text", "test:acked");
+  // A prepared wake admission captured one canonical queue row; the lead then
+  // drained and acknowledged it, so the canonical owner removed the row.
+  const { writeFileSync: write } = await import("node:fs");
+  write(`${paths.state}/.wake-queue`, "1700000000\t1\tsignal\talpha.status\tsignal: alpha\n");
+  journal.prepare("pending wake text", "wake");
+  result.pendingBefore = journal.pending().length;
+  write(`${paths.state}/.wake-queue`, "");
   const errors = [];
   for (let i = 0; i < 3; i++) { try { await coordinator.resumePending("ses_lead"); } catch (e) { errors.push(String(e.message)); } }
   result.pendingAfter = journal.pending().length;
@@ -332,8 +346,9 @@ test_pending_admission_retires_after_lead_ack() {
   v2_require_native acked-pending || return $?
   local dir="$TMP_ROOT/acked-pending"
   journal_driver "$dir" acked "$dir/out.json"
-  jq -e '.pendingAfter == 0' "$dir/out.json" >/dev/null \
-    || fail "a pending admission whose episode the lead already acknowledged was never retired: $(cat "$dir/out.json")"
+  jq -e '.pendingBefore == 1' "$dir/out.json" >/dev/null || fail "fixture vacuous: the wake admission was not pending before the lead acknowledged: $(cat "$dir/out.json")"
+  jq -e '.pendingAfter == 0 and (.attempts | length) == 0' "$dir/out.json" >/dev/null \
+    || fail "a pending admission whose rows the lead already acknowledged was not retired (or was admitted anyway): $(cat "$dir/out.json")"
   jq -e '(.errors | length) <= 1' "$dir/out.json" >/dev/null \
     || fail "a retired-episode admission keeps failing on every reconcile: $(jq -c .errors "$dir/out.json")"
   pass "tui: a pending admission whose episode was acknowledged is retired instead of failing forever"
@@ -357,11 +372,52 @@ test_rejected_admissions_retry_one_id() {
   pass "tui: rejected admissions retry under one stable id and admit once"
 }
 
-# Worker busy state must be bound to the worker's recorded session; a child
-# session's terminal event must not clear it. The worker plugin is generated
-# inside fm-spawn.sh with no standalone public entry yet.
+# Worker busy state is bound to the worker's recorded session. The real
+# fm-spawn writes the V2 worker plugin into an isolated task worktree; after the
+# worker latches busy, a child session's start and terminal events must neither
+# clear the worker's state nor touch its notification marker, and the worker's
+# own terminal event then settles it. Positive control: the worker's events do
+# change state.
 test_worker_child_event_isolation() {
-  v2_pending worker-child-events "a standalone public seam for the fm-spawn generated V2 worker busy plugin (or an fm-spawn fixture run that leaves it in the task worktree)"
+  local case_dir="$TMP_ROOT/worker-child" home proj wt fakebin id=v2-child-iso out state plugin
+  home="$case_dir/home"; proj="$case_dir/project"; wt="$case_dir/wt"
+  fakebin=$(make_spawn_fakebin "$case_dir/fake" opencode)
+  fm_test_spawn_home "$home" opencode
+  fm_git_worktree "$proj" "$wt" "wt-worker-child"
+  fm_test_spawn_brief "$home" "$id"
+  out=$(fm_test_run_spawn "$home" "$wt" "$fakebin" "$id" "$proj" --mode no-mistakes --yolo off) \
+    || fail "the real spawn fixture failed: $out"
+  state="$home/state"
+  plugin="$wt/.opencode/plugins/fm-busy-state.js"
+  [ -f "$plugin" ] || fail "fm-spawn wrote no worker busy plugin"
+  printf '%s\n' '{"version":1,"sessionID":"ses_worker"}' > "$state/$id.opencode-v2-session.json"
+  drive() {  # <events-json>
+    PLUGIN="$plugin" "$V2_NODE_BIN" --input-type=module - "$(jq -nc --arg d "$wt" --argjson e "$1" '{directory: $d, events: $e,
+      sessions: {ses_worker: {id: "ses_worker", location: {directory: $d}}, ses_child: {id: "ses_child", parentID: "ses_worker", location: {directory: $d}}}}')" <<'EOF2'
+import { pathToFileURL } from "node:url";
+const spec = JSON.parse(process.argv[2]);
+const { setupBusyStateV2 } = await import(pathToFileURL(process.env.PLUGIN).href);
+const queue = []; let notify = null; const abort = new AbortController();
+const ctx = { location: { directory: spec.directory },
+  event: { subscribe() { return { async *[Symbol.asyncIterator]() { while (!abort.signal.aborted) { if (queue.length) { yield queue.shift(); continue; } await new Promise((r) => { notify = r; }); } } }; } },
+  session: { async get({ sessionID }) { const i = spec.sessions[sessionID]; if (!i) throw new Error("missing"); return i; } } };
+const cleanup = await setupBusyStateV2(ctx);
+await new Promise((r) => setTimeout(r, 30));
+for (const event of spec.events) { queue.push(event); notify?.(); await new Promise((r) => setTimeout(r, 60)); }
+await new Promise((r) => setTimeout(r, 400));
+cleanup?.(); abort.abort(); notify?.();
+EOF2
+  }
+  classify() { bash -c '. "$1/bin/fm-busy-lib.sh"; fm_busy_classify tmux fake:w opencode "$2" "$3"' _ "$ROOT" "$id" "$state"; }
+  rm -f "$state/$id.turn-ended"
+  # One plugin instance: the worker latches busy, then its child runs a turn.
+  drive '[{"type":"session.execution.started","data":{"sessionID":"ses_worker"}},{"type":"session.created","data":{"sessionID":"ses_child"}},{"type":"session.execution.started","data":{"sessionID":"ses_child"}},{"type":"session.execution.succeeded","data":{"sessionID":"ses_child"}}]' >/dev/null
+  [ "$(classify)" = "busy opencode-plugin" ] || fail "a child session's events changed the worker's busy state: $(classify)"
+  [ ! -e "$state/$id.turn-ended" ] || fail "a child session's terminal event touched the worker notification marker"
+  drive '[{"type":"session.execution.started","data":{"sessionID":"ses_worker"}},{"type":"session.execution.succeeded","data":{"sessionID":"ses_worker"}}]' >/dev/null
+  [ "$(classify)" = "idle opencode-plugin" ] || fail "positive control: the worker's own terminal event did not settle it: $(classify)"
+  [ -e "$state/$id.turn-ended" ] || fail "positive control: the worker's terminal event did not notify"
+  pass "worker: after the worker latches busy, its child session's events neither clear it nor notify; its own terminal event does"
 }
 
 v2_run_cases \
