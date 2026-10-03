@@ -156,7 +156,7 @@ export default { id: "firstmate.native.v2", async setup(ctx) {
            globalThis[slot] = coordinator;
            await reconcile();
            ctx.ui.toast?.show({ variant: "success", message: "Exact lead execution service rebind verified." });
-         } catch (error) { failure(error.message); }
+         } catch (error) { failure(error.message, { permanent: true }); }
        } }] }));
      } catch (error) {
        console.error("V2 command registration: " + error.message);
@@ -170,7 +170,7 @@ export default { id: "firstmate.native.v2", async setup(ctx) {
    if (stopped) { retireClaim(); return cleanup; }
    process.once("exit", exitFallback);
    const paths = { root: record.root, home: record.home, state: record.state, config: record.config };
-  let reconcileInFlight;
+  let reconcileInFlight, held = false;
   let lastFailure = "";
    const notices = createFailureNotice(reason => {
     if (stopped) return;
@@ -233,14 +233,15 @@ export default { id: "firstmate.native.v2", async setup(ctx) {
         for (const pending of journal.pending()) {
           if (pending.kind === "startup:" + record.claimID) await journal.deliver(pending);
         }
-        failure("V2 supervision ownership is unavailable; automatic reconciliation is continuing");
+        if (held) failure("V2 supervision ownership is unavailable; automatic reconciliation is continuing");
         return;
       }
+      held = true;
       const current = readRegistration(record.sessionID);
       if (current.lifecycle !== "active") publish("claim", { ...current, lifecycle: "active" });
       const armStatus = await coordinator.ensureArmed(record.sessionID);
       await coordinator.resumePending(record.sessionID);
-      const pending = journal.pending().filter(value => !value.kind.startsWith("failure:"));
+      const pending = journal.pending().filter(value => value.kind === "wake" || value.kind === "startup:" + record.claimID);
       if (pending.length) failure("V2 retained admission remains undelivered; automatic recovery is continuing");
       else if (["armed", "existing", "not-needed"].includes(armStatus)) notices.recovered();
     })();

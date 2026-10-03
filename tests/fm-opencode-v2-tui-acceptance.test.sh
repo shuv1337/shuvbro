@@ -145,10 +145,78 @@ test_notice_transient() {
   pass "real TUI setup: recovered sub-30-second stall retains diagnostic but never prompts or toasts"
 }
 
+test_notice_silent_until_first_ownership() {
+  tui_case notice-startup 1
+  local out="$CASE/out.json" steps
+  steps=$(jq -nc --argjson l "$(lock_step)" '
+    [{do:"wait",until:"admitted",match:"fm-session-start"},{do:"tick",count:3},
+    {do:"advance-notice-clock",ms:31000},{do:"tick",count:3},{do:"sleep",ms:500},{do:"notice-count"},
+    $l,{do:"wait",until:"lock"},{do:"wait",until:"watcher"},{do:"tick",count:3},
+    {do:"advance-notice-clock",ms:31000},{do:"tick",count:3},{do:"sleep",ms:500},{do:"notice-count"}]')
+  v2_tui "$CASE" "$(spec "$(jq -nc --argjson s "$steps" '{manualNoticeClock:true,captureTimer:true,steps:$s}')")" "$out"
+  jq -e 'all(.steps[] | select(.step=="wait"); .ok)' "$out" >/dev/null || fail "slow startup positive control failed: $(jq -c '.steps' "$out")"
+  jq -e 'all(.steps[] | select(.step=="notice-count"); .count==0 and .toasts==0)' "$out" >/dev/null || fail "slow startup before .lock prompted manual repair: $(jq -c '.steps' "$out")"
+  [ "$(notice_count "$out")" = 0 ] || fail "slow startup produced a failure notice"
+  pass "real TUI setup: lock acquired after more than 30 s of notice clock stays silent"
+}
+
+test_notice_ownership_lost_after_held() {
+  tui_case notice-ownership-lost 1
+  local out="$CASE/out.json" steps
+  steps=$(jq -nc --argjson a "$(owned_and_armed "$(lock_step)")" --arg s "$HOME_DIR/state" '
+    $a + [{do:"write",path:($s+"/.lock"),text:"1\n"},{do:"tick",count:3},
+    {do:"wait",until:"diagnostic",match:"ownership is unavailable",timeoutMs:10000},{do:"notice-count"},
+    {do:"advance-notice-clock",ms:31000},{do:"tick",count:3},
+    {do:"wait",until:"admitted",match:"WATCHER FAILURE",timeoutMs:10000},{do:"tick",count:3},{do:"sleep",ms:500}]')
+  v2_tui "$CASE" "$(spec "$(jq -nc --argjson s "$steps" '{manualNoticeClock:true,captureTimer:true,steps:$s}')")" "$out"
+  jq -e 'all(.steps[] | select(.step=="wait"); .ok)' "$out" >/dev/null || fail "ownership loss positive control failed: $(jq -c '.steps' "$out")"
+  jq -e 'all(.steps[] | select(.step=="notice-count"); .count==0 and .toasts==0)' "$out" >/dev/null || fail "ownership loss surfaced before the bound"
+  [ "$(notice_count "$out")" = 1 ] || fail "ownership loss after hold must notify once after the bound"
+  jq -e '[.toasts[] | select(.variant=="error")] | length==1' "$out" >/dev/null || fail "ownership loss toast count differs"
+  pass "real TUI setup: ownership lost after being held notifies once after the 30 s bound"
+}
+
+test_notice_stale_startup_entry() {
+  tui_case notice-stale-startup 1
+  local out="$CASE/out.json" steps
+  "$V2_NODE_BIN" --input-type=module -e '
+    const [root, state, session] = process.argv.slice(1);
+    const { createAdmissionJournal } = await import(root + "/.opencode/plugins/fm-native-v2/admission.js");
+    createAdmissionJournal({ state }, session, async () => {}).prepare("fm-session-start leftover", "startup:earlier-claim");
+  ' "$V2_CODE_ROOT" "$HOME_DIR/state" ses_lead || fail "could not seed a leftover startup admission"
+  steps=$(jq -nc --argjson a "$(owned_and_armed "$(lock_step)")" --arg s "$HOME_DIR/state" '
+    $a + [{do:"outage",ms:600000},{do:"write",path:($s+"/notice.status"),text:"done: stale startup\n"},
+    {do:"wait",until:"diagnostic",match:"undelivered|admission",timeoutMs:20000},
+    {do:"advance-notice-clock",ms:29000},{do:"sleep",ms:3000},{do:"outage",ms:0},
+    {do:"wait",until:"admitted",match:"WATCHER FIRED",timeoutMs:20000},{do:"sleep",ms:3000},
+    {do:"advance-notice-clock",ms:60000},{do:"sleep",ms:3000}]')
+  v2_tui "$CASE" "$(spec "$(jq -nc --argjson s "$steps" '{manualNoticeClock:true,faultMatch:"WATCHER FIRED",steps:$s}')")" "$out"
+  jq -e 'all(.steps[] | select(.step=="wait"); .ok)' "$out" >/dev/null || fail "stale startup positive control failed: $(jq -c '.steps' "$out")"
+  [ "$(wake_admissions "$out")" = 1 ] && [ "$(notice_count "$out")" = 0 ] || fail "a leftover startup entry from an earlier claim blocked recovery"
+  jq -e '[.toasts[]? | select(.variant=="error")] | length==0' "$out" >/dev/null || fail "stale startup entry produced an error toast"
+  pass "real TUI setup: a leftover earlier-claim startup entry does not block recovery or notify"
+}
+
+test_notice_rebind_failure_immediate() {
+  tui_case notice-rebind 1
+  local out="$CASE/out.json" steps
+  steps=$(jq -nc '
+    [{do:"wait",until:"admitted",match:"fm-session-start"},{do:"break-server-info"},{do:"command",name:"firstmate-rebind"},
+    {do:"wait",until:"admitted",match:"WATCHER FAILURE[\\s\\S]*server info unavailable",timeoutMs:10000},{do:"notice-count"}]')
+  v2_tui "$CASE" "$(spec "$(jq -nc --argjson s "$steps" '{manualNoticeClock:true,steps:$s}')")" "$out"
+  jq -e 'all(.steps[] | select(.step=="wait"); .ok)' "$out" >/dev/null || fail "explicit rebind failure was not surfaced immediately: $(jq -c '.steps' "$out")"
+  jq -e 'all(.steps[] | select(.step=="notice-count"); .count==1 and .toasts==1)' "$out" >/dev/null || fail "explicit rebind failure toast/notice count differs"
+  pass "real TUI setup: a failed explicit /firstmate-rebind is surfaced immediately"
+}
+
 if [ "${FM_V2_NOTICE_ONLY:-0}" = 1 ]; then
   test_notice_episodes
   test_notice_permanent_after_stall
   test_notice_transient
+  test_notice_silent_until_first_ownership
+  test_notice_ownership_lost_after_held
+  test_notice_stale_startup_entry
+  test_notice_rebind_failure_immediate
   exit 0
 fi
 
@@ -704,6 +772,10 @@ v2_run_cases \
   test_notice_episodes \
   test_notice_permanent_after_stall \
   test_notice_transient \
+  test_notice_silent_until_first_ownership \
+  test_notice_ownership_lost_after_held \
+  test_notice_stale_startup_entry \
+  test_notice_rebind_failure_immediate \
   test_activation_publishes_and_nudges_once_without_events \
   test_inactive_tui_stays_inert \
   test_copied_activation_is_inert_in_another_process \

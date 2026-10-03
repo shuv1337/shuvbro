@@ -241,6 +241,7 @@ async function tuiRole([codeRoot, socketFile, specFile, outFile]) {
   const events = [];
   let notify = null;
   let streamBroken = false;
+  let serverInfoBroken = false;
   const commands = new Map();
   // Manual reconcile clock: the TUI's periodic reconcile (2 s interval) is
   // captured instead of scheduled, so a case can tell an event-triggered
@@ -321,7 +322,7 @@ async function tuiRole([codeRoot, socketFile, specFile, outFile]) {
           return { id: input.id };
         },
       },
-      server: { async info() { return { pid: (await request(socket(), { op: "pid" })).pid }; } },
+      server: { async info() { if (serverInfoBroken) throw new Error("server info unavailable"); return { pid: (await request(socket(), { op: "pid" })).pid }; } },
       rpc() { return { bindingStatus: async (input) => request(socket(), { op: "bindingStatus", input }) }; },
       event: {
         subscribe({ signal } = {}) {
@@ -363,6 +364,7 @@ async function tuiRole([codeRoot, socketFile, specFile, outFile]) {
       entry.count = record.admitted.filter(a => a.text.includes("WATCHER FAILURE")).length;
       entry.toasts = (record.toasts || []).filter(a => a.variant === "error").length;
     }
+    else if (step.do === "break-server-info") serverInfoBroken = true;
     else if (step.do === "stream-error") { streamBroken = true; notify?.(); }
     else if (step.do === "tick") {
       entry.timers = timers.length;
