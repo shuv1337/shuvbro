@@ -70,20 +70,70 @@ export default { id: "firstmate.native.v2", async setup(ctx) {
     const current = readRegistration(requested.sessionID);
     if (["ownerPID", "ownerStart", "hostBootID", "sessionID", "claimID", "root", "home", "state", "config", "serviceURL"].every(key => current[key] === requested[key])) activation = { ...current, lifecycle: "claimed" };
   } catch { /* activation itself still must pass full validation */ }
-  const record = await activate(ctx, activation);
+   let record = requested, coordinator, timer, unregisterUI, disposal;
+   const reservation = {};
+   globalThis[slot] = reservation;
+   const abort = new AbortController();
+   let stopped = false;
   const retireClaim = () => {
     const current = readRegistration(record.sessionID);
     if (current.claimID !== record.claimID || current.ownerPID !== process.pid || current.ownerStart !== record.ownerStart) throw new Error("obsolete TUI cannot retire a successor claim");
     if (current.lifecycle !== "retired") publish("retire", current);
   };
   // The installed TUI's final exit may finish before its asynchronous plugin
-  // disposer. Keep a same-claim synchronous tombstone fallback; SIGKILL still
-  // uses the process-birth stale proof. This owns no watcher or retry loop.
-  const exitFallback = () => { try { retireClaim(); } catch (error) { console.error("V2 exit retirement: " + error.message); } };
-  process.once("exit", exitFallback);
-  const paths = { root: record.root, home: record.home, state: record.state, config: record.config };
-  const abort = new AbortController();
-  let stopped = false;
+   // disposer. Signal only remembered arm/watcher process births synchronously;
+   // the owned arm trap performs its ordinary retirement-to-downtime path.
+   const exitFallback = () => {
+     coordinator?.cleanupSync();
+     try { retireClaim(); } catch (error) { console.error("V2 exit retirement: " + error.message); }
+   };
+   const cleanup = () => {
+     if (disposal) return disposal;
+     stopped = true;
+     abort.abort();
+     clearInterval(timer);
+     let publicationError;
+     try { unregisterUI?.(); } catch (error) { publicationError = error; }
+     try { retireClaim(); } catch (error) { if (error.code !== "ENOENT") publicationError = error; }
+     disposal = (async () => {
+       try { await coordinator?.cleanup(); }
+       finally {
+         if (globalThis[slot] === coordinator || globalThis[slot] === reservation) delete globalThis[slot];
+         process.removeListener("exit", exitFallback);
+       }
+       if (publicationError) throw publicationError;
+     })();
+     return disposal;
+   };
+   try {
+   // Slot render runs within the host's Keymap.Provider; setup does not.
+   // A deferred render failure also disposes already started resources.
+   unregisterUI = ctx.ui.slot({ append: "app", render() {
+     if (stopped) return null;
+     try {
+       ctx.keymap.layer(() => ({ mode: "global", commands: [{ id: "firstmate.rebind", title: "Rebind Firstmate execution service", palette: true, slash: { name: "firstmate-rebind" }, run: async () => {
+         if (stopped || !coordinator) return;
+         try {
+           await coordinator.cleanup();
+           await rebind(ctx, record);
+           if (stopped) return;
+           coordinator = createWatchArmCoordinator(paths, () => {}, coordinatorOptions);
+           globalThis[slot] = coordinator;
+           await reconcile();
+           ctx.ui.toast?.show({ variant: "success", message: "Exact lead execution service rebind verified." });
+         } catch (error) { failure(error.message); }
+       } }] }));
+     } catch (error) {
+       console.error("V2 command registration: " + error.message);
+       void cleanup().catch(error => console.error("V2 setup cleanup: " + error.message));
+     }
+     return null;
+   } });
+   if (stopped) { unregisterUI?.(); return cleanup; }
+   record = await activate(ctx, activation);
+   if (stopped) { retireClaim(); return cleanup; }
+   process.once("exit", exitFallback);
+   const paths = { root: record.root, home: record.home, state: record.state, config: record.config };
   let reconcileInFlight;
   let lastFailure = "";
   const failure = reason => {
@@ -106,8 +156,8 @@ export default { id: "firstmate.native.v2", async setup(ctx) {
     catch { return false; }
   };
   const journal = createAdmissionJournal(paths, record.sessionID, input => ctx.client.session.prompt(input, { signal: AbortSignal.any([abort.signal, AbortSignal.timeout(10000)]) }), failure, { valid: validClaim, signal: abort.signal });
-  const coordinatorOptions = { owns, admission: journal, failure, needs: () => supervisionNeeded(paths) };
-  let coordinator = createWatchArmCoordinator(paths, () => {}, coordinatorOptions);
+   const coordinatorOptions = { owns, admission: journal, failure, needs: () => supervisionNeeded(paths), processIdentity: identity };
+   coordinator = createWatchArmCoordinator(paths, () => {}, coordinatorOptions);
   globalThis[slot] = coordinator;
   const env = { ...helperEnvironment(record), OPENCODE_SESSION_ID: record.sessionID };
 
@@ -145,19 +195,9 @@ export default { id: "firstmate.native.v2", async setup(ctx) {
     await reconcile();
   } catch (error) { failure(error.message); }
 
-  const timer = setInterval(() => { void reconcile().catch(error => failure(error.message)); }, 2000);
+   if (stopped) return cleanup;
+   timer = setInterval(() => { void reconcile().catch(error => failure(error.message)); }, 2000);
   timer.unref();
-  ctx.keymap?.layer(() => ({ commands: [{ id: "firstmate.rebind", title: "Rebind Firstmate execution service", palette: true, slash: { name: "firstmate-rebind" }, run: async () => {
-    if (stopped) return;
-    try {
-      await coordinator.cleanup();
-      await rebind(ctx, record);
-      coordinator = createWatchArmCoordinator(paths, () => {}, coordinatorOptions);
-      globalThis[slot] = coordinator;
-      await reconcile();
-      ctx.ui?.toast.show({ variant: "success", message: "Exact lead execution service rebind verified." });
-    } catch (error) { failure(error.message); }
-  } }] }));
   void (async () => {
     try {
       for await (const event of ctx.client.event.subscribe({ signal: abort.signal })) {
@@ -170,23 +210,9 @@ export default { id: "firstmate.native.v2", async setup(ctx) {
     } catch (error) { if (!abort.signal.aborted) failure("V2 event stream interrupted: " + error.message); }
   })();
 
-  return async () => {
-    stopped = true;
-    abort.abort();
-    clearInterval(timer);
-    // Publish the protective tombstone synchronously before the first await:
-    // process shutdown may tear down child spawns during async retirement.
-    // Cleanup still cannot complete until the owned arm's bounded retirement.
-    let publicationError;
-    try { retireClaim(); }
-    catch (error) { publicationError = error; }
-    try { await coordinator.cleanup(); }
-    finally {
-    // Native hot reload reuses the immutable claim on next setup. A retired
-    // record still protects the exact session between setups and after exit.
-      if (globalThis[slot] === coordinator) delete globalThis[slot];
-      process.removeListener("exit", exitFallback);
-    }
-    if (publicationError) throw publicationError;
-  };
+   } catch (error) {
+     console.error("V2 setup failed: " + error.message);
+     try { await cleanup(); } catch (error) { console.error("V2 setup cleanup: " + error.message); }
+   }
+   return cleanup;
 } };

@@ -263,6 +263,14 @@ try {
  assert.throws(()=>owner.nativeAPI({...r,serviceURL:undefined},'server.info'),/endpoint/);
  assert.throws(()=>owner.schema({...r,serviceURL:'http://user:secret@127.0.0.1:23456'}),/endpoint/);
  assert.equal(owner.registeredService(endpoint).serviceURL,endpoint);
+ const defaultPrimary=spawnSync(root+'/bin/fm-opencode-v2-primary.sh',['--session',r.sessionID,'--native-binary','/bin/echo'],{encoding:'utf8',env:{...env,FM_HOME:r.home}});
+ assert.equal(defaultPrimary.status,0,defaultPrimary.stderr);assert.equal(defaultPrimary.stdout.trim(),'--server '+endpoint+' --session '+r.sessionID);
+ const beforeRefusal=fs.readFileSync(process.env.FIXTURE_LOG,'utf8');
+ fs.renameSync(lab+'/native/service.json',lab+'/native/retained.json');
+ assert.throws(()=>owner.nativeAPI(r,'server.info'),/unregistered/);
+ const unregisteredHelper=helper();assert.notEqual(unregisteredHelper.status,0);assert.match(unregisteredHelper.stderr,/unregistered/);
+ assert.equal(fs.readFileSync(process.env.FIXTURE_LOG,'utf8'),beforeRefusal,'missing endpoint registration must not query/start another service');
+ fs.renameSync(lab+'/native/retained.json',lab+'/native/service.json');
  assert.throws(()=>owner.publish('claim',{...r,serviceURL:'http://127.0.0.1:9999'}),/conflicting/);
  const worker=lab+'/worker.json';owner.writePrivate(worker,{version:1,sessionID:r.sessionID,location:{directory:root},model:{providerID:'fixture',id:'echo'},serviceURL:endpoint,servicePID:me.pid,serviceStart:me.start,hostBootID:me.boot});
  fs.writeFileSync(process.env.FIXTURE_ACTIVE,'running');
@@ -298,3 +306,6 @@ JS
   pass "$out"
 }
 test_frozen_endpoint_and_worker_execution
+
+out=$(env ROOT="$ROOT" LAB="$TMP_ROOT/provider-host" node "$ROOT/tests/fixtures/fm-opencode-v2-provider-host.mjs" 2>&1) || fail "native provider/lifecycle regression: $out"
+pass "$out"

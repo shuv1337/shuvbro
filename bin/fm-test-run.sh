@@ -656,7 +656,7 @@ tests/fm-omp-harness.test.sh 59969
 tests/fm-on.test.sh 34087
 tests/fm-opencode-primary-live-e2e.test.sh 21
 tests/fm-opencode-v2-plugin.test.sh 30000
-tests/fm-opencode-v2-launch.test.sh 8000
+tests/fm-opencode-v2-launch.test.sh 15000
 tests/fm-operational-input.test.sh 231
 tests/fm-peek-remote.test.sh 1018
 tests/fm-pending-reply-10.test.sh 4350
@@ -1484,6 +1484,9 @@ families_for_changed_path() {
     tests/lib.sh|tests/*-helpers.sh|tests/fixtures.sh)
       families_for_test_reference "$(basename "$path")" \
         || printf '%s\n' "__unmapped__:$path"
+      ;;
+    tests/fixtures/fm-opencode-v2-provider-host.mjs)
+      printf '%s\n' __script__:fm-opencode-v2-plugin.test.sh
       ;;
     tests/fixtures/*/*)
       # A fixture belongs to whichever suite reads its directory, found by the

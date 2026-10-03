@@ -19,12 +19,21 @@ export function createAdmissionJournal(paths, sessionID, admit, report = console
     let logical = kind;
     let identities = [];
     if (kind === "wake") {
-      const queue = readFileSync(join(paths.state, ".wake-queue"), "utf8");
+      let queue;
+      try { queue = readFileSync(join(paths.state, ".wake-queue"), "utf8"); }
+      catch (error) { if (error.code !== "ENOENT") throw error; queue = ""; }
       identities = queue.trim().split("\n").filter(Boolean).map(line => line.split("\t").slice(0, 2).join("\t"));
-      if (!identities.length) throw new Error("actionable close has no durable wake rows");
-      const prior = pending().find(value => value.rows.some(row => identities.includes(row)));
-      if (prior) return prior;
-      logical += ":" + identities.join("\n");
+      if (!identities.length) {
+        const generation = context.recovery?.generation;
+        // A canonical handling generation is the identity for a no-row
+        // rearm-resurface presentation. No timestamp/random synthetic wake.
+        if (typeof generation !== "string" || !/^[A-Za-z0-9._-]{1,200}$/.test(generation)) throw new Error("actionable close has neither durable wake rows nor recovery generation");
+        logical += ":recovery:" + generation;
+      } else {
+        const prior = pending().find(value => value.rows.some(row => identities.includes(row)));
+        if (prior) return prior;
+        logical += ":" + identities.join("\n");
+      }
     }
     const id = "msg_" + createHash("sha256").update(sessionID + "\0" + logical).digest("hex");
     try { return validate(readPrivate(join(dir, id + ".json"))); }
@@ -46,6 +55,7 @@ export function createAdmissionJournal(paths, sessionID, admit, report = console
   async function attemptDelivery(value) {
     validate(value);
     if (["admitted", "acknowledged"].includes(value.phase) || acknowledged(value)) return;
+    if (value.kind === "wake" && value.phase !== "confirmed") throw new Error("V2 wake admission requires successor confirmation first");
     const retry = retries.get(value.id);
     if (retry && Date.now() < retry.after) return;
     for (let attempt = 0; attempt < 5; attempt++) {

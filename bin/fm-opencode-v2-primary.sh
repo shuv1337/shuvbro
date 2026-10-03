@@ -28,9 +28,14 @@ home=$(realpath "${FM_HOME:-$root}")
 mkdir -p "${FM_STATE_OVERRIDE:-$home/state}" "${FM_CONFIG_OVERRIDE:-$home/config}"
 state=$(realpath "${FM_STATE_OVERRIDE:-$home/state}")
 config=$(realpath "${FM_CONFIG_OVERRIDE:-$home/config}")
-args=()
-[ -z "$server" ] || args=(--server "$server")
 service_info=$(node "$SCRIPT_DIR/fm-opencode-v2-owner.mjs" service ${server:+"$server"})
+server=$(jq -er '.serviceURL' <<< "$service_info")
+# Freeze attachment as well as helper calls; default native resolution could
+# otherwise auto-start a different managed service after registration vanished.
+# The private credential travels only through the child environment, never the
+# activation record or command arguments. Shell exec retains the owning PID.
+OPENCODE_PASSWORD=$(node --input-type=module -e 'const {registeredService}=await import(process.argv[2]); const expected=JSON.parse(process.argv[3]), found=registeredService(expected.serviceURL); if(found.pid!==expected.servicePID || found.start!==expected.serviceStart || found.boot!==expected.hostBootID) throw new Error("primary service registration changed incarnation"); process.stdout.write(found.password)' fm-primary-credential "$SCRIPT_DIR/fm-opencode-v2-owner.mjs" "$service_info")
+export OPENCODE_PASSWORD
 owner_info=$(node "$SCRIPT_DIR/fm-opencode-v2-owner.mjs" identity "$$")
 claim=$(node -e 'console.log(require("node:crypto").randomBytes(24).toString("hex"))')
 FM_V2_ACTIVATION=$(jq -cn --arg session "$session" --arg claim "$claim" --arg root "$root" --arg home "$home" --arg state "$state" --arg config "$config" --argjson owner "$owner_info" --argjson service "$service_info" \
@@ -38,4 +43,4 @@ FM_V2_ACTIVATION=$(jq -cn --arg session "$session" --arg claim "$claim" --arg ro
 export FM_V2_ACTIVATION FM_HOME="$home" FM_ROOT_OVERRIDE="$root" FM_STATE_OVERRIDE="$state" FM_CONFIG_OVERRIDE="$config"
 unset OPENCODE_SESSION_ID
 cd "$root"
-exec "$binary" "${args[@]}" --session "$session"
+exec "$binary" --server "$server" --session "$session"
