@@ -23,15 +23,18 @@
 #     cancellation is confirmed, ordinary teardown succeeds. For an idle
 #     successor session, shuvcode documents interrupting an idle session as a
 #     no-op rather than a terminal release of a durable claim, so an
-#     interrupted:false answer alone is not cancellation proof: while
-#     settlement is unproven (successor younger than its 30 s bound, the
-#     session active in a second sample, or the newest message not a terminal
-#     assistant answer completed after the successor started) ordinary
-#     teardown refuses naming a retry or --force, status reports the outcome
-#     as unknown, and the binding is unchanged; once settlement is proven
-#     ordinary teardown succeeds as settled (not interrupted) and the binding
-#     moves to the proven successor. An explicit discard proceeds with the
-#     caveat;
+#     interrupted:false answer alone is not cancellation proof. Settlement
+#     (review F8-M1) needs the successor past its 30 s bound, the session idle
+#     in a second sample, and the newest message terminal: an idle notice of
+#     any outcome (succeeded, failed, interrupted) or an assistant answer with
+#     finish "stop" and no error, whenever that turn ended, including before
+#     the restart. While unproven (young successor, session active again, a
+#     newer user message, a tool-call step, a bare errored answer, an unknown
+#     notice outcome) ordinary teardown refuses naming a retry or --force,
+#     status reports the outcome as unknown, and the binding is unchanged;
+#     once proven, ordinary teardown succeeds as settled (not interrupted) and
+#     the binding moves to the proven successor. An explicit discard proceeds
+#     with the caveat;
 #   - gone incarnation with no live successor: status may only answer an honest
 #     unknown (executing null, cancellation unconfirmed), never "stopped";
 #     teardown and interrupt refuse with a diagnostic naming the possible
@@ -184,15 +187,19 @@ test_successor_idle_needs_proof_or_discard() {
 }
 
 # Settlement proof against one successor that matures past the 30 s bound.
+# The pre-settlement worker record is restored before each variant, so every
+# variant is judged against the same restarted-successor binding.
 now_ms() { date +%s%3N; }
-assistant() {  # <completed-ms> [finish] [error]: a terminal assistant message
+assistant() {  # <completed-ms> [finish] [error]: an assistant message
   jq -nc --argjson c "$1" --arg f "${2:-stop}" --arg e "${3:-}" '{type: "assistant", finish: $f, time: {created: ($c - 500), completed: $c}} + (if $e == "" then {} else {error: {message: $e}} end)'
 }
-idle_notice() { jq -nc --argjson c "$1" '{type: "idle", outcome: "succeeded", time: {created: $c}}'; }
+idle_notice() { jq -nc --argjson c "$1" --arg o "${2:-succeeded}" '{type: "idle", outcome: $o, time: {created: $c}}'; }
 messages() { jq -s '.' > "$CASE/messages.json"; }  # newest first on stdin
 binding() { sha256sum "$RECORD" | cut -d' ' -f1; }
+restore_binding() { cp "$CASE/record.before" "$RECORD"; chmod 600 "$RECORD"; }
 unproven_refusal() {  # <label>
   local before
+  restore_binding
   before=$(binding)
   reconcile teardown
   if [ "$RC" = 0 ]; then
@@ -202,45 +209,57 @@ unproven_refusal() {  # <label>
   fi
   [ "$(binding)" = "$before" ] || miss "$1: an unproven refusal rewrote the worker binding"
 }
+proven_settlement() {  # <label>
+  restore_binding
+  reconcile teardown
+  { [ "$RC" = 0 ] && printf '%s' "$OUT" | jq -e '.executing == false and .interrupted == false and .cancellation == "settled"' >/dev/null; } \
+    || miss "$1: ordinary teardown refused a proven settled successor: rc=$RC out=$OUT err=$ERR"
+  jq -e --argjson p "$SUCCESSOR" '.servicePID == $p' "$RECORD" >/dev/null || miss "$1: the binding did not move to the proven successor"
+}
 
 test_successor_settlement_proof() {
   v2_require_native successor-settlement || return $?
   worker_case successor-settlement
-  executing_turn
-  local restarted mature completed
+  local restarted mature before_restart after
+  # The worker's last turn ended before the restart: a terminal answer and the
+  # fork's succeeded idle notice, then the service restarts.
+  before_restart=$(now_ms)
+  { idle_notice "$((before_restart + 5))"; assistant "$before_restart"; } | messages
+  sleep 0.3
   restart_at_same_endpoint
   restarted=$(now_ms)
-  # The successor resumes the turn and then finishes it: no longer executing,
-  # with a terminal answer completed after the successor started.
-  sleep 0.3
-  printf '{}' > "$CASE/execution.json"
-  completed=$(now_ms)
-  { idle_notice "$((completed + 5))"; assistant "$completed"; } | messages
+  cp "$RECORD" "$CASE/record.before"
   unproven_refusal "young successor"
-  # Wait out the successor's 30 s uptime bound.
   mature=$((restarted / 1000 + 32))
   while [ "$(date +%s)" -lt "$mature" ]; do sleep 1; done
-  { assistant "$((restarted - 5000))"; } | messages
-  unproven_refusal "an answer completed before the successor started"
-  { jq -nc --argjson c "$(now_ms)" '{type: "user", time: {created: $c}}'; assistant "$completed"; } | messages
+  after=$(now_ms)
+  # Still unproven past the bound.
+  { jq -nc --argjson c "$after" '{type: "user", time: {created: $c}}'; assistant "$before_restart"; } | messages
   unproven_refusal "a newer user message after the answer"
-  { assistant "$completed" tool-calls; } | messages
+  { assistant "$after" tool-calls; } | messages
   unproven_refusal "a tool-call step as the newest message"
-  { assistant "$completed" stop "provider failed"; } | messages
-  unproven_refusal "an errored answer"
-  { idle_notice "$((completed + 5))"; assistant "$completed"; } | messages
+  { assistant "$after" stop "provider failed"; } | messages
+  unproven_refusal "a bare errored answer as the newest message"
+  { idle_notice "$after" running; } | messages
+  unproven_refusal "an idle notice with an unknown outcome"
+  { idle_notice "$((before_restart + 5))"; assistant "$before_restart"; } | messages
   printf 'idle\nrunning %s\nrunning %s\nrunning %s\n' "$SID" "$SID" "$SID" > "$CASE/active-samples"
   unproven_refusal "the session active again in the second sample"
   rm -f "$CASE/active-samples"
   interrupts_exact || miss "an interrupt did not target the exact session with resume=false"
-  # Proven: mature, idle across samples, and a terminal answer after start.
-  reconcile teardown
-  { [ "$RC" = 0 ] && printf '%s' "$OUT" | jq -e '.executing == false and .interrupted == false and .cancellation == "settled"' >/dev/null; } \
-    || miss "ordinary teardown refused a proven settled successor: rc=$RC out=$OUT err=$ERR"
-  jq -e --argjson p "$SUCCESSOR" '.servicePID == $p' "$RECORD" >/dev/null || miss "the binding did not move to the proven successor"
+  # Proven: any terminal outcome, whenever it ended.
+  { idle_notice "$((before_restart + 5))"; assistant "$before_restart"; } | messages
+  proven_settlement "a turn that ended before the restart (succeeded notice)"
+  { assistant "$before_restart"; } | messages
+  proven_settlement "a bare stop answer completed before the restart"
+  { idle_notice "$after" failed; assistant "$after" stop "provider failed"; } | messages
+  proven_settlement "a failed idle notice"
+  { idle_notice "$after" interrupted; } | messages
+  proven_settlement "an interrupted idle notice"
+  # After the binding moved, later ordinary teardown succeeds.
   reconcile teardown
   { [ "$RC" = 0 ] && printf '%s' "$OUT" | jq -e '.executing == false' >/dev/null; } || miss "ordinary teardown refused after the binding moved: rc=$RC err=$ERR"
-  finish "worker restart: an idle successor tears down as settled only once proven (mature, idle across samples, terminal answer after start); each unproven variant refuses unchanged"
+  finish "worker restart: an idle successor settles only past its bound, idle across samples, with a terminal newest message of any outcome (including a turn that ended before the restart); each unproven variant refuses unchanged"
 }
 
 no_successor_case() {  # <case> <stop|unregister>
