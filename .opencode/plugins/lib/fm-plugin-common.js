@@ -38,7 +38,11 @@ export function runProcess(command, args, options = {}) {
     proc.on("close", (code, signal) => {
       resolveResult({ code, signal, stdout, stderr });
     });
-    if (input !== undefined) proc.stdin.end(input);
+    if (input !== undefined) {
+      // A child may exit without reading its input; EPIPE must not crash the host.
+      proc.stdin.on("error", () => {});
+      proc.stdin.end(input);
+    }
   });
 }
 
