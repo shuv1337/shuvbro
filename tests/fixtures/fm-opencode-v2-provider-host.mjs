@@ -5,6 +5,8 @@ import * as fs from "node:fs";
 import { spawn } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
+import { assertTestRegistry, cleanupTestRegistry } from "../assets/fm-opencode-v2-test-registry.mjs";
+assertTestRegistry();
 const source = process.env.ROOT, lab = process.env.LAB;
 const owner = await import(pathToFileURL(source + "/bin/fm-opencode-v2-owner.mjs"));
 const tui = (await import(pathToFileURL(source + "/.opencode/plugins/fm-native-v2/tui.js"))).default;
@@ -309,7 +311,7 @@ if (process.argv.some(value => value.startsWith("--review-"))) {
   } finally {
     if (savedSidecar) owner.writePrivate(state + "/.opencode-v2-owner.json", savedSidecar);
     await dispose?.(); clearInterval(keepAlive);
-    owner.publish("cleanup-test-namespace", {});
+    cleanupTestRegistry(source);
   }
   process.exit(0);
 }
@@ -318,6 +320,7 @@ if (process.argv.includes("--exit")) {
   process.env.FM_HEARTBEAT = "999999";
   process.env.FM_CHECK_INTERVAL = "999999";
   const app = host(); await tui.setup(app); app.renderApp();
+  process.on("exit", () => cleanupTestRegistry(source));
   assert.equal(commands[0].slash.name, "firstmate-rebind");
   await until(() => running(read(".watch.lock/pid")), "exit fixture never armed production watcher");
   const watcher = read(".watch.lock/pid");
@@ -365,7 +368,7 @@ try {
   const exitedWatcher = fs.readFileSync(exitLab + "/home/state/watcher.pid", "utf8").trim(), exitedArm = fs.readFileSync(exitLab + "/home/state/arm.pid", "utf8").trim();
   assert.equal(owner.readPrivate(exitLab + "/home/state/.opencode-v2-owner.json").lifecycle, "retired");
   await until(() => !running(exitedWatcher) && !running(exitedArm), "synchronous owner exit orphaned arm/watcher");
-  process.env.FM_V2_REGISTRY_NAMESPACE = namespace + "-exit"; owner.publish("cleanup-test-namespace", {}); process.env.FM_V2_REGISTRY_NAMESPACE = namespace;
+  process.env.FM_V2_REGISTRY_NAMESPACE = namespace + "-exit"; cleanupTestRegistry(source); process.env.FM_V2_REGISTRY_NAMESPACE = namespace;
   // Real arm SIGKILL with a surviving watcher: the retry must be ordinary,
   // resurface no-row recovery, then confirm a successor before admission.
   fs.writeFileSync(state + "/count", "0"); fs.writeFileSync(state + "/launches", ""); fs.writeFileSync(state + "/order", "");
@@ -406,6 +409,6 @@ try {
   finally {
     if (running(read("arm.pid"))) process.kill(Number(read("arm.pid")), "SIGTERM");
     if (running(read("watcher.pid"))) process.kill(Number(read("watcher.pid")), "SIGTERM");
-    owner.publish("cleanup-test-namespace", {});
+    cleanupTestRegistry(source);
   }
 }

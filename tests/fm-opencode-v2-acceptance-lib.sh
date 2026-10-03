@@ -19,6 +19,22 @@
 # directory removed at exit. The operator's default namespace is never used:
 # v2_namespace refuses "default".
 
+v2_assert_test_namespace() {
+  case "${FM_V2_REGISTRY_NAMESPACE:-}" in
+    default|'') printf 'refusing unset/default V2 test registry namespace\n' >&2; return 1 ;;
+  esac
+  [[ "$FM_V2_REGISTRY_NAMESPACE" =~ ^[a-zA-Z0-9_-]{1,64}$ ]] || { printf 'refusing invalid V2 test registry namespace\n' >&2; return 1; }
+  if [ "${1:-}" != --existing ] && [ -e "$HOME/.local/state/shuvbro/opencode-v2/$FM_V2_REGISTRY_NAMESPACE" ]; then
+    if ! { [ -n "${FM_V2_TEST_NAMESPACE_FILE:-}" ] && [ -f "$FM_V2_TEST_NAMESPACE_FILE" ] && grep -qxF "$FM_V2_REGISTRY_NAMESPACE" "$FM_V2_TEST_NAMESPACE_FILE"; }; then
+      printf 'refusing non-fresh unmanaged V2 test registry namespace\n' >&2; return 1
+    fi
+  fi
+}
+if [ "${BASH_SOURCE[0]}" = "$0" ] && [ "${1:-}" = --assert-test-namespace ]; then
+  v2_assert_test_namespace "${2:-}"
+  exit $?
+fi
+
 # shellcheck source=tests/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
@@ -29,6 +45,7 @@ V2_PENDING=0
 V2_FAILED=0
 V2_STATE_DIR=$(mktemp -d "${TMPDIR:-/tmp}/fm-v2-accept.XXXXXX")
 V2_NS_BASE="v2t$$$RANDOM"
+[ ! -e "$HOME/.local/state/shuvbro/opencode-v2/$V2_NS_BASE" ] || { printf 'refusing a colliding V2 test namespace\n' >&2; exit 1; }
 export FM_V2_REGISTRY_NAMESPACE="${V2_NS_BASE}"
 # Fixture boundary: an ambient native session identity or activation (for
 # example from the developer's own shuvcode shell) must never reach production
@@ -36,6 +53,7 @@ export FM_V2_REGISTRY_NAMESPACE="${V2_NS_BASE}"
 unset OPENCODE_SESSION_ID FM_V2_ACTIVATION OPENCODE OPENCODE_TERMINAL
 : > "$V2_STATE_DIR/pids"
 printf '%s\n' "$FM_V2_REGISTRY_NAMESPACE" > "$V2_STATE_DIR/namespaces"
+export FM_V2_TEST_NAMESPACE_FILE="$V2_STATE_DIR/namespaces"
 
 v2_native_ready() {
   [ -f "$V2_CODE_ROOT/.opencode/plugins/fm-native-v2/server.js" ] \
@@ -62,6 +80,7 @@ v2_namespace() {  # <suffix>
   local ns="${V2_NS_BASE}$1"
   [[ "$ns" =~ ^[a-zA-Z0-9_-]{1,64}$ ]] && [ "$ns" != default ] || fail "refusing registry namespace '$ns'"
   export FM_V2_REGISTRY_NAMESPACE="$ns"
+  v2_assert_test_namespace || fail "refusing a non-fresh V2 case namespace"
   printf '%s\n' "$ns" >> "$V2_STATE_DIR/namespaces"
 }
 
@@ -69,13 +88,6 @@ v2_namespace() {  # <suffix>
 # never signal a reused pid that no longer belongs to this run.
 v2_start_token() { local stat; stat=$(cat "/proc/$1/stat" 2>/dev/null) || return 1; stat=${stat##*) }; printf '%s' "$stat" | awk '{print $20}'; }
 v2_track() { printf '%s %s\n' "$1" "$(v2_start_token "$1" || echo 0)" >> "$V2_STATE_DIR/pids"; }
-
-# Every production call made by these fixtures must run in a test namespace.
-v2_assert_test_namespace() {
-  case "${FM_V2_REGISTRY_NAMESPACE:-default}" in
-    default|'') fail "refusing to run production V2 code against the operator's default registry namespace" ;;
-  esac
-}
 
 V2_TEARDOWN_FAILED=0
 v2_teardown() {

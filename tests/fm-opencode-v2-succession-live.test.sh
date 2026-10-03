@@ -281,7 +281,6 @@ journal_ids() {
 # through 0 under its own recovery generation and is counted separately.
 acks() { local n; n=$(grep -c '^acked [1-9]' "$LAB/handled.log" 2>/dev/null) || true; echo "${n:-0}"; }
 resurfaces() { awk '$1 == "acked" && $2 == 0 {print $3}' "$LAB/handled.log" 2>/dev/null | sort -u | count; }
-resurfaces_above() { [ "$(resurfaces)" -gt "$1" ]; }
 watchers() { pgrep -f "^bash $PRIMARY/bin/fm-watch.sh" | count; }
 arms() { pgrep -f "$PRIMARY/bin/fm-watch-arm.sh" | count; }
 watch_pid() { cat "$PRIMARY/state/.watch.lock/pid" 2>/dev/null || echo none; }
@@ -388,7 +387,25 @@ done
 [ "$steady_ok" = 1 ] && pass "steady succession: ${FM_V2_SUCC_CYCLES:-10} wakes, each one journaled message ID and one canonical ack, one watcher, fresh beacon, empty queue, zero failure prompts"
 
 # --- kills mid-idle ---------------------------------------------------------------
-replaced() { [ "$(watch_pid)" != "$1" ] && one_supervisor; }
+replacement_ready() {
+  # Readiness must persist across samples; the bounded retry budget only
+  # prevents a broken recovery from hanging the suite under parallel load.
+  local before=$1 r0=$2 what=$3 token current previous='' stable=0 _
+  for _ in $(seq 1 240); do
+    current=$(watch_pid)
+    token=$(cat "$PRIMARY/state/.watcher-down" 2>/dev/null || true)
+    if [ "$current" != "$before" ] && one_supervisor && [[ "$token" != pending:* && "$token" != announced:* ]] \
+      && { [ "$what" != watcher ] || [ "$(resurfaces)" -gt "$r0" ]; }; then
+      if [ "$previous" = "$current" ]; then stable=$((stable + 1)); else stable=0; fi
+      [ "$stable" -ge 2 ] && return 0
+      previous=$current
+    else
+      previous=''; stable=0
+    fi
+    sleep 0.5
+  done
+  return 1
+}
 for pair in watcher:TERM watcher:KILL arm:TERM; do
   what=${pair%%:*} sig=${pair#*:}
   before=$(watch_pid)
@@ -399,10 +416,7 @@ for pair in watcher:TERM watcher:KILL arm:TERM; do
   # must present it exactly once (one generation) and keep one successor
   # [F4-B1]. An arm TERM retires its own watcher and may resurface at most once.
   recovered=1
-  if [ "$what" = watcher ]; then
-    wait_until 60 resurfaces_above "$r0" || recovered=0
-  fi
-  wait_until 60 replaced "$before" || recovered=0
+  replacement_ready "$before" "$r0" "$what" || recovered=0
   sleep 4   # absence window: a second generation or retire/re-arm loop would show here
   got=$(( $(resurfaces) - r0 ))
   if [ "$what" = watcher ]; then [ "$got" = 1 ] || recovered=0; else [ "$got" -le 1 ] || recovered=0; fi

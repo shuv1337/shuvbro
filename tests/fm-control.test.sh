@@ -19,8 +19,9 @@
 #      while fm-send's marking of the same task is untouched.
 set -u
 
-# shellcheck source=tests/lib.sh
-. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+# shellcheck source=tests/fm-opencode-v2-acceptance-lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/fm-opencode-v2-acceptance-lib.sh"
+v2_assert_test_namespace || exit 1
 # shellcheck source=/dev/null
 . "$ROOT/bin/fm-control-lib.sh"
 # shellcheck source=/dev/null
@@ -33,7 +34,14 @@ SEND="$ROOT/bin/fm-send.sh"
 TMP_ROOT=$(fm_test_tmproot fm-control)
 mkdir -p "$TMP_ROOT"
 TMP_ROOT=$(cd "$TMP_ROOT" && pwd)
-trap 'rm -rf "$TMP_ROOT"' EXIT
+control_exit() {
+  local status=$?
+  rm -rf "$TMP_ROOT"
+  v2_teardown
+  [ "$V2_TEARDOWN_FAILED" = 0 ] || status=1
+  exit "$status"
+}
+trap control_exit EXIT
 
 VERIFIED_HARNESSES="claude codex opencode pi pi-signed grok kimi cursor muse omp"
 

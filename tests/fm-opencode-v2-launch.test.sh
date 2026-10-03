@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Shared-service worker launcher behavior with a native CLI-shaped fixture.
 set -eu
-# shellcheck source=tests/lib.sh
-. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+# shellcheck source=tests/fm-opencode-v2-acceptance-lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/fm-opencode-v2-acceptance-lib.sh"
+v2_assert_test_namespace || exit 1
 TMP_ROOT=$(fm_test_tmproot fm-opencode-v2-launch)
 mkdir -p "$TMP_ROOT/bin" "$TMP_ROOT/work"
 cat > "$TMP_ROOT/bin/shuvcode" <<'SH'

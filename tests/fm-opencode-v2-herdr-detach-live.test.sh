@@ -48,8 +48,13 @@ set -u
 # Fixture boundary: no ambient native session identity or activation, and a
 # token-only registry namespace for any production helper this run reaches.
 unset OPENCODE_SESSION_ID FM_V2_ACTIVATION
-export FM_V2_REGISTRY_NAMESPACE="${FM_V2_REGISTRY_NAMESPACE:-v2iso$$}"
-case "$FM_V2_REGISTRY_NAMESPACE" in default) echo "not ok - refusing the default registry namespace" >&2; exit 1 ;; esac
+if [ -n "${FM_V2_TEST_NAMESPACE_FILE:-}" ] && [ -f "$FM_V2_TEST_NAMESPACE_FILE" ] && grep -qxF "${FM_V2_REGISTRY_NAMESPACE:-}" "$FM_V2_TEST_NAMESPACE_FILE"; then
+  bash "$ROOT/tests/fm-opencode-v2-acceptance-lib.sh" --assert-test-namespace || exit 1
+else
+  # shellcheck source=tests/fm-opencode-v2-acceptance-lib.sh
+  . "$ROOT/tests/fm-opencode-v2-acceptance-lib.sh"
+  v2_assert_test_namespace || exit 1
+fi
 fm_live_gate opt-in FM_OPENCODE_V2_HERDR_LIVE,FM_OPENCODE_V2_HERDR_SMOKE_LIVE herdr termctrl jq
 REAL_KNOBS=1
 for knob in FM_V2_HERDR_OWNER_CMD FM_V2_HERDR_OWNER_PID_CMD FM_V2_HERDR_SENTINEL_CMD FM_V2_HERDR_RETIRED_CMD FM_V2_HERDR_EXEC_CMD; do
@@ -106,6 +111,7 @@ cleanup() {
     fi
   fi
   [ "$FAILED" -eq 0 ] || status=1
+  if declare -F v2_teardown >/dev/null; then v2_teardown; [ "$V2_TEARDOWN_FAILED" = 0 ] || status=1; fi
   if [ "$status" -eq 0 ]; then rm -rf "$LAB"; else printf 'note: evidence retained at %s\n' "$LAB" >&2; fi
   exit "$status"
 }

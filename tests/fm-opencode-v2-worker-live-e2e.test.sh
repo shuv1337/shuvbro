@@ -8,6 +8,9 @@
 set -eu
 # shellcheck source=tests/fixtures.sh
 . "$(dirname "${BASH_SOURCE[0]}")/fixtures.sh"
+# shellcheck source=tests/fm-opencode-v2-acceptance-lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/fm-opencode-v2-acceptance-lib.sh"
+v2_assert_test_namespace || exit 1
 fm_live_gate opt-in FM_OPENCODE_V2_WORKER_LIVE shuvcode tmux jq git node
 VERSION=$(shuvcode --version)
 MODEL=${FM_OPENCODE_V2_MODEL:-opencode/space-bunny-free}
@@ -28,7 +31,6 @@ SERVICE_IDENTITY=
 # config once its trust state is no longer visible.
 NODE_DIR=$(dirname "$(node -p process.execPath)")
 export PATH="$NODE_DIR:$PATH"
-export FM_V2_REGISTRY_NAMESPACE="test-worker-live-$$-$RANDOM"
 export XDG_CONFIG_HOME="$LAB/xdg/config" XDG_STATE_HOME="$LAB/xdg/state" XDG_DATA_HOME="$LAB/xdg/data" XDG_CACHE_HOME="$LAB/xdg/cache"
 unset OPENCODE_CONFIG_DIR OPENCODE_CONFIG_CONTENT OPENCODE_SESSION_ID FM_V2_ACTIVATION OPENCODE_PASSWORD OPENCODE_SERVER_PASSWORD
 cleanup() {
@@ -51,6 +53,8 @@ cleanup() {
     fi
   fi
   node "$ROOT/bin/fm-opencode-v2-owner.mjs" cleanup-test-namespace >/dev/null 2>&1 || status=1
+  v2_teardown
+  [ "$V2_TEARDOWN_FAILED" = 0 ] || status=1
   if [ "$status" -eq 0 ]; then
     rm -rf "$LAB"
   else

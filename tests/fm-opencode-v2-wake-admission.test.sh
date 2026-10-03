@@ -21,8 +21,9 @@ set -u
 # Fixture boundary: no ambient native session identity or activation, and a
 # token-only registry namespace for any production helper this run reaches.
 unset OPENCODE_SESSION_ID FM_V2_ACTIVATION
-export FM_V2_REGISTRY_NAMESPACE="${FM_V2_REGISTRY_NAMESPACE:-v2iso$$}"
-case "$FM_V2_REGISTRY_NAMESPACE" in default) echo "not ok - refusing the default registry namespace" >&2; exit 1 ;; esac
+# shellcheck source=tests/fm-opencode-v2-acceptance-lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/fm-opencode-v2-acceptance-lib.sh"
+v2_assert_test_namespace || exit 1
 
 # Cross-tree runs (FM_V2_TEST_CODE_ROOT) exercise that tree's recovery helpers,
 # matching the acceptance library's code-root selection.

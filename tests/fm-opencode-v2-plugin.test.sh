@@ -2,11 +2,33 @@
 # Credential-free behavioral coverage for the native exact-session contract.
 # Live native loader/service/Herdr qualification is separate and opt-in.
 set -u
-# shellcheck source=tests/lib.sh
-. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+# shellcheck source=tests/fm-opencode-v2-acceptance-lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/fm-opencode-v2-acceptance-lib.sh"
+v2_assert_test_namespace || exit 1
 TMP_ROOT=$(fm_test_tmproot fm-opencode-v2-plugin)
 export NODE_NO_WARNINGS=1
-export FM_V2_REGISTRY_NAMESPACE="test-$$-$RANDOM"
+
+test_standalone_registry_guard() {
+  local fixture namespace out home="$TMP_ROOT/guard-home" lab="$TMP_ROOT/guard-lab"
+  mkdir -p "$home/.local/state/shuvbro/opencode-v2/default"
+  mkdir -p "$home/.local/state/shuvbro/opencode-v2/test-existing"
+  printf 'untouched sentinel\n' > "$home/.local/state/shuvbro/opencode-v2/default/sentinel"
+  for fixture in fixtures/fm-opencode-v2-provider-host.mjs fixtures/fm-opencode-v2-real-recovery.mjs assets/fm-opencode-v2-native-harness.mjs; do
+    for namespace in unset default '../unsafe' test-existing; do
+      if [ "$namespace" = unset ]; then
+        out=$(env -u FM_V2_REGISTRY_NAMESPACE HOME="$home" ROOT="$ROOT" LAB="$lab" node "$ROOT/tests/$fixture" 2>&1) && fail "standalone $fixture accepted unset namespace"
+      else
+        out=$(env FM_V2_REGISTRY_NAMESPACE="$namespace" HOME="$home" ROOT="$ROOT" LAB="$lab" node "$ROOT/tests/$fixture" 2>&1) && fail "standalone $fixture accepted $namespace namespace"
+      fi
+      [[ "$out" == *refusing*registry*namespace* ]] || fail "standalone guard was not the refusal: $out"
+      [ "$(find "$home/.local/state/shuvbro/opencode-v2" -type f | wc -l)" = 1 ] || fail "standalone fixture wrote to disposable default registry"
+      [ "$(cat "$home/.local/state/shuvbro/opencode-v2/default/sentinel")" = 'untouched sentinel' ] || fail "standalone fixture changed default contents"
+      [ ! -e "$lab" ] || fail "standalone fixture mutated its lab before registry guard"
+    done
+  done
+  pass "all standalone native fixtures refuse unset/default/invalid/non-fresh namespaces before any write, with disposable HOME"
+}
+test_standalone_registry_guard
 
 test_native_exact_owner_and_transport() {
   local out
@@ -230,6 +252,7 @@ const owner=await import(pathToFileURL(root+'/bin/fm-opencode-v2-owner.mjs'));
 const session=await import(pathToFileURL(root+'/bin/fm-opencode-v2-session.mjs'));
 const me=owner.identity(process.pid),endpoint='http://127.0.0.1:23456';
 process.env.FM_V2_REGISTRY_NAMESPACE='test-endpoint-'+process.pid;
+fs.appendFileSync(process.env.FM_V2_TEST_NAMESPACE_FILE, process.env.FM_V2_REGISTRY_NAMESPACE+'\n');
 process.env.FIXTURE_STATE=lab+'/native';process.env.FIXTURE_PID=String(process.pid);process.env.FIXTURE_ROOT=root;process.env.FIXTURE_LOG=lab+'/api.log';process.env.FIXTURE_ACTIVE=lab+'/active';
 fs.writeFileSync(lab+'/native/service.json',JSON.stringify({pid:me.pid,url:endpoint,password:'private-fixture'}),{mode:0o600});
 fs.writeFileSync(lab+'/bin/shuvcode',`#!/usr/bin/env node
