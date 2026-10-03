@@ -71,6 +71,7 @@ owned_and_armed() {  # <lock-step-json>: steps until the owner holds .lock and a
 # so a process whose parent has the identical cmdline is not a watcher.
 watchers_step() {
   local cmd
+  # shellcheck disable=SC2016 # expanded by the lead model shell, not here
   cmd='n=0; for p in $(pgrep -f "/bin/fm-watch\.sh( |$)"); do
   tr "\0" "\n" < /proc/$p/environ 2>/dev/null | grep -qx "FM_STATE_OVERRIDE=$1" || continue
   pp=$(sed "s/.*) //" /proc/$p/stat 2>/dev/null | cut -d" " -f2)
