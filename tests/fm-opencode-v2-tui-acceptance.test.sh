@@ -187,6 +187,22 @@ test_notice_startup_undelivered_stays_open() {
   pass "real TUI setup: an undelivered startup admission still notifies once after the bound"
 }
 
+test_notice_startup_helper_failure_immediate() {
+  tui_case notice-helper-failure 1
+  local out="$CASE/out.json" steps failbin="$CASE/failnode"
+  mkdir -p "$failbin"
+  printf '#!/usr/bin/env bash\ncase " $* " in *" helper "*" acquire "*) echo "helper refused" >&2; exit 1;; esac\nexec %q "$@"\n' "$V2_NODE_BIN" > "$failbin/node"
+  chmod +x "$failbin/node"
+  steps=$(jq -nc '
+    [{do:"wait",until:"admitted",match:"WATCHER FAILURE[\\s\\S]*helper proof failed",timeoutMs:10000},
+    {do:"tick",count:5},{do:"advance-notice-clock",ms:31000},{do:"tick",count:5},{do:"sleep",ms:500},{do:"notice-count"}]')
+  v2_tui "$CASE" "$(spec "$(jq -nc --argjson s "$steps" --arg p "$failbin:$PATH" '{manualNoticeClock:true,captureTimer:true,ownerEnv:{PATH:$p},steps:$s}')")" "$out"
+  jq -e 'all(.steps[] | select(.step=="wait"); .ok)' "$out" >/dev/null || fail "startup helper failure was not surfaced immediately: $(jq -c '.steps' "$out")"
+  jq -e 'all(.steps[] | select(.step=="notice-count"); .count==1 and .toasts==1)' "$out" >/dev/null || fail "startup helper failure notice cleared or repeated: $(jq -c '.steps' "$out")"
+  [ "$(startup_admissions "$out")" = 0 ] || fail "startup nudge admitted despite failed helper proof"
+  pass "real TUI setup: a failed startup helper proof notifies once immediately and is not cleared by later ticks"
+}
+
 test_notice_ownership_lost_after_held() {
   tui_case notice-ownership-lost 1
   local out="$CASE/out.json" steps
@@ -243,6 +259,7 @@ if [ "${FM_V2_NOTICE_ONLY:-0}" = 1 ]; then
   test_notice_silent_until_first_ownership
   test_notice_startup_transient_self_heals
   test_notice_startup_undelivered_stays_open
+  test_notice_startup_helper_failure_immediate
   test_notice_ownership_lost_after_held
   test_notice_stale_startup_entry
   test_notice_rebind_failure_immediate
@@ -804,6 +821,7 @@ v2_run_cases \
   test_notice_silent_until_first_ownership \
   test_notice_startup_transient_self_heals \
   test_notice_startup_undelivered_stays_open \
+  test_notice_startup_helper_failure_immediate \
   test_notice_ownership_lost_after_held \
   test_notice_stale_startup_entry \
   test_notice_rebind_failure_immediate \

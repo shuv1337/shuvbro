@@ -170,7 +170,7 @@ export default { id: "firstmate.native.v2", async setup(ctx) {
    if (stopped) { retireClaim(); return cleanup; }
    process.once("exit", exitFallback);
    const paths = { root: record.root, home: record.home, state: record.state, config: record.config };
-  let reconcileInFlight, held = false;
+  let reconcileInFlight, held = false, nudged = false;
   let lastFailure = "";
    const notices = createFailureNotice(reason => {
     if (stopped) return;
@@ -234,7 +234,7 @@ export default { id: "firstmate.native.v2", async setup(ctx) {
           if (pending.kind === "startup:" + record.claimID) await journal.deliver(pending);
         }
         if (held) failure("V2 supervision ownership is unavailable; automatic reconciliation is continuing");
-        else if (!journal.pending().some(value => value.kind === "startup:" + record.claimID)) notices.recovered();
+        else if (nudged && !journal.pending().some(value => value.kind === "startup:" + record.claimID)) notices.recovered();
         return;
       }
       held = true;
@@ -249,11 +249,16 @@ export default { id: "firstmate.native.v2", async setup(ctx) {
     try { await reconcileInFlight; } finally { reconcileInFlight = null; }
   }
   try {
-    const proof = await runProcess("node", [`${record.root}/bin/fm-opencode-v2-owner.mjs`, "helper", record.state, "acquire"], { cwd: record.root, env, timeout: 10000 });
-    if (proof.code !== 0) throw new Error("V2 startup helper proof failed: " + proof.stderr.trim());
-    const nudge = await runProcess(`${record.root}/bin/fm-sessionstart-nudge.sh`, [], { cwd: record.root, env, timeout: 10000 });
-    if (nudge.code !== 0) throw new Error("V2 startup nudge failed");
-    if (nudge.stdout.trim()) await journal.deliver(journal.prepare(nudge.stdout.trim(), "startup:" + record.claimID));
+    let startup;
+    try {
+      const proof = await runProcess("node", [`${record.root}/bin/fm-opencode-v2-owner.mjs`, "helper", record.state, "acquire"], { cwd: record.root, env, timeout: 10000 });
+      if (proof.code !== 0) throw new Error("V2 startup helper proof failed: " + proof.stderr.trim());
+      const nudge = await runProcess(`${record.root}/bin/fm-sessionstart-nudge.sh`, [], { cwd: record.root, env, timeout: 10000 });
+      if (nudge.code !== 0) throw new Error("V2 startup nudge failed");
+      if (nudge.stdout.trim()) startup = journal.prepare(nudge.stdout.trim(), "startup:" + record.claimID);
+    } catch (error) { throw Object.assign(error, { nonRecoverable: true }); }
+    nudged = true;
+    if (startup) await journal.deliver(startup);
     await reconcile();
   } catch (error) { failureFromError(error); }
 
