@@ -11,7 +11,8 @@ export NODE_NO_WARNINGS=1
 test_standalone_registry_guard() {
   local fixture namespace out home="$TMP_ROOT/guard-home" lab="$TMP_ROOT/guard-lab"
   local preload="--import=$ROOT/tests/assets/fm-opencode-v2-scratch-home.mjs"
-  local -a scratch=(env HOME="$TMP_ROOT/not-the-registry-home" FM_V2_TEST_SCRATCH_HOME="$home" NODE_OPTIONS="$preload")
+  # A foreign HOME breaks version-manager node shims; pin the resolved binary.
+  local -a scratch=(env HOME="$TMP_ROOT/not-the-registry-home" PATH="$(dirname "$V2_NODE_BIN"):$PATH" FM_V2_TEST_SCRATCH_HOME="$home" NODE_OPTIONS="$preload")
   mkdir -p "$home/.local/state/shuvbro/opencode-v2/default"
   mkdir -p "$home/.local/state/shuvbro/opencode-v2/test-existing"
   printf 'untouched sentinel\n' > "$home/.local/state/shuvbro/opencode-v2/default/sentinel"
