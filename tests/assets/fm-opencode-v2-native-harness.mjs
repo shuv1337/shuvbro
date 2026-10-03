@@ -35,7 +35,8 @@
 // every request so tests can edit snapshots between steps.
 import net from "node:net";
 import { spawn } from "node:child_process";
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, appendFileSync } from "node:fs";
+import { dirname } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const [role, ...args] = process.argv.slice(2);
@@ -87,6 +88,7 @@ async function serviceRole([codeRoot, socket, sessionsFile]) {
   // service, as a real shell's `shuvcode api` reaches its own service.
   const shells = new Map();
   const nativeState = process.env.V2_NATIVE_STATE, nativeBin = process.env.V2_NATIVE_BIN;
+  const caseDir = dirname(sessionsFile);
   if (!nativeState || !nativeBin || !process.env.V2_SERVICE_URL) throw new Error("service stand-in needs V2_NATIVE_STATE, V2_NATIVE_BIN and V2_SERVICE_URL");
   {
     const { randomBytes } = await import("node:crypto");
@@ -115,6 +117,26 @@ async function serviceRole([codeRoot, socket, sessionsFile]) {
     },
     environment: async ({ sessionID, variables }) => ({ variables: await api.environment({ sessionID, variables }) ?? null }),
     api: async ({ operation, params }) => {
+      // Every native API call is logged with the answering service's pid, so a
+      // case can tell which incarnation was consulted or interrupted.
+      const param = (name) => (params || []).map((p) => p.startsWith(name + "=") ? p.slice(name.length + 1) : undefined).find((v) => v !== undefined);
+      appendFileSync(`${caseDir}/api.log`, `${process.pid} ${operation} ${(params || []).join(" ")}\n`);
+      // Execution claims are durable service data (<case>/execution.json), so
+      // a successor at the same endpoint sees a turn the predecessor started,
+      // as shuvcode's resumeSuspendedSessions does.
+      const executing = () => { try { return JSON.parse(readFileSync(`${caseDir}/execution.json`, "utf8")); } catch { return {}; } };
+      if (operation === "session.get") {
+        const info = JSON.parse(readFileSync(sessionsFile, "utf8"))[param("sessionID")];
+        return info ? { data: info } : { error: "session not found" };
+      }
+      if (operation === "session.active") return { data: Object.fromEntries(Object.keys(executing()).map((id) => [id, { type: "running" }])) };
+      if (operation === "session.interrupt") {
+        if (param("resume") !== "false") return { error: "interrupt without resume=false" };
+        const current = executing(), id = param("sessionID"), was = Object.hasOwn(current, id);
+        delete current[id];
+        writeFileSync(`${caseDir}/execution.json`, JSON.stringify(current));
+        return { interrupted: was };
+      }
       if (operation === "server.info") return { pid: process.pid };
       if (operation === "shell.list") {
         const directory = (params || []).map((p) => /^location\[directory\]=(.*)$/.exec(p)?.[1]).find(Boolean);
