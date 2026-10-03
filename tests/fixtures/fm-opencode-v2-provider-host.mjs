@@ -76,12 +76,14 @@ function host(failAt) {
     renderApp() {
       provider = true; try { for (const render of renders) render(); } finally { provider = false; }
     },
-    keymap: { layer(get) { assert.equal(provider, true, "Keymap.Provider is missing"); if (failAt === "render") throw new Error("fixture layer failure"); commands = get().commands; assert.equal(get().mode, "global"); } },
+      keymap: { layer(get) { assert.equal(provider, true, "Keymap.Provider is missing"); if (["render", "sync-render"].includes(failAt)) throw new Error("fixture layer failure"); commands = get().commands; assert.equal(get().mode, "global"); } },
     ui: { slot(claim) {
       if (failAt === "slot") throw new Error("fixture slot registration failure");
       assert.equal(claim.append, "app");
       renders.push(claim.render);
-      return () => { assert.equal(provider, false, "slot was disposed inside its own provider render"); unregisters++; renders.length = 0; commands = []; };
+      if (failAt === "sync-render") { provider = true; try { claim.render(); } finally { provider = false; } }
+      let disposed = false;
+      return () => { assert.equal(disposed, false, "slot unregister invoked twice"); disposed = true; assert.equal(provider, false, "slot was disposed inside its own provider render"); unregisters++; renders.length = 0; commands = []; };
     }, toast: { show() {} } },
     client: {
       server: { info: async () => ({ pid: me.pid }) },
@@ -116,10 +118,12 @@ if (process.argv.includes("--exit")) {
 let cleanup, coordinator;
 try {
   assert.throws(() => host().keymap.layer(() => ({})), /Provider/); // fixture discriminates on the original cause
-  for (const stage of ["slot", "render", "activation"]) {
+   for (const stage of ["slot", "render", "sync-render", "activation"]) {
+     const before = unregisters;
     const app = host(stage), failed = await tui.setup(app);
     app.renderApp();
-    assert.equal(typeof failed, "function"); await failed();
+     assert.equal(typeof failed, "function"); await failed(); await failed();
+     assert.equal(unregisters - before, stage === "slot" ? 0 : 1, "failure must unregister exactly once");
     assert.equal(globalThis[Symbol.for("firstmate.native.v2.tui.coordinator")], undefined);
     assert.equal(running(read("watcher.pid")), false);
   }

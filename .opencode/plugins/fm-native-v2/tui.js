@@ -93,7 +93,9 @@ export default { id: "firstmate.native.v2", async setup(ctx) {
      abort.abort();
      clearInterval(timer);
      let publicationError;
-     try { unregisterUI?.(); } catch (error) { publicationError = error; }
+      const unregister = unregisterUI;
+      unregisterUI = undefined; // host disposal is not required to be idempotent
+      try { unregister?.(); } catch (error) { publicationError = error; }
      try { retireClaim(); } catch (error) { if (error.code !== "ENOENT") publicationError = error; }
      disposal = (async () => {
        try { await coordinator?.cleanup(); }
@@ -130,7 +132,7 @@ export default { id: "firstmate.native.v2", async setup(ctx) {
      }
      return null;
    } });
-   if (stopped) { unregisterUI?.(); return cleanup; }
+    if (stopped) return cleanup; // render failure already scheduled disposal
    record = await activate(ctx, activation);
    if (stopped) { retireClaim(); return cleanup; }
    process.once("exit", exitFallback);
