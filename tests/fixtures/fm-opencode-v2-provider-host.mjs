@@ -30,12 +30,29 @@ if (!fs.existsSync(root)) {
     fs.writeFileSync(state + "/fixture.meta", "kind=scout\n");
   } else {
   fs.writeFileSync(root + "/bin/fm-supervision-lib.sh", 'fm_supervision_status() { FM_SUP_NEEDED=true; FM_SUP_QUEUE_PENDING=false; }\n');
+  // The stub arm mirrors the real recovery-marker transitions
+  // (bin/fm-wake-lib.sh): a dead watcher leaves pending:downtime:G, an
+  // ordinary re-arm announces it (announced:downtime:G) and resurfaces it with
+  // no queue rows, a predecessor-bound successor reports the open episode's
+  // generation, and only --handling-delivered G turns downtime into handling
+  // (refusing another generation). It never invents a handling marker.
   fs.writeFileSync(root + "/bin/fm-watch-arm.sh", `#!/bin/bash
 set -eu
 state="$FM_STATE_OVERRIDE"
+marker="$state/.watcher-down"
+token=$(cat "$marker" 2>/dev/null || true)
 if [ "\${1:-}" = --handling-delivered ]; then
   kill -0 "$4" || exit 1
-  echo "pending:handling:$2" > "$state/.watcher-down"
+  case "$token" in
+    *:*:"$2") ;;
+    *) exit 3 ;;
+  esac
+  case "$token" in
+    pending:downtime:*) echo "pending:handling:$2" > "$marker" ;;
+    announced:downtime:*) echo "announced:handling:$2" > "$marker" ;;
+    pending:handling:*|announced:handling:*) ;;
+    *) exit 1 ;;
+  esac
   echo "confirm $2" >> "$state/order"
   exit 0
 fi
@@ -46,13 +63,21 @@ old=$(cat "$state/watcher.pid" 2>/dev/null || true); [ -z "$old" ] || kill -TERM
 sleep 1000 </dev/null >/dev/null 2>&1 & child=$!; echo "$child" > "$state/watcher.pid"
 trap 'kill -TERM "$child" 2>/dev/null || true; wait "$child" 2>/dev/null || true; exit 0' TERM INT HUP
 if [ -f "$state/recovery-mode" ] && [ "$count" = 2 ]; then
-  echo announced:downtime:fixture-recovery > "$state/.watcher-down"
+  # The previous watcher was abandoned: its downtime episode is published,
+  # then this ordinary arm announces it and resurfaces it with no rows.
+  echo announced:downtime:fixture-recovery > "$marker"
   kill -TERM "$child"; wait "$child" 2>/dev/null || true
   echo 'check: rearm-resurface'
   exit 0
 fi
+generation=
 if [ -n "\${FM_WATCH_PREDECESSOR_ARM_PID:-}" ]; then
-  echo "watcher: started pid=$child (beacon fresh) recovery-generation=fixture-recovery"
+  case "$token" in
+    pending:downtime:*|announced:downtime:*|pending:handling:*|announced:handling:*) generation=\${token##*:} ;;
+  esac
+fi
+if [ -n "$generation" ]; then
+  echo "watcher: started pid=$child (beacon fresh) recovery-generation=$generation"
 else
   echo "watcher: started pid=$child (beacon fresh)"
 fi
