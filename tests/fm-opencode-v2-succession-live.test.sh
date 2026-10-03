@@ -248,10 +248,19 @@ create_session() {  # <directory> [parent]
      + (if $p == "" then {} else {parentID: $p} end)')" | jq -r '.data.id'
 }
 prompt() { api post "/api/session/$1/prompt" --data "$(jq -nc --arg t "$2" '{text: $t, delivery: "queue"}')" >/dev/null; }
-# Native user messages of one session: "<id>\t<first line of text>".
+# Native user messages of one session: "<id>\t<first line of text>". The export
+# is captured to a file (a pipe truncates large exports at 32 KiB) and must parse
+# completely: an unreadable export is recorded and fails the run, never reads
+# as zero messages.
 user_messages() {
-  api get "/api/experimental/session/$1/export" \
-    | jq -r '[.data.messages[]? | select(.type == "user")] | .[] | [.id, ((.text // "") | gsub("\u2063"; "") | split("\n")[0])] | @tsv'
+  local out="$LAB/export.$1.json"
+  if api get "/api/experimental/session/$1/export" > "$out" \
+    && jq -e '.data.messages | type == "array"' "$out" >/dev/null 2>&1; then
+    jq -r '[.data.messages[] | select(.type == "user")] | .[] | [.id, ((.text // "") | gsub("\u2063"; "") | split("\n")[0])] | @tsv' "$out"
+  else
+    printf 'not ok - unreadable session export for %s (%s bytes)\n' "$1" "$(wc -c < "$out")" | tee -a "$LAB/export.failed" >&2
+    return 1
+  fi
 }
 # Exact IDs of the watcher wake messages delivered to a session.
 wake_ids() { user_messages "$1" | awk -F'\t' '$2 ~ /^FIRSTMATE_OP: v1 watcher:.*WATCHER FIRED/ {print $1}'; }
@@ -527,4 +536,5 @@ if [ "${FM_V2_SUCC_PRIVATE:-1}" = 1 ]; then
   fi
 fi
 
+[ ! -s "$LAB/export.failed" ] || live_fail "session exports were unreadable: $(sort -u "$LAB/export.failed" | tr '\n' ' ')"
 [ "$LIVE_FAILED" -eq 0 ] || exit 1
