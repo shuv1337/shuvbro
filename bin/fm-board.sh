@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# fm-board.sh - the opt-in live board: one read-only web page of the fleet,
-# with answer buttons for what is waiting on the captain.
+# fm-board.sh - the opt-in live board: one web page of the fleet, read from
+# its structured records, with answer buttons for what is waiting on the captain.
 #
 # Usage:
 #   fm-board.sh serve
