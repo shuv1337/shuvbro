@@ -454,6 +454,15 @@ test_crew_absorb_class_classifier() {
   export FM_FAKE_CREW_STATE
   FM_FAKE_CREW_STATE='state: working · source: run-step · validating (running)'
   [ "$(crew_absorb_class a)" = working ] || fail "active run-step not classed working"
+  ! crew_run_step_is_ci_results_wait "$FM_FAKE_CREW_STATE" \
+    || fail "an active running step matched the ci results wait"
+  FM_FAKE_CREW_STATE='state: working · source: run-step · ci running, waiting for results'
+  [ "$(crew_absorb_class a)" = working ] || fail "ci results wait stopped counting as working"
+  crew_is_provably_working a || fail "ci results wait was not provably working"
+  crew_run_step_is_ci_results_wait "$FM_FAKE_CREW_STATE" \
+    || fail "ci results wait detail not recognized"
+  ! crew_run_step_is_ci_results_wait 'state: working · source: pane · ci running, waiting for results' \
+    || fail "a pane-sourced line matched the run-step ci results wait"
   FM_FAKE_CREW_STATE='state: working · source: pane · harness busy'
   [ "$(crew_absorb_class a)" = working ] || fail "busy pane not classed working"
   FM_FAKE_CREW_STATE='state: paused · source: status-log · awaiting upstream'
@@ -2908,6 +2917,95 @@ test_paused_authoritative_working_preserves_wedge_timer() {
   pass "a paused status overridden by authoritative working preserves its wedge timer and escalates"
 }
 
+# A current paused: line while the ci step is waiting on check results is the
+# external wait the line names. It takes the long pause cadence, including when
+# a wedge timer was already running, and it does not escalate as a possible wedge.
+# An undeclared results wait still uses that timer: the declaration is the
+# discriminator, not the ci step alone.
+test_declared_pause_during_ci_results_wait_uses_pause_cadence() {
+  local dir state fakebin out capture_file window key pane_hash sig pid
+  dir=$(make_case ci-results-pause); state="$dir/state"; fakebin="$dir/fakebin"
+  out="$dir/watch.out"; capture_file="$dir/pane.txt"; window="test:fm-ci-pause"
+  printf 'idle, waiting on CI\n' > "$capture_file"
+  printf 'window=%s\nkind=ship\n' "$window" > "$state/ci-pause.meta"
+  printf 'paused: waiting on external CI until checks finish\n' > "$state/ci-pause.status"
+  sig=$(seen_sig "$state/ci-pause.status"); printf '%s' "$sig" > "$state/.seen-ci-pause_status"
+  key=$(printf '%s' "$window" | tr ':/.' '___')
+  pane_hash=$(hash_text "idle, waiting on CI")
+  printf '%s' "$pane_hash" > "$state/.hash-$key"
+  printf '1\n' > "$state/.count-$key"
+  export FM_FAKE_CREW_STATE='state: working · source: run-step · ci running, waiting for results'
+
+  PATH="$fakebin:$PATH" FM_FAKE_TMUX_WINDOW="$window" FM_FAKE_TMUX_CAPTURE="$capture_file" \
+    FM_STATE_OVERRIDE="$state" FM_CREW_STATE_BIN="$fakebin/fm-crew-state.sh" \
+    FM_STALE_ESCALATE_SECS=1 FM_PAUSE_RESURFACE_SECS=999 FM_POLL=1 FM_SIGNAL_GRACE=1 \
+    FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$WATCH" > "$out" &
+  pid=$!
+  if ! wait_poll_cycle "$state" "$pid"; then
+    reap "$pid"; fail "a declared pause during the ci results wait was escalated: $(cat "$out")"
+  fi
+  [ ! -s "$out" ] || { reap "$pid"; fail "a declared pause during the ci results wait printed a wake: $(cat "$out")"; }
+  [ -e "$state/.paused-$key" ] || { reap "$pid"; fail "the ci results wait did not take the pause cadence"; }
+  [ ! -e "$state/.stale-since-$key" ] || { reap "$pid"; fail "the ci results wait started the wedge timer"; }
+  reap "$pid"
+  ack_stopped_cycle "$state" || fail "could not acknowledge the intentional ci-results pause stop"
+
+  echo $(( $(date +%s) - 500 )) > "$state/.stale-since-$key"
+  : > "$out"
+  PATH="$fakebin:$PATH" FM_FAKE_TMUX_WINDOW="$window" FM_FAKE_TMUX_CAPTURE="$capture_file" \
+    FM_STATE_OVERRIDE="$state" FM_CREW_STATE_BIN="$fakebin/fm-crew-state.sh" \
+    FM_STALE_ESCALATE_SECS=240 FM_PAUSE_RESURFACE_SECS=999 FM_POLL=1 FM_SIGNAL_GRACE=1 \
+    FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$WATCH" > "$out" &
+  pid=$!
+  if ! wait_poll_cycle "$state" "$pid"; then
+    reap "$pid"; fail "a declared ci results wait with a stale wedge timer was escalated: $(cat "$out")"
+  fi
+  grep -F "possible wedge" "$out" >/dev/null && { reap "$pid"; fail "a declared ci results wait was labeled a possible wedge: $(cat "$out")"; }
+  [ -e "$state/.paused-$key" ] || { reap "$pid"; fail "the ci results wait dropped the pause cadence"; }
+  [ ! -e "$state/.stale-since-$key" ] || { reap "$pid"; fail "the ci results wait kept the wedge timer"; }
+  reap "$pid"
+  unset FM_FAKE_CREW_STATE
+  pass "a declared pause during the ci results wait uses the pause cadence and drops a running wedge timer"
+}
+
+test_undeclared_ci_results_wait_still_wedge_escalates() {
+  local dir state fakebin out capture_file window key pane_hash sig pid
+  dir=$(make_case ci-results-undeclared); state="$dir/state"; fakebin="$dir/fakebin"
+  out="$dir/watch.out"; capture_file="$dir/pane.txt"; window="test:fm-ci-quiet"
+  printf 'idle building output' > "$capture_file"
+  printf 'window=%s\nkind=ship\n' "$window" > "$state/ci-quiet.meta"
+  printf 'working: still waiting on checks\n' > "$state/ci-quiet.status"
+  sig=$(seen_sig "$state/ci-quiet.status"); printf '%s' "$sig" > "$state/.seen-ci-quiet_status"
+  key=$(printf '%s' "$window" | tr ':/.' '___')
+  pane_hash=$(hash_text "idle building output")
+  printf '%s' "$pane_hash" > "$state/.hash-$key"
+  printf '1\n' > "$state/.count-$key"
+  export FM_FAKE_CREW_STATE='state: working · source: run-step · ci running, waiting for results'
+
+  PATH="$fakebin:$PATH" FM_FAKE_TMUX_WINDOW="$window" FM_FAKE_TMUX_CAPTURE="$capture_file" \
+    FM_STATE_OVERRIDE="$state" FM_CREW_STATE_BIN="$fakebin/fm-crew-state.sh" FM_STALE_ESCALATE_SECS=999 FM_POLL=1 FM_SIGNAL_GRACE=1 \
+    FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$WATCH" > "$out" &
+  pid=$!
+  if ! wait_poll_cycle "$state" "$pid"; then
+    reap "$pid"; fail "an undeclared ci results wait escalated before the wedge threshold: $(cat "$out")"
+  fi
+  [ -s "$state/.stale-since-$key" ] || { reap "$pid"; fail "an undeclared ci results wait did not start the wedge timer"; }
+  [ ! -e "$state/.paused-$key" ] || { reap "$pid"; fail "an undeclared ci results wait took the pause cadence"; }
+  reap "$pid"
+  ack_stopped_cycle "$state" || fail "could not acknowledge the intentional undeclared ci-results stop"
+
+  echo $(( $(date +%s) - 500 )) > "$state/.stale-since-$key"
+  : > "$out"
+  PATH="$fakebin:$PATH" FM_FAKE_TMUX_WINDOW="$window" FM_FAKE_TMUX_CAPTURE="$capture_file" \
+    FM_STATE_OVERRIDE="$state" FM_CREW_STATE_BIN="$fakebin/fm-crew-state.sh" FM_STALE_ESCALATE_SECS=240 FM_POLL=1 FM_SIGNAL_GRACE=1 \
+    FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$WATCH" > "$out" &
+  pid=$!
+  wait_for_exit "$pid" 100 || fail "an undeclared ci results wait did not wedge-escalate past the threshold"
+  grep -F "possible wedge" "$out" >/dev/null || fail "the undeclared ci results wait escalation omitted its reason"
+  unset FM_FAKE_CREW_STATE
+  pass "an undeclared ci results wait is absorbed, then wedge-escalated past the threshold"
+}
+
 # --- consecutive wedge escalations on the same pane demand deep inspection ----
 # Root cause of the PR #252 incident's ~20 minutes of unnoticed green: each
 # wedge escalation fires, gets classified as "still validating" one poll later
@@ -4758,6 +4856,8 @@ test_secondmate_unpause_clears_pause_tracking
 test_nonterminal_stale_pause_transitions_reclassify_unchanged_hash
 test_nonterminal_paused_rechecks_authoritative_state
 test_paused_authoritative_working_preserves_wedge_timer
+test_declared_pause_during_ci_results_wait_uses_pause_cadence
+test_undeclared_ci_results_wait_still_wedge_escalates
 test_nonterminal_stale_repairs_missing_or_corrupt_timer
 test_wedge_escalation_deferred_while_worktree_is_written
 test_write_deferral_resurfaces_on_the_bounded_cadence

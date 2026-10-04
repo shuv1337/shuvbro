@@ -54,7 +54,11 @@
 #      the active step is ci, `axi status` alone cannot tell "still waiting on
 #      checks" from "checks green, waiting on merge" (see nm_ci_checks_state) -
 #      a ci-step log-tail check overrides working -> done once checks read
-#      green, so a green PR is never silently read as still-validating. And a
+#      green, so a green PR is never silently read as still-validating. When
+#      that same log's latest marker is still "CI checks running", state stays
+#      working and the detail names the results wait, so an idle-pane classifier
+#      can honor a current paused: line without treating an active running or
+#      fixing step as that wait (bin/fm-watch.sh's pause_state_class). And a
 #      terminal FAILED run whose only failure is the ci monitor step, after
 #      every substantive step completed and the ci log's last marker reads
 #      checks green, also reads done (held-for-merge), never failed: a monitor
@@ -521,7 +525,11 @@ nm_ci_checks_state() {
     | tail -1)
   case "$marker" in
     *"checks passed"*|*"no CI checks reported - still monitoring"*) printf 'green' ;;
-    *"no CI checks reported yet"*|*"checks failed"*|*"issues detected"*|*"CI checks running"*|*"base branch advanced"*"re-arming CI monitor timeout"*) printf 'not-ready' ;;
+    # Distinct from the other not-ready markers: the step is parked on external
+    # check results, not failing, fixing, or re-arming. pause_state_class matches
+    # this token in the emitted detail.
+    *"CI checks running"*) printf 'waiting' ;;
+    *"no CI checks reported yet"*|*"checks failed"*|*"issues detected"*|*"base branch advanced"*"re-arming CI monitor timeout"*) printf 'not-ready' ;;
     *) printf 'unknown' ;;
   esac
 }
@@ -728,9 +736,18 @@ if [ "$HAVE_RUN" = 1 ]; then
     elif [ "$CI_STEP_STATUS" = fixing ]; then
       CI_LOG_STATE=not-ready
     fi
-    if [ "$CI_LOG_STATE" != not-ready ]; then
-      emit "done" status-log "$(status_line_note "$LOG_LINE")${SEP}run still monitoring PR"
-    fi
+    case "$CI_LOG_STATE" in
+      not-ready|waiting) ;;
+      *) emit "done" status-log "$(status_line_note "$LOG_LINE")${SEP}run still monitoring PR" ;;
+    esac
+  fi
+
+  # A ci step whose latest log marker is still waiting on check results stays
+  # working - the run has not finished - but the detail names that wait. An
+  # active running or fixing step keeps its own detail, so a leftover paused:
+  # line does not look like this wait.
+  if [ "$RUN_STATE" = working ] && [ "$CI_LOG_STATE" = waiting ]; then
+    RUN_DETAIL="ci running, waiting for results"
   fi
 
   # Reconcile the status log. A needs-decision/blocked log line that the run-step
