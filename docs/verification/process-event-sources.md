@@ -123,7 +123,7 @@ Exercised by `tests/fm-procevent.test.sh` against a fake blocking source whose c
 | coherent ownership reads | a claim replacement held inside the source boundary blocks `list` until one complete generation is visible |
 | retire-start exclusion | a queued start revalidates registration after the serialized retirement boundary and executes no child |
 | uncertain identity before the first signal | a live owner whose identity probe transiently fails is not signaled or released, and its registration remains for retry |
-| unreaped zombie leader | a finished runner that is still a zombie, with no non-zombie process left in its group, is stale: retirement releases that generation without signalling; a zombie leader that still has a live group member stays refused like any other crashed leader |
+| unreaped zombie leader | a finished runner that is still a zombie, with no non-zombie process left in its group, is stale: retirement releases that generation without signalling; a zombie leader that still has a live group member stays refused like any other crashed leader; a runner that passes its identity check and is reaped before its process-group read is likewise released once no live group member remains |
 | bounded home sweep | a non-mutating full-tree preflight precedes teardown, then registrations and claim-only owned sources retire through the ordinary safe path at each home-removal boundary |
 | sweep refusal | uncertain identity preserves the runner, claim, registration, home, lease, and parent retirement evidence for retry |
 | foreign ownership | sweeping one home removes its registration without signaling or releasing another home's live claim |
