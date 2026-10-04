@@ -3172,13 +3172,45 @@ opencode_v2_submit_prefill() {
   return 1
 }
 
+# The prefill wait's only copy of a launcher diagnostic is the pane, and this
+# failure path closes that pane. Record the composer verdict and a bounded
+# tail first, as one physical line: status events are line-oriented.
+opencode_v2_failure_evidence() {
+  local pane state marker=${FM_OPENCODE_V2_READY_MARKER:-'╹▀'} seen=no excerpt line
+  pane=$(fm_backend_capture "$BACKEND" "$T" 40 "$W" 2>/dev/null || true)
+  state=$(opencode_v2_composer_state)
+  case "$state" in
+    empty|pending|pending-unproven|unknown) ;;
+    *) state=unknown ;;
+  esac
+  if printf '%s\n' "$pane" | grep -Fq -- "$marker"; then
+    seen=yes
+  fi
+  excerpt=
+  while IFS= read -r line || [ -n "$line" ]; do
+    line=${line//$'\t'/ }
+    line=${line//$'\r'/ }
+    if [ -n "$excerpt" ]; then
+      excerpt="$excerpt | $line"
+    else
+      excerpt=$line
+    fi
+  done < <(printf '%s\n' "$pane" | grep -v '^[[:space:]]*$' | tail -n 8)
+  if [ "${#excerpt}" -gt 400 ]; then
+    excerpt=${excerpt: -400}
+  fi
+  printf 'composer=%s marker=%s tail=%s' "$state" "$seen" "$excerpt"
+}
+
 # Same orphan hazard as rovo: a launched --auto worker with no published task
-# record must not outlive a failed spawn.
+# record must not outlive a failed spawn. Capture the pane before that close.
 opencode_v2_spawn_fail() {  # <detail>
-  local detail=$1
+  local detail=$1 evidence
+  evidence=$(opencode_v2_failure_evidence)
   opencode_v2_cancel_admitted || detail="$detail; $OPENCODE_V2_CANCEL_NOTE"
+  detail="$detail; $evidence"
   printf 'failed: %s\n' "$detail" >> "$STATE/$ID.status"
-  echo "error: $detail; inspect window $T" >&2
+  echo "error: $detail" >&2
   rovo_endpoint_cleanup
 }
 
