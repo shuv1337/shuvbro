@@ -1,0 +1,51 @@
+=== case: hostile-id  OPENCODE_SESSION_ID='bad; touch PWNED <x>' FM_OPENCODE_V2_BIN='<tmp>/native dir; touch PWNED/shuvcode'
+fm-lock.sh exit=1
+error: OpenCode V2 lead is not activated for session ses_INVALID, so it cannot own this home's fleet lock; exit this client and relaunch with <tmp>/bin/fm-opencode-v2-lead.sh --session ses_INVALID (equivalent: <tmp>/bin/fm-opencode-v2-primary.sh --session ses_INVALID --native-binary <tmp>/native\ dir\;\ touch\ PWNED/shuvcode)
+--- pasting lead command:
+[lead launcher argv]
+  <--session>
+  <ses_INVALID>
+paste exit=0
+--- pasting equivalent command:
+[primary launcher argv]
+  <--session>
+  <ses_INVALID>
+  <--native-binary>
+  <<tmp>/native dir; touch PWNED/shuvcode>
+paste exit=0
+sentinels: session-id=keep --native-binary=keep PWNED=no .lock=no
+
+=== case: missing-binary  OPENCODE_SESSION_ID='$(touch PWNED)' FM_OPENCODE_V2_BIN='<tmp>/nope'
+fm-lock.sh exit=1
+error: OpenCode V2 lead is not activated for session ses_INVALID, so it cannot own this home's fleet lock; exit this client and relaunch with <tmp>/bin/fm-opencode-v2-lead.sh --session ses_INVALID (equivalent: <tmp>/bin/fm-opencode-v2-primary.sh --session ses_INVALID --native-binary installed-native-shuvcode-executable)
+--- pasting lead command:
+[lead launcher argv]
+  <--session>
+  <ses_INVALID>
+paste exit=0
+--- pasting equivalent command:
+[primary launcher argv]
+  <--session>
+  <ses_INVALID>
+  <--native-binary>
+  <installed-native-shuvcode-executable>
+paste exit=0
+sentinels: session-id=keep --native-binary=keep PWNED=no .lock=no
+
+=== case: valid-id  OPENCODE_SESSION_ID='ses_abc123' FM_OPENCODE_V2_BIN='<tmp>/native dir; touch PWNED/shuvcode'
+fm-lock.sh exit=1
+error: OpenCode V2 lead is not activated for session ses_abc123, so it cannot own this home's fleet lock; exit this client and relaunch with <tmp>/bin/fm-opencode-v2-lead.sh --session ses_abc123 (equivalent: <tmp>/bin/fm-opencode-v2-primary.sh --session ses_abc123 --native-binary <tmp>/native\ dir\;\ touch\ PWNED/shuvcode)
+--- pasting lead command:
+[lead launcher argv]
+  <--session>
+  <ses_abc123>
+paste exit=0
+--- pasting equivalent command:
+[primary launcher argv]
+  <--session>
+  <ses_abc123>
+  <--native-binary>
+  <<tmp>/native dir; touch PWNED/shuvcode>
+paste exit=0
+sentinels: session-id=keep --native-binary=keep PWNED=no .lock=no
+
