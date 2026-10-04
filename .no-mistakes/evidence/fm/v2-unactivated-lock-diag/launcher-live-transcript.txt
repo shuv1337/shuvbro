@@ -1,0 +1,24 @@
+$ (real shuvcode on PATH = npm launcher) FM_ROOT_OVERRIDE=/home/shuv/repos/shuvbro-dev fm-opencode-v2-lead.sh   # default --continue
+resuming lead session ses_efaadcd2effealA1cUAI1JzmWs
+[recorder] fm-opencode-v2-primary.sh would be exec'd with: --session ses_efaadcd2effealA1cUAI1JzmWs --native-binary /home/shuv/.npm-global/lib/node_modules/shuvcode/node_modules/shuvcode-linux-x64/bin/shuvcode
+[recorder] FM_HOME=/tmp/claude-fmhome cwd=/home/shuv/repos/shuvbro-dev
+exit=0
+
+$ FM_ROOT_OVERRIDE=/home/shuv/repos/shuvbro fm-opencode-v2-lead.sh --continue
+resuming lead session ses_efad9e0e8ffeHxH7bU55LSxhs4
+[recorder] fm-opencode-v2-primary.sh would be exec'd with: --session ses_efad9e0e8ffeHxH7bU55LSxhs4 --native-binary /home/shuv/.npm-global/lib/node_modules/shuvcode/node_modules/shuvcode-linux-x64/bin/shuvcode
+[recorder] FM_HOME=<unset> cwd=/home/shuv/repos/shuvbro
+exit=0
+
+$ fm-opencode-v2-lead.sh --session ses_explicit123 --native-binary /usr/bin/true
+[recorder] fm-opencode-v2-primary.sh would be exec'd with: --session ses_explicit123 --native-binary /usr/bin/true
+[recorder] FM_HOME=<unset> cwd=/home/shuv/repos/shuvbro
+exit=0
+
+$ FM_OPENCODE_V2_BIN=/home/shuv/.npm-global/bin/shuvcode (npm wrapper script) fm-opencode-v2-lead.sh
+error: cannot resolve the installed native shuvcode executable; pass --native-binary PATH or set FM_OPENCODE_V2_BIN
+exit=2
+
+$ fm-opencode-v2-lead.sh --bogus
+error: unknown argument: --bogus (see --help)
+exit=2

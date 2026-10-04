@@ -1,0 +1,26 @@
+== probe of real session ses_efaadcd2effealA1cUAI1JzmWs against the live V2 registry
+probe exit=3
+
+== BEFORE (base 5bbc669) fm-lock.sh, OPENCODE_SESSION_ID=ses_efaadcd2effealA1cUAI1JzmWs, no harness in ancestry (systemd-run --user)
+ancestry: systemd (ppid 1629)
+error: cannot locate harness process in ancestry
+exit=1
+no .lock written
+
+== AFTER (this branch) fm-lock.sh, same conditions
+ancestry: systemd (ppid 1629)
+error: OpenCode V2 lead is not activated for session ses_efaadcd2effealA1cUAI1JzmWs, so it cannot own this home's fleet lock; exit this client and relaunch with /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M42NNHK6GJF1D0XP927J8CS3/bin/fm-opencode-v2-lead.sh --session ses_efaadcd2effealA1cUAI1JzmWs (equivalent: /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M42NNHK6GJF1D0XP927J8CS3/bin/fm-opencode-v2-primary.sh --session ses_efaadcd2effealA1cUAI1JzmWs --native-binary /home/shuv/.npm-global/lib/node_modules/shuvcode/node_modules/shuvcode-linux-x64/bin/shuvcode)
+exit=1
+no .lock written
+
+== AFTER, no OPENCODE_SESSION_ID (generic failure must remain)
+ancestry: systemd (ppid 1629)
+error: cannot locate harness process in ancestry
+exit=1
+no .lock written
+
+== AFTER, hostile OPENCODE_SESSION_ID 'ses_x;rm -rf /' (must not be echoed verbatim)
+ancestry: systemd (ppid 1629)
+error: OpenCode V2 lead is not activated for session <session-id>, so it cannot own this home's fleet lock; exit this client and relaunch with /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M42NNHK6GJF1D0XP927J8CS3/bin/fm-opencode-v2-lead.sh --session <session-id> (equivalent: /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M42NNHK6GJF1D0XP927J8CS3/bin/fm-opencode-v2-primary.sh --session <session-id> --native-binary /home/shuv/.npm-global/lib/node_modules/shuvcode/node_modules/shuvcode-linux-x64/bin/shuvcode)
+exit=1
+no .lock written

@@ -1,0 +1,9 @@
+ok - resolver: the native platform executable is found nested, hoisted, or directly on PATH
+ok - resolver: script overrides and a launcher with no platform package resolve to nothing
+ok - launcher: continue activates the newest exact-root session, ignoring newer worktree and sibling sessions
+ok - launcher: continue with no session at the code root creates one there and activates it
+ok - launcher: continue refuses to create a session when the session list fills its whole window
+ok - launcher: new creates a fresh session even when one exists at the code root
+ok - launcher: an explicit session and native executable pass straight to the activation
+ok - launcher: an unresolvable native executable stops before activation and names --native-binary
+rc=0
