@@ -1,0 +1,338 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="fm-board-token" content="__FM_BOARD_TOKEN__">
+<meta name="fm-board-instance" content="__FM_BOARD_INSTANCE__">
+<meta name="fm-board-refresh" content="__FM_BOARD_REFRESH__">
+<link rel="icon" href="data:,">
+<title>shuvbro</title>
+<style nonce="__FM_BOARD_NONCE__">
+  :root {
+    --bg: #0f1115; --panel: #171a21; --line: #262b36; --text: #e6e8ee; --muted: #8b93a7;
+    --you: #f5a524; --review: #5b9cff; --working: #9b8cff; --ready: #3fcf8e; --blocked: #ff5c69;
+    --decision: #f5a524; --paused: #8b93a7; --button: #222734; --button-hover: #2b3242;
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --bg: #f6f7f9; --panel: #fff; --line: #e3e6ec; --text: #161a22; --muted: #667085;
+      --button: #eef0f4; --button-hover: #e2e6ee; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 960px; margin: 0 auto; padding: 18px 14px 48px;
+    padding-left: max(14px, env(safe-area-inset-left)); padding-right: max(14px, env(safe-area-inset-right)); }
+  header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
+  h1 { font-size: 18px; margin: 0; letter-spacing: .2px; }
+  h1 .home { color: var(--muted); font-weight: 500; font-size: 14px; margin-left: 6px; }
+  .updated { color: var(--muted); font-size: 12px; }
+  .updated.stale { color: var(--blocked); font-weight: 600; }
+  section { margin-top: 22px; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted);
+    margin: 0 0 8px; display: flex; gap: 8px; align-items: center; }
+  .count { background: var(--line); color: var(--text); border-radius: 999px; padding: 0 7px; font-size: 11px; }
+  .you h2 { color: var(--you); }
+  .you .count { background: var(--you); color: #111; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 13px; margin-bottom: 8px; }
+  .you .card { border-left: 3px solid var(--you); }
+  .you .card.readonly { border-left-color: var(--line); }
+  .row { display: flex; gap: 10px; align-items: flex-start; justify-content: space-between; }
+  .title { font-weight: 600; word-break: break-word; }
+  .meta { color: var(--muted); font-size: 12px; margin-top: 3px; }
+  .reason { margin-top: 5px; word-break: break-word; }
+  .badge { white-space: nowrap; font-size: 11px; font-weight: 600; border-radius: 6px; padding: 2px 7px; border: 1px solid currentColor; }
+  .t-review { color: var(--review); } .t-working { color: var(--working); } .t-ready { color: var(--ready); }
+  .t-blocked { color: var(--blocked); } .t-decision { color: var(--decision); } .t-paused, .t-unknown { color: var(--paused); }
+  a { color: var(--review); text-decoration: none; } a:hover { text-decoration: underline; }
+  details { margin-top: 6px; } summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+  details p { margin: 6px 0 0; font-size: 12px; color: var(--muted); word-break: break-word; white-space: pre-wrap; }
+  .empty { color: var(--muted); font-style: italic; padding: 4px 2px; }
+  .allclear { color: var(--ready); font-weight: 600; padding: 4px 2px; }
+  .errors .card { color: var(--blocked); }
+  .banner { background: var(--panel); border: 1px solid var(--you); border-radius: 10px; padding: 10px 13px; margin-bottom: 10px; }
+  ul.compact { list-style: none; padding: 0; margin: 0; }
+  ul.compact li { padding: 7px 2px; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+  ul.compact li:last-child { border-bottom: 0; }
+  .small { font-size: 12px; color: var(--muted); }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  button { font: inherit; font-size: 14px; color: var(--text); background: var(--button); border: 1px solid var(--line);
+    border-radius: 8px; padding: 8px 14px; min-height: 40px; cursor: pointer; }
+  button:hover:not(:disabled) { background: var(--button-hover); }
+  button:disabled { opacity: .5; cursor: default; }
+  button.primary { border-color: var(--you); }
+  button.quiet { color: var(--muted); }
+  .panel { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--line); }
+  .panel .actions { margin-top: 6px; }
+  textarea { width: 100%; min-height: 76px; font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line);
+    border-radius: 8px; padding: 8px; resize: vertical; }
+  input[type=date] { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 7px 8px; min-height: 40px; }
+  .feedback { margin-top: 8px; font-size: 13px; }
+  .feedback.pending { color: var(--muted); }
+  .feedback.recorded { color: var(--ready); font-weight: 600; }
+  .feedback.failed { color: var(--blocked); }
+  .answered { color: var(--ready); font-size: 13px; padding: 6px 2px; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1 id="product">shuvbro</h1>
+    <div id="updated" class="updated">loading…</div>
+  </header>
+  <div id="banner"></div>
+  <div id="errors" class="errors"></div>
+  <section class="you">
+    <h2>Waiting on you <span id="c-you" class="count">0</span></h2>
+    <div id="answered"></div>
+    <div id="you"></div>
+    <details id="older" hidden><summary id="older-summary"></summary><div id="older-list"></div></details>
+  </section>
+  <section id="s-lead" hidden><h2><span id="h-lead">Answered</span> <span id="c-lead" class="count">0</span></h2><div id="lead"></div></section>
+  <section><h2>In flight <span id="c-flight" class="count">0</span></h2><div id="flight"></div></section>
+  <section id="s-fyi" hidden><h2>Heads-up</h2><div id="fyi"></div></section>
+  <section id="s-queued" hidden><h2>Queued <span id="c-queued" class="count">0</span></h2><div id="queued"></div></section>
+  <section><h2>Recently done</h2><div id="done"></div></section>
+</main>
+<script nonce="__FM_BOARD_NONCE__">
+"use strict";
+const meta = (name) => document.querySelector(`meta[name="${name}"]`).content;
+const TOKEN = meta("fm-board-token");
+const INSTANCE = meta("fm-board-instance");
+const REFRESH = Math.max(2, Number(meta("fm-board-refresh")) || 10);
+const STALE_AFTER = Math.max(45, REFRESH * 3);
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const isWeb = (u) => typeof u === "string" && /^https?:\/\/[^\s"<>]+$/.test(u);
+const shortUrl = (u) => { const m = String(u).match(/github\.com\/[^/]+\/([^/]+)\/(pull|issues)\/(\d+)/); return m ? `${m[1]}#${m[3]}` : u; };
+const link = (u, label) => isWeb(u) ? `<a href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(label || shortUrl(u))}</a>` : "";
+const ago = (iso) => {
+  if (!iso) return "";
+  const s = Math.max(0, (Date.now() - Date.parse(iso)) / 1000);
+  return s < 60 ? `${Math.round(s)}s ago` : s < 3600 ? `${Math.round(s / 60)}m ago` : s < 86400 ? `${Math.round(s / 3600)}h ago` : `${Math.round(s / 86400)}d ago`;
+};
+const utcDay = (offset) => new Date(Date.now() + offset * 86400000).toISOString().slice(0, 10);
+const dayLabel = (d) => new Date(`${d}T12:00:00Z`).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" });
+
+let last = null;
+let offline = false;
+let lastWaitingSignature = "";
+const cardState = new Map();   // task id -> {state, message}
+const panels = new Map();      // task id -> "later" | "reply"
+const drafts = new Map();      // task id -> reply text
+let recentlyAnswered = [];     // {title, message, at}
+
+function choicesHtml(w) {
+  const st = cardState.get(w.id) || {};
+  const busy = st.state === "pending" || st.state === "recorded";
+  const dis = busy ? " disabled" : "";
+  const open = panels.get(w.id);
+  let html = `<div class="actions">${(w.choices || []).map((c) =>
+    `<button class="primary" data-act="choice" data-id="${esc(w.id)}" data-choice="${esc(c.id)}"${dis}>${esc(c.label)}</button>`).join("")}
+    <button data-act="panel" data-id="${esc(w.id)}" data-panel="later"${dis}>Later…</button>
+    <button class="quiet" data-act="panel" data-id="${esc(w.id)}" data-panel="reply"${dis}>Reply…</button></div>`;
+  if (open === "later" && !busy) {
+    const presets = [1, 3, 7].map((n) => utcDay(n));
+    html += `<div class="panel"><div class="small">Bring this back to you on:</div><div class="actions">
+      ${presets.map((d) => `<button data-act="later" data-id="${esc(w.id)}" data-until="${d}">${esc(dayLabel(d))}</button>`).join("")}
+      <input type="date" data-later-input="${esc(w.id)}" min="${utcDay(1)}" max="${utcDay(366)}" aria-label="Pick a date">
+      <button data-act="later-pick" data-id="${esc(w.id)}">Move</button></div></div>`;
+  }
+  if (open === "reply" && !busy) {
+    const draft = drafts.get(w.id) || "";
+    html += `<div class="panel"><textarea maxlength="500" data-draft="${esc(w.id)}" placeholder="Recorded as your answer to this question">${esc(draft)}</textarea>
+      <div class="actions"><button class="primary" data-act="reply" data-id="${esc(w.id)}">Send</button>
+      <span class="small" data-counter="${esc(w.id)}">${draft.length}/500</span></div></div>`;
+  }
+  if (st.state) html += `<div class="feedback ${esc(st.state)}">${esc(st.message)}</div>`;
+  return html;
+}
+
+function waitingCard(w, lead) {
+  if (!w.answerable) {
+    const from = w.source === "secondmate"
+      ? `From second mate ${esc(w.from)} - answer it in chat with ${esc(lead)}`
+      : `Noted by ${esc(lead)}`;
+    return `<div class="card readonly"><div class="title">${esc(w.title)}</div>
+      ${w.reason ? `<div class="reason">${esc(w.reason)}</div>` : ""}
+      <div class="meta">${[from, ...(w.links || []).map((u) => link(u))].filter(Boolean).join(" · ")}</div></div>`;
+  }
+  const age = Number.isInteger(w.age_days) ? (w.age_days === 0 ? "asked today" : `asked ${w.age_days}d ago`) : "";
+  return `<div class="card" data-card="${esc(w.id)}"><div class="title">${esc(w.title)}</div>
+    ${w.reason ? `<div class="reason">${esc(w.reason)}</div>` : ""}
+    <div class="meta">${[esc(w.repo || ""), age, ...(w.links || []).map((u) => link(u))].filter(Boolean).join(" · ")}</div>
+    ${choicesHtml(w)}</div>`;
+}
+
+function renderWaiting(d) {
+  const all = d.waiting_on_you || [];
+  const live = all.filter((w) => !w.aged);
+  const older = all.filter((w) => w.aged);
+  const ids = new Set(all.filter((w) => w.answerable).map((w) => w.id));
+  for (const [id, st] of cardState) {
+    if (!ids.has(id)) {
+      if (st.state === "recorded") recentlyAnswered.push({ message: st.message, title: st.title, at: Date.now() });
+      cardState.delete(id); panels.delete(id); drafts.delete(id);
+    }
+  }
+  recentlyAnswered = recentlyAnswered.filter((r) => Date.now() - r.at < 120000);
+  const signature = JSON.stringify([all, [...cardState], [...panels], recentlyAnswered.length]);
+  $("c-you").textContent = live.length;
+  document.title = (live.length ? `(${live.length}) ` : "") + (d.product || "shuvbro");
+  if (signature === lastWaitingSignature) return;
+  lastWaitingSignature = signature;
+  const focused = document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.draft : undefined;
+  $("answered").innerHTML = recentlyAnswered.map((r) => `<div class="answered">✓ ${esc(r.title)}: ${esc(r.message)}</div>`).join("");
+  $("you").innerHTML = live.length ? live.map((w) => waitingCard(w, d.lead)).join("") : `<div class="allclear">Nothing waiting on you.</div>`;
+  $("older").hidden = older.length === 0;
+  $("older-summary").textContent = `Older questions still open (${older.length})`;
+  $("older-list").innerHTML = older.map((w) => waitingCard(w, d.lead)).join("");
+  if (focused) {
+    const el = document.querySelector(`textarea[data-draft="${CSS.escape(focused)}"]`);
+    if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); }
+  }
+}
+
+function render(d) {
+  last = d;
+  if (d.instance && d.instance !== INSTANCE) {
+    if ([...drafts.values()].some((t) => t.trim())) {
+      $("banner").innerHTML = `<div class="banner">The board restarted. <button data-act="reload">Reload</button> to keep answering.</div>`;
+    } else {
+      location.reload();
+      return;
+    }
+  }
+  $("product").innerHTML = `${esc(d.product || "shuvbro")}${d.home_label ? `<span class="home">${esc(d.home_label)}</span>` : ""}`;
+  $("errors").innerHTML = (d.errors || []).map((e) => `<div class="card">${esc(e)}</div>`).join("");
+  renderWaiting(d);
+  const withLead = d.with_lead || [];
+  $("s-lead").hidden = withLead.length === 0;
+  $("h-lead").textContent = `Answered - with ${d.lead || "the lead"}`;
+  $("c-lead").textContent = withLead.length;
+  $("lead").innerHTML = withLead.map((w) => `<div class="card"><div class="title">${esc(w.title)}</div>
+    ${w.reason ? `<div class="reason">${esc(w.reason)}</div>` : ""}
+    <div class="meta">${[w.answer ? `You answered: ${esc(w.answer)}` : "You answered", w.answered_at ? ago(w.answered_at) : "",
+      esc(w.repo || ""), ...(w.links || []).map((u) => link(u))].filter(Boolean).join(" · ")}</div></div>`).join("");
+  const flight = d.in_flight || [], queued = d.queued || [], done = d.done || [], fyi = d.fyi || [];
+  $("c-flight").textContent = flight.length;
+  $("flight").innerHTML = flight.length ? flight.map((t) => `
+    <div class="card"><div class="row"><div><div class="title">${esc(t.title)}</div>
+      <div class="meta">${[esc(t.project || ""), esc(t.kind || ""), t.pr ? link(t.pr) : "", t.observed_at ? `checked ${ago(t.observed_at)}` : ""].filter(Boolean).join(" · ")}</div></div>
+      <span class="badge t-${esc(t.tone)}">${esc(t.label)}</span></div>
+      ${t.note ? `<details><summary>Latest note from the worker</summary><p>${esc(t.note)}</p></details>` : ""}
+    </div>`).join("") : `<div class="empty">Nothing in flight.</div>`;
+  $("s-fyi").hidden = fyi.length === 0;
+  $("fyi").innerHTML = fyi.map((n) => `<div class="card">${esc(n.text)}${n.detail ? `<div class="meta">${esc(n.detail)}</div>` : ""}${n.link ? `<div class="meta">${link(n.link)}</div>` : ""}</div>`).join("");
+  $("s-queued").hidden = queued.length === 0;
+  $("c-queued").textContent = queued.length;
+  $("queued").innerHTML = `<div class="card"><ul class="compact">${queued.map((q) => `<li><span>${esc(q.title)}${q.note ? ` <span class="small">${esc(q.note)}</span>` : ""}</span><span class="small">${esc(q.repo || "")}</span></li>`).join("")}</ul></div>`;
+  $("done").innerHTML = done.length ? `<div class="card"><ul class="compact">${done.map((x) => `<li><span>${esc(x.title)}</span><span class="small">${x.pr ? `${link(x.pr)} · ` : ""}${esc(x.verb || "")} ${esc(x.date || "")}</span></li>`).join("")}</ul></div>` : `<div class="empty">Nothing yet.</div>`;
+  tick();
+}
+
+function tick() {
+  const el = $("updated");
+  if (offline) { el.textContent = last ? `Board offline - last update ${ago(last.generated)}` : "Board offline"; el.className = "updated stale"; return; }
+  if (!last) return;
+  const age = (Date.now() - Date.parse(last.generated)) / 1000;
+  el.textContent = age > STALE_AFTER ? `Not updating - last update ${ago(last.generated)}` : `updated ${ago(last.generated)}`;
+  el.className = "updated" + (age > STALE_AFTER ? " stale" : "");
+}
+
+async function refresh() {
+  try {
+    const r = await fetch(`board.json?${Date.now()}`, { cache: "no-store", credentials: "same-origin" });
+    const body = await r.json();
+    if (r.ok) { offline = false; render(body); }
+    else { offline = false; $("errors").innerHTML = `<div class="card">${esc(body.message || "The board is not ready yet.")}</div>`; }
+  } catch (e) {
+    offline = true;
+    tick();
+  }
+}
+
+function findItem(id) {
+  return ((last && last.waiting_on_you) || []).find((w) => w.answerable && w.id === id);
+}
+
+async function answer(id, choice, extra) {
+  const item = findItem(id);
+  if (!item) return;
+  cardState.set(id, { state: "pending", message: "Recording your answer…", title: item.title });
+  panels.delete(id);
+  lastWaitingSignature = "";
+  renderWaiting(last);
+  let result;
+  try {
+    const r = await fetch("answer", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: TOKEN, task: id, card: item.card, choice, ...extra }),
+    });
+    result = await r.json().catch(() => ({ ok: false, message: `The board answered ${r.status}.` }));
+  } catch (e) {
+    result = { ok: false, message: "The board could not be reached. Nothing was recorded." };
+  }
+  if (result.ok) {
+    cardState.set(id, { state: "recorded", message: result.message || "Recorded.", title: item.title });
+    drafts.delete(id);
+  } else {
+    cardState.set(id, { state: "failed", message: `Not recorded: ${result.message || "unknown error"}`, title: item.title });
+    if (result.code === "bad_token") {
+      $("banner").innerHTML = `<div class="banner">This page is out of date. <button data-act="reload">Reload</button> and answer again.</div>`;
+    }
+  }
+  lastWaitingSignature = "";
+  renderWaiting(last);
+  refresh();
+}
+
+document.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-act]");
+  if (!button) return;
+  const id = button.dataset.id;
+  switch (button.dataset.act) {
+    case "choice": answer(id, button.dataset.choice); break;
+    case "panel": {
+      panels.get(id) === button.dataset.panel ? panels.delete(id) : panels.set(id, button.dataset.panel);
+      const st = cardState.get(id);
+      if (st && st.state === "failed") cardState.delete(id);
+      lastWaitingSignature = "";
+      renderWaiting(last);
+      const ta = document.querySelector(`textarea[data-draft="${CSS.escape(id)}"]`);
+      if (ta) ta.focus();
+      break;
+    }
+    case "later": answer(id, "later", { until: button.dataset.until }); break;
+    case "later-pick": {
+      const input = document.querySelector(`input[data-later-input="${CSS.escape(id)}"]`);
+      if (input && input.value) answer(id, "later", { until: input.value });
+      break;
+    }
+    case "reply": {
+      const text = (drafts.get(id) || "").trim();
+      if (text) answer(id, "reply", { text });
+      break;
+    }
+    case "reload": location.reload(); break;
+  }
+});
+
+document.addEventListener("input", (event) => {
+  const id = event.target.dataset && event.target.dataset.draft;
+  if (id === undefined) return;
+  drafts.set(id, event.target.value);
+  const counter = document.querySelector(`[data-counter="${CSS.escape(id)}"]`);
+  if (counter) counter.textContent = `${event.target.value.length}/500`;
+});
+
+refresh();
+setInterval(refresh, REFRESH * 1000);
+setInterval(tick, 1000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
+</script>
+</body>
+</html>

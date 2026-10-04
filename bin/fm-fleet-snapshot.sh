@@ -40,6 +40,15 @@
 #     captain_actionable means "waiting on the captain now" and is exactly
 #     hold_bucket == "live".
 #     hold_age_days is the hold's age when computable, else null.
+#     hold_options is the ordered list of answer choices declared with
+#     `bin/fm-captain-hold.sh hold --option`, read only from the machine-written
+#     `Captain hold options:` line directly under the hold-set stamp, else null.
+#     hold_answer is {at, answer} for the newest captain answer recorded on the
+#     current hold without resolving it (`bin/fm-captain-hold.sh answer
+#     --record`), read only from that machine-written `Captain answer
+#     recorded:` note and its `Answer:` line, and only when the note is newer
+#     than the hold-set stamp; a re-hold restamps the hold and clears it. Else
+#     null.
 #     Aging is a projection safety net only: the durable deferral remains
 #     re-holding with --until.
 #     Renderers keep every non-live bucket out of the default Captain's Call,
@@ -472,6 +481,8 @@ backlog_json() {  # [<backlog-path>] - defaults to this home's $BACKLOG
              hold_kind:metadata($rest; "hold-kind"),
              hold_until:metadata($rest; "hold-until"),
              hold_set:null,
+             hold_options:null,
+             hold_answer:null,
              blocked_by:cap($rest; ".*blocked-by:[[:space:]]*(?<v>[^[:space:])]+).*"),
              blocked_by_ids:blocked_by_ids($rest),
              blocked_reason:blocked_reason($rest),
@@ -508,6 +519,25 @@ backlog_json() {  # [<backlog-path>] - defaults to this home's $BACKLOG
     | .records |= map(
         if (.body_lines | length) > 0 then
           .hold_set = cap(.body_lines[0]; "^Captain hold set:[[:space:]]*(?<v>[0-9]{4}-[0-9]{2}-[0-9]{2}(?:T[0-9]{2}:[0-9]{2}:[0-9]{2}Z)?)$")
+          | .hold_options =
+              (if .hold_set != null and (.body_lines | length) > 1 then
+                 (cap(.body_lines[1]; "^Captain hold options:[[:space:]]*(?<v>.+)$")) as $declared
+                 | if $declared == null then null
+                   else ([$declared | split("|")[] | trim | select(. != "")]
+                         | if length == 0 then null else . end)
+                   end
+               else null end)
+          | .hold_answer =
+              (([ .body_lines | to_entries[]
+                  | select(.value | test("^Captain answer recorded:[[:space:]]*[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")) ]
+                | last) as $note
+               | if $note == null or .hold_set == null then null
+                 else cap($note.value; "^Captain answer recorded:[[:space:]]*(?<v>.+)$") as $at
+                   | if $at > .hold_set then
+                       {at: $at,
+                        answer: ([ .body_lines[($note.key + 1):][:6][] | cap(.; "^Answer:[[:space:]]*(?<v>.+)$") | select(. != null) ] | first)}
+                     else null end
+                 end)
           | .local_note = (.local_note
               // (if any(.body_lines[];
                     test("^Resolution recorded by fm-(captain|decision)-hold\\.$"))

@@ -950,6 +950,62 @@ EOF
   pass "captain holds become visible only after their hold-set timestamp is durable"
 }
 
+test_declared_options_travel_with_the_hold() {
+  local home show body bad
+  home=$(make_home declared-options)
+  cat > "$home/data/backlog.md" <<'EOF'
+## In flight
+
+## Queued
+- [ ] sample-options-call - Existing gated task (repo: sample) (kind: ship) (since 2026-01-01)
+  Earlier task context stays below the machine-owned head.
+
+## Done
+EOF
+  FM_CAPTAIN_HOLD_NOW=2026-07-14T12:00:00Z run_captain "$home" hold sample-options-call \
+    --reason "choose the sample route" --option "Ship it (now)" --option "Wait a week" >/dev/null \
+    || fail "could not hold with declared options"
+  show=$(tasks_in "$home" show sample-options-call --full)
+  body=$(printf '%s\n' "$show" | sed -n 's/^  body: //p')
+  assert_contains "$body" 'Captain hold set: 2026-07-14T12:00:00Z\nCaptain hold options: Ship it (now) | Wait a week\n\nEarlier task context' \
+    "declared options were not written directly under the hold-set stamp"
+  assert_contains "$show" "hold_reason: choose the sample route" "declared options leaked into the hold reason"
+
+  FM_CAPTAIN_HOLD_NOW=2026-07-20T12:00:00Z run_captain "$home" hold sample-options-call \
+    --reason "choose the sample route" --option "Ship it (now)" --option "Wait a week" >/dev/null \
+    || fail "an identical retry with options failed"
+  show=$(tasks_in "$home" show sample-options-call --full)
+  assert_contains "$show" "Captain hold set: 2026-07-14T12:00:00Z" "a retry with options reset the hold age"
+  [ "$(printf '%s\n' "$show" | grep -o 'Captain hold options:' | wc -l | tr -d ' ')" = 1 ] \
+    || fail "a retry duplicated the options line: $show"
+
+  FM_CAPTAIN_HOLD_NOW=2026-07-20T12:00:00Z run_captain "$home" hold sample-options-call \
+    --reason "approve the sample route" >/dev/null \
+    || fail "re-holding without options failed"
+  show=$(tasks_in "$home" show sample-options-call --full)
+  assert_not_contains "$show" "Captain hold options:" "a hold without --option kept the earlier options"
+  assert_contains "$show" "Captain hold set: 2026-07-14T12:00:00Z" "clearing options reset the hold age"
+  assert_contains "$show" "Earlier task context stays below" "clearing options lost the task's own body"
+
+  for bad in "Later" "reconcile" "a|b" " padded" ""; do
+    if run_captain "$home" hold sample-options-call --reason "approve the sample route" \
+      --option "$bad" >/dev/null 2>&1; then
+      fail "an invalid declared option was accepted: [$bad]"
+    fi
+  done
+  if run_captain "$home" hold sample-options-call --reason "approve the sample route" \
+    --option Same --option same >/dev/null 2>&1; then
+    fail "duplicate declared options were accepted"
+  fi
+  if run_captain "$home" hold sample-options-call --reason "approve the sample route" \
+    --option o1 --option o2 --option o3 --option o4 --option o5 --option o6 --option o7 >/dev/null 2>&1; then
+    fail "more than six declared options were accepted"
+  fi
+  assert_not_contains "$(tasks_in "$home" show sample-options-call --full)" "Captain hold options:" \
+    "a refused option set still changed the task"
+  pass "declared answer options live under the hold-set stamp and travel with each hold call"
+}
+
 test_interrupted_answer_preserves_hold_age() {
   local home snap show
   home=$(make_home interrupted-answer-age)
@@ -3779,6 +3835,7 @@ test_completion_gate_attests_and_transfers
 test_answer_records_and_closes
 test_release_frees_held_work
 test_hold_stamp_precedes_hold_visibility
+test_declared_options_travel_with_the_hold
 test_interrupted_answer_preserves_hold_age
 test_deferral_leaves_captains_call_until_due
 test_out_of_band_close_is_recordable

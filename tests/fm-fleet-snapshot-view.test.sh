@@ -731,6 +731,43 @@ EOF
   pass "undated captain holds age after a configurable threshold, decided only from structured fields"
 }
 
+test_declared_hold_options_are_read_only_under_the_stamp() {
+  local home fakebin out
+  home=$(make_home hold-options)
+  cat > "$home/data/backlog.md" <<'EOF'
+## In flight
+
+## Queued
+- [ ] declared-call - Declared options call (repo: sample) (kind: captain) (hold: choose a sample route) (hold-kind: captain)
+  Captain hold set: 2026-07-20T00:00:00Z
+  Captain hold options: Ship it (now) |  Wait a week | | Drop it
+- [ ] prose-call - Options prose is not a declaration (repo: sample) (kind: captain) (hold: choose a sample route) (hold-kind: captain)
+  Captain hold set: 2026-07-20T00:00:00Z
+  Some earlier context.
+  Captain hold options: Not | Declared
+- [ ] unstamped-call - Unstamped options line (repo: sample) (kind: ship) (hold: choose a sample route) (hold-kind: captain)
+  Captain hold options: Not | Declared
+- [ ] plain-call - Plain call (repo: sample) (kind: captain) (hold: choose a sample route) (hold-kind: captain)
+  Captain hold set: 2026-07-20T00:00:00Z
+
+## Done
+EOF
+  fakebin=$(make_fakebin "$home")
+  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" FM_DATA_OVERRIDE="$home/data" \
+    FM_SNAPSHOT_NOW=2026-07-25T00:00:00Z "$SNAPSHOT" --json)
+  printf '%s' "$out" | jq -e '
+    (.backlog.records | map({key: .id, value: .hold_options}) | from_entries) as $o
+    | $o["declared-call"] == ["Ship it (now)", "Wait a week", "Drop it"]
+      and $o["prose-call"] == null
+      and $o["unstamped-call"] == null
+      and $o["plain-call"] == null
+  ' >/dev/null || fail "hold_options must come only from the options line directly under the stamp: $out"
+  printf '%s' "$out" | jq -e '
+    [.backlog.records[] | .hold_bucket] == ["live", "live", "live", "live"]
+  ' >/dev/null || fail "declared options must not change any hold classification: $out"
+  pass "declared hold options are read only from the machine-written line under the hold-set stamp"
+}
+
 test_view_renders_snapshot() {
   local home fakebin view
   home=$(make_home view)
@@ -1049,6 +1086,7 @@ test_empty_fleet_json
 test_fixture_snapshot_json
 test_home_summary_excludes_secondmate_from_child_inventory
 test_undated_captain_hold_phrasing_and_aging
+test_declared_hold_options_are_read_only_under_the_stamp
 test_hold_buckets_are_total_and_text_blind
 test_main_inventory_orphan_and_unstructured_disclosure
 test_normalized_roles_and_plural_blocker_readiness

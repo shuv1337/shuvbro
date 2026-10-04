@@ -20,9 +20,9 @@
 # and secondmate-home ownership aligned with the work that discovered the call.
 #
 # Usage:
-#   fm-captain-hold.sh hold <task-id> --reason <reason> \
+#   fm-captain-hold.sh hold <task-id> --reason <reason> [--option <label>]... \
 #     [--title <title>] [--repo <repo>] [--origin <origin-id>] [--until YYYY-MM-DD]
-#   fm-captain-hold.sh answer <task-id> --decision-file <path> [--release]
+#   fm-captain-hold.sh answer <task-id> --decision-file <path> [--release | --record]
 #   fm-captain-hold.sh answers [<legacy-origin> | --any-origin] --source <provenance>   (keyed answers on stdin)
 #   fm-captain-hold.sh reconcile-requests --source-id <source-id> --source <provenance>   (task ids on stdin)
 #   fm-captain-hold.sh bind <source-id> [<legacy-origin> | --any-origin]
@@ -42,10 +42,24 @@
 # default repo from that origin's metadata). Prefer holding the work item the
 # question gates over minting a new row. The command records a UTC `Captain
 # hold set:` timestamp in the task body: repeating an active hold preserves the
-# existing timestamp, while re-holding released work starts a new lifecycle.
+# existing timestamp, while re-holding released work, or an active hold that
+# has a captain answer recorded on it (`answer --record`) since that timestamp,
+# starts a new lifecycle, so the re-asked call reads as waiting on the captain
+# again. A new hold-set stamp and a recorded answer are each written one second
+# past the newest stamp or recorded answer already on the task when the clock
+# has not moved past it, so their order is always strict.
 # A task already closed is refused rather than reopened. `--until` records the
 # captain's own deferral date through `tasks-axi hold --until`, so a "revisit
 # later" answer is stored as a date instead of a live card.
+# `--option` (repeatable, at most six) declares the answer choices a
+# captain-facing surface offers for this call instead of the default yes or
+# no. The set is written as one `Captain hold options: <a> | <b>` line directly
+# under the hold-set stamp, never into the tasks-axi hold reason, and it travels
+# with the reason: every hold call states the whole set, so a hold without
+# `--option` clears an earlier one. Each label is one line of at most 120 bytes
+# with no `|` or control character, labels are unique ignoring case, and
+# `later` and `reconcile` are refused because a surface always offers its own
+# deferral and the intake reserves reconcile.
 #
 # `answer` records the captain's exact words and resolves the call in the same
 # act. It requires a non-empty captain decision file of at most 8192 bytes and
@@ -64,6 +78,16 @@
 # answered captain call. A hold that expired by date (`--until` in the past) is
 # still answerable: the surviving hold annotations, not tasks-axi's live
 # `held:` bit, prove the captain owned it.
+# `--record` records the captain's words on a still-open call WITHOUT resolving
+# it: one dated `Captain answer recorded:` note carrying the answer digest is
+# appended below the body, and the hold, hold-set stamp, declared options,
+# lifecycle identity, and parent decision are all left as they were. It is for
+# an answer that does not let held work go ahead - a no, a deferral, or a reply
+# the lead still has to act on - so the merge entrypoints keep refusing the
+# task. It refuses a task that is not an open captain call, and an exact retry
+# - the newest recorded note carries this digest and is newer than the
+# hold-set stamp - is a no-op, so the same answer to a re-asked call is
+# recorded again.
 #
 # ONE KEYED-ANSWER INTAKE, FED BY EVERY CHANNEL.
 # "A keyed answer resolves its matching captain-held task" is a single
@@ -73,7 +97,8 @@
 # identically no matter which channel the answer arrived on. The key IS the
 # task id - no identity arithmetic. The optional fourth field selects the close:
 # empty or `done` completes the task, `release` lifts the hold so held work
-# resumes; anything else is skipped. A key that names no task, a task that is
+# resumes, `record` records the answer and keeps the hold (reported
+# `recorded:`); anything else is skipped. A key that names no task, a task that is
 # not held for the captain, or a task already closed is reported as `skipped:`
 # and feeds nothing. A replayed delivery whose answer digest and requested
 # close mode both match the newest record is reported `closed:` and is a no-op;
@@ -731,25 +756,95 @@ body_hold_set_timestamp() {  # <decoded-task-body>
     | head -1
 }
 
-write_hold_set_stamp() {  # <task-id> <shown-body> <timestamp> <preserve-existing-0-or-1>
-  local id=$1 body=$2 hold_set=$3 preserve=$4 existing new_body tmp
+# The newest `Captain answer recorded:` time on a body, or nothing.
+newest_recorded_answer_at() {  # <decoded-task-body>
+  printf '%s\n' "$1" \
+    | sed -n 's/^Captain answer recorded: \([0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z\)$/\1/p' \
+    | tail -1
+}
+
+# The time for a new hold-set stamp or recorded answer: <now>, or one second
+# past the newest such event already on the body when the clock has not moved
+# past it, so every comparison between the two can be strict.
+next_event_stamp() {  # <decoded-task-body> <now>
+  local now=$2 newest epoch
+  newest=$({ body_hold_set_timestamp "$1"; newest_recorded_answer_at "$1"; } \
+    | grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2}T' | LC_ALL=C sort | tail -1)
+  if [ -n "$newest" ] && ! [[ "$now" > "$newest" ]]; then
+    epoch=$(fm_utc_iso_to_epoch "$newest") || fail "cannot read the event time $newest"
+    epoch=$((epoch + 1))
+    now=$(date -u -r "$epoch" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+      || date -u -d "@$epoch" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null) \
+      || fail "cannot compute the next event time after $newest"
+  fi
+  printf '%s' "$now"
+}
+
+HOLD_OPTIONS_PREFIX='Captain hold options: '
+HOLD_OPTIONS_MAX=6
+
+# One declared answer choice: refused rather than silently reshaped, because a
+# label the surface shows must be exactly what the lead declared.
+validate_hold_option() {  # <label>
+  local value=$1 lower
+  validate_one_line option "$value"
+  [ "$(printf '%s' "$value" | LC_ALL=C wc -c | tr -d ' ')" -le 120 ] \
+    || fail "option must be at most 120 bytes: $value"
+  case "$value" in
+    *'|'*) fail "option must not contain |: $value" ;;
+    ' '*|*' ') fail "option must not start or end with a space: $value" ;;
+  esac
+  if printf '%s' "$value" | LC_ALL=C grep -q '[[:cntrl:]]'; then
+    fail "option must not contain control characters"
+  fi
+  lower=$(printf '%s' "$value" | tr '[:upper:]' '[:lower:]')
+  case "$lower" in
+    later|reconcile) fail "option $value is reserved: a captain surface always offers its own deferral, and reconcile is reserved by the keyed-answer intake" ;;
+  esac
+}
+
+# Writes the machine-owned head of the task body: the hold-set stamp, then the
+# declared options line when there is one. Only an options line directly under
+# the stamp is this script's, so prose elsewhere in the body is never touched.
+write_hold_set_stamp() {  # <task-id> <shown-body> <timestamp> <preserve-existing-0-or-1> [<options-line>]
+  local id=$1 body=$2 hold_set=$3 preserve=$4 options=${5:-} existing original new_body tmp had_options=0
   body=$(decode_shown_value "$body") \
     || fail "could not decode the existing body for $id"
+  original=$body
   existing=$(body_hold_set_timestamp "$body")
-  if [ "$preserve" = 1 ] && [ -n "$existing" ]; then
-    return 0
-  fi
   if [ -n "$existing" ]; then
+    [ "$preserve" != 1 ] || hold_set=$existing
     body=${body#"Captain hold set: $existing"}
     case "$body" in
       $'\n\n'*) body=${body#$'\n\n'} ;;
       $'\n'*) body=${body#$'\n'} ;;
     esac
+    case "$body" in
+      "$HOLD_OPTIONS_PREFIX"*)
+        had_options=1
+        case "$body" in
+          *$'\n'*) body=${body#*$'\n'} ;;
+          *) body='' ;;
+        esac
+        case "$body" in
+          $'\n'*) body=${body#$'\n'} ;;
+        esac
+        ;;
+    esac
+    # An active hold retried with no options to add or clear keeps its body
+    # byte for byte, as it always has.
+    if [ "$preserve" = 1 ] && [ -z "$options" ] && [ "$had_options" = 0 ]; then
+      return 0
+    fi
   fi
   new_body=$(printf 'Captain hold set: %s' "$hold_set")
+  if [ -n "$options" ]; then
+    new_body=$(printf '%s\n%s%s' "$new_body" "$HOLD_OPTIONS_PREFIX" "$options")
+  fi
   if [ -n "$body" ]; then
     new_body=$(printf '%s\n\n%s' "$new_body" "$body")
   fi
+  [ "$new_body" != "$original" ] || return 0
   tmp=$(umask 077; mktemp "${TMPDIR:-/tmp}/fm-captain-hold-stamp.XXXXXX") \
     || fail "cannot stage the hold-set stamp"
   if ! printf '%s\n' "$new_body" > "$tmp"; then
@@ -763,9 +858,19 @@ write_hold_set_stamp() {  # <task-id> <shown-body> <timestamp> <preserve-existin
   rm -f -- "$tmp"
 }
 
+set_captain_hold() {  # <task-id> <reason> <until-or-empty>
+  if [ -n "$3" ]; then
+    tasks_axi hold "$1" --reason "$2" --kind captain --until "$3" >/dev/null \
+      || fail "could not hold task $1 for the captain"
+  else
+    tasks_axi hold "$1" --reason "$2" --kind captain >/dev/null \
+      || fail "could not hold task $1 for the captain"
+  fi
+}
+
 command_hold() {
   local id=${1:-} title='' reason='' repo='' origin='' until='' show state existing_title body='' hold_kind hold_set occurrence
-  local existing_hold_kind='' existing_held='' preserve_hold_set=0
+  local existing_hold_kind='' existing_held='' preserve_hold_set=0 hold_answered existing_hold_set options='' option_count=0 seen_options='' lower_option
   [ "$#" -ge 1 ] || { usage >&2; exit 2; }
   shift
   while [ "$#" -gt 0 ]; do
@@ -775,6 +880,19 @@ command_hold() {
       --repo) shift; repo=${1:-} ;;
       --origin) shift; origin=${1:-} ;;
       --until) shift; until=${1:-} ;;
+      --option)
+        shift
+        validate_hold_option "${1:-}"
+        lower_option=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
+        case "$seen_options" in
+          *$'\n'"$lower_option"$'\n'*) fail "option is declared twice: $1" ;;
+        esac
+        seen_options="${seen_options:-$'\n'}$lower_option"$'\n'
+        option_count=$((option_count + 1))
+        [ "$option_count" -le "$HOLD_OPTIONS_MAX" ] \
+          || fail "at most $HOLD_OPTIONS_MAX options may be declared"
+        options="${options:+$options | }$1"
+        ;;
       *) usage >&2; exit 2 ;;
     esac
     shift
@@ -806,6 +924,14 @@ command_hold() {
     existing_held=$(show_field_value "$show" held)
     if [ "$existing_hold_kind" = captain ] && [ "$existing_held" = yes ]; then
       preserve_hold_set=1
+      body=$(decode_shown_value "$(show_field "$show" body)") \
+        || fail "could not decode the existing body for $id"
+      hold_answered=$(newest_recorded_answer_at "$body")
+      existing_hold_set=$(body_hold_set_timestamp "$body")
+      if [ -n "$hold_answered" ] && [ -n "$existing_hold_set" ] && [[ "$hold_answered" > "$existing_hold_set" ]]; then
+        preserve_hold_set=0
+      fi
+      body=''
     fi
     if [ -n "$title" ]; then
       existing_title=$(show_field_value "$show" title)
@@ -830,21 +956,30 @@ command_hold() {
         || fail "could not create task $id"
     fi
   fi
-  # Publish the timestamp before the captain-hold annotation. A concurrent
-  # snapshot may see the harmless stamp by itself, but can never see a newly
-  # held task without the timestamp that defines this hold lifecycle's age.
+  # Order the two writes so a concurrent snapshot never reads a captain call as
+  # waiting with a question it is not being asked. A task not yet held gets its
+  # timestamp first, so it can never appear held without the stamp that defines
+  # this lifecycle's age. A call that is already held and answered gets its new
+  # reason first: until the restamp lands, its recorded answer still reads as
+  # newer than the hold, so the old question is never offered as unanswered.
+  if [ "$existing_hold_kind" = captain ] && [ "$existing_held" = yes ] && [ "$preserve_hold_set" = 0 ]; then
+    set_captain_hold "$id" "$reason" "$until"
+  fi
   show=$(task_show "$id") || fail "task $id disappeared before recording its hold-set stamp"
-  write_hold_set_stamp "$id" "$(show_field "$show" body)" "$hold_set" "$preserve_hold_set"
+  if [ "$preserve_hold_set" = 0 ]; then
+    body=$(decode_shown_value "$(show_field "$show" body)") \
+      || fail "could not decode the existing body for $id"
+    hold_set=$(next_event_stamp "$body" "$hold_set")
+  fi
+  write_hold_set_stamp "$id" "$(show_field "$show" body)" "$hold_set" "$preserve_hold_set" "$options"
   show=$(task_show "$id") || fail "task $id disappeared while recording its hold-set stamp"
   [ -n "$(body_hold_set_timestamp "$(show_field_value "$show" body)")" ] \
     || fail "task $id did not retain its hold-set stamp"
-  if [ -n "$until" ]; then
-    tasks_axi hold "$id" --reason "$reason" --kind captain --until "$until" >/dev/null \
-      || fail "could not hold task $id for the captain"
-  else
-    tasks_axi hold "$id" --reason "$reason" --kind captain >/dev/null \
-      || fail "could not hold task $id for the captain"
+  if [ -n "$options" ]; then
+    [ "$(show_field_value "$show" body | sed -n '2p')" = "$HOLD_OPTIONS_PREFIX$options" ] \
+      || fail "task $id did not retain its declared options"
   fi
+  set_captain_hold "$id" "$reason" "$until"
   show=$(task_show "$id") || fail "task $id disappeared while holding it"
   hold_kind=$(show_field_value "$show" hold_kind)
   [ "$hold_kind" = captain ] || fail "task $id did not retain its captain hold"
@@ -911,6 +1046,42 @@ apply_pending_retained_artifact() {  # <task-id>
   esac
 }
 
+record_answer_keeping_hold() {  # <task-id> <shown-body>
+  local id=$1 body marker stamp tmp newest newest_at hold_set
+  body=$(decode_shown_value "$2") \
+    || fail "could not decode the existing body for $id"
+  marker="Recorded answer digest: $DECISION_DIGEST"
+  newest=$(printf '%s\n' "$body" | awk '
+    /^Captain answer recorded: / { at = substr($0, 26); digest = ""; if ((getline line) > 0) digest = line }
+    END { printf "%s\t%s", at, digest }')
+  newest_at=${newest%%$'\t'*}
+  hold_set=$(body_hold_set_timestamp "$body")
+  case "${newest#*$'\t'}" in
+    "$marker")
+      [ -n "$newest_at" ] && [ -n "$hold_set" ] && [[ "$newest_at" > "$hold_set" ]] && newest=retry
+      ;;
+  esac
+  case "$newest" in
+    retry) : ;;
+    *)
+      stamp=$(next_event_stamp "$body" "${FM_CAPTAIN_HOLD_NOW:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}")
+      tmp=$(umask 077; mktemp "${TMPDIR:-/tmp}/fm-captain-hold-record.XXXXXX") \
+        || fail "cannot stage the recorded answer"
+      if ! printf '%s\n\nCaptain answer recorded: %s\n%s\n%s\n' "$body" "$stamp" "$marker" "$DECISION_TEXT" > "$tmp"; then
+        rm -f -- "$tmp"
+        fail "cannot stage the recorded answer for $id"
+      fi
+      if ! tasks_axi update "$id" --body-file "$tmp" --archive-body >/dev/null; then
+        rm -f -- "$tmp"
+        fail "could not record the captain answer on $id"
+      fi
+      rm -f -- "$tmp"
+      ;;
+  esac
+  command_open "$id" || fail "recording the answer released captain-held task $id"
+  printf 'recorded: %s\n' "$id"
+}
+
 close_answered() {  # <task-id> <release-0-or-1>
   if [ "$2" = 1 ]; then
     tasks_axi unhold "$1" >/dev/null
@@ -943,17 +1114,19 @@ remove_interrupted_answer_stamp() {  # <task-id>
 }
 
 command_answer() {
-  local id=${1:-} decision_file='' release=0 show state hold_kind body outcome recorded_mode occurrence
+  local id=${1:-} decision_file='' release=0 record=0 show state hold_kind body outcome recorded_mode occurrence
   [ "$#" -ge 1 ] || { usage >&2; exit 2; }
   shift
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --decision-file) shift; decision_file=${1:-} ;;
       --release) release=1 ;;
+      --record) record=1 ;;
       *) usage >&2; exit 2 ;;
     esac
     shift
   done
+  [ "$release" = 0 ] || [ "$record" = 0 ] || fail "--release and --record are mutually exclusive"
   validate_slug task-id "$id"
   load_decision "$decision_file"
   acquire_task_control_lock "$id"
@@ -962,6 +1135,12 @@ command_answer() {
   state=$(show_field "$show" state)
   hold_kind=$(show_field_value "$show" hold_kind)
   body=$(show_field "$show" body)
+  if [ "$record" = 1 ]; then
+    [ "$state" != "done" ] && [ "$hold_kind" = captain ] \
+      || fail "task $id is not an open captain call; --record only adds to a live hold"
+    record_answer_keeping_hold "$id" "$body"
+    return 0
+  fi
   if [ "$release" = 1 ]; then outcome=released; else outcome=answered; fi
   # The occurrence the parent line names: the record about to be written is
   # one past those already in the body, and a retry names the newest one.
@@ -1151,7 +1330,7 @@ sanitize_reconcile_provenance() {
 
 command_answers() {
   local origin='' source='' row rest key answer label mode id show state hold_kind body digest legacy_digest legacy_key
-  local recorded_digest recorded_mode occurrence tmp err closed=0 skipped=0 reason release_flag tab=$'\t'
+  local recorded_digest recorded_mode occurrence tmp err closed=0 recorded=0 skipped=0 reason release_flag tab=$'\t'
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --source) shift; source=${1:-} ;;
@@ -1196,6 +1375,7 @@ command_answers() {
     case "${mode:-}" in
       ''|done) : ;;
       release) release_flag=--release ;;
+      record) release_flag=--record ;;
       *)
         printf 'skipped: %s (unknown close mode %s)\n' "$key" "$(sanitize_field "$mode")"
         skipped=$((skipped + 1))
@@ -1271,8 +1451,13 @@ command_answers() {
       # A parent-channel delivery problem is reported on stderr by the answer
       # path even when the close succeeded; keep it visible.
       [ ! -s "$err" ] || cat "$err" >&2
-      printf 'closed: %s\n' "$id"
-      closed=$((closed + 1))
+      if [ "$release_flag" = --record ]; then
+        printf 'recorded: %s\n' "$id"
+        recorded=$((recorded + 1))
+      else
+        printf 'closed: %s\n' "$id"
+        closed=$((closed + 1))
+      fi
     else
       reason=$(tr -d '\n' < "$err" | sed 's/^fm-captain-hold: //')
       printf 'skipped: %s (%s)\n' "$id" "$reason"
@@ -1280,7 +1465,7 @@ command_answers() {
     fi
   done
   rm -f -- "$tmp" "$err"
-  printf 'answers: closed=%s skipped=%s\n' "$closed" "$skipped"
+  printf 'answers: closed=%s recorded=%s skipped=%s\n' "$closed" "$recorded" "$skipped"
   [ "$skipped" -eq 0 ]
 }
 

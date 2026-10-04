@@ -108,6 +108,7 @@ That is not hypothetical: by 2026-09-01 the lane had grown from 116 to 139 scrip
 `bin/fm-test-run.sh --check-coverage` now reports the unmeasured share as `serial_unhinted=` and refuses past `PORTABLE_SERIAL_MAX_UNHINTED_PERCENT`, so hint drift fails the coverage guard instead of silently pushing one shard into its job cap.
 Refresh the hints whenever the serial lane gains scripts, rather than waiting for that bound to trip.
 `tests/fm-persona-lib.test.sh` (925 ms) and `tests/fm-fork-boundary.test.sh` (3250 ms) were measured locally on 2026-09-10 from `FM_TEST_END duration_ms` on this host; they are unclassified serial scripts, not proven-isolated.
+`tests/fm-board.test.sh` (24204 ms) was measured the same way on 2026-10-04; it is a serial snapshot-bearings script, not proven-isolated.
 
 | Lane | Script count | Estimated duration |
 |---|---:|---:|
