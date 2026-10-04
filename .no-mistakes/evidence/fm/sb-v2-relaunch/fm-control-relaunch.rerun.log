@@ -1,0 +1,11 @@
+not ok - a same-harness relaunch should succeed
+warning: /tmp/fm-control-relaunch.1MPEWf/same-15690/home/data/rl1/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+mise ERROR error parsing config file: /home/shuv/.config/mise/config.toml
+mise ERROR Config files in /home/shuv/.config/mise/config.toml are not trusted.
+Trust them with `mise trust`. See https://mise.jdx.dev/cli/trust.html for more information.
+mise ERROR Version: 2026.10.0 linux-x64 (2026-10-02)
+mise ERROR Run with --verbose or MISE_VERBOSE=1 for more information
+error: refusing to pre-register Claude trust: could not record trust for '/tmp/fm-control-relaunch.1MPEWf/same-15690/wt' in '/tmp/fm-control-relaunch.1MPEWf/same-15690/user-home/.claude.json'
+error: could not pre-register Claude workspace trust for /tmp/fm-control-relaunch.1MPEWf/same-15690/wt; refusing to launch a claude worker that would wedge on the trust dialog; inspect window fmses:fm-rl1
+error: the replacement agent for rl1 could not be launched on claude
+error: rl1's agent was stopped but the replacement did not launch; no agent is running, and its work plus the recorded progress note are preserved at /tmp/fm-control-relaunch.1MPEWf/same-15690/wt: expected exit 0, got 1
