@@ -2051,24 +2051,20 @@ fm_backend_herdr_tab_is_husk() {  # <session> <pane_id>
 
 # fm_backend_herdr_pane_process_agent_state: classify the exact pane's
 # FOREGROUND processes for one adapter whose Herdr registration cannot prove
-# liveness, printing alive|dead|ambiguous|unreadable from one `pane
-# process-info` read.
+# liveness, printing alive|dead|ambiguous|unreadable.
 #   alive      - a foreground process carries the adapter's own structural
 #                identity (opencode-v2: bin/fm-shuvcode-lib.sh, matching the
 #                compiled binary or its node launcher, never the shared
 #                `--service` process, which never runs in a pane anyway).
-#   dead       - the foreground process group is the pane's own shell and
-#                holds nothing but recognized shells.
+#   dead       - fm_backend_herdr_pane_idle_shell_pid proves the pane holds
+#                only its lone idle shell, with that proof's settle retry.
 #   ambiguous  - anything else, including a wrapper whose TUI child has not
 #                started or has already gone.
-#   unreadable - the read failed or its pane id, shell pid, process group, or
-#                process list did not round-trip.
-# Only the foreground group is read, so a background child of an idle shell
-# (gitstatusd, zsh-async) cannot fake a live agent, exactly as on tmux.
+#   unreadable - the read failed or its pane id or process list did not
+#                round-trip.
 # Unsupported adapters print unreadable rather than guessing an identity.
 fm_backend_herdr_pane_process_agent_state() {  # <session> <pane-id> <harness>
-  local session=$1 pane=$2 harness=$3 info shell_pid fg_pgid rows name argv0 args base
-  local seen=0 shells=0 other=0
+  local session=$1 pane=$2 harness=$3 info rows name argv0 args
   case "$harness" in
     opencode-v2) ;;
     *) printf 'unreadable'; return 0 ;;
@@ -2080,12 +2076,6 @@ fm_backend_herdr_pane_process_agent_state() {  # <session> <pane-id> <harness>
     and .result.process_info.pane_id == $pane
     and (.result.process_info.foreground_processes | type) == "array"
   ' >/dev/null 2>&1 || { printf 'unreadable'; return 0; }
-  shell_pid=$(printf '%s' "$info" | jq -er \
-    '.result.process_info.shell_pid | select(type == "number" and . > 1) | floor' 2>/dev/null) \
-    || { printf 'unreadable'; return 0; }
-  fg_pgid=$(printf '%s' "$info" | jq -er \
-    '.result.process_info.foreground_process_group_id | select(type == "number" and . > 1) | floor' 2>/dev/null) \
-    || { printf 'unreadable'; return 0; }
   rows=$(printf '%s' "$info" | jq -r '
     .result.process_info.foreground_processes[]
     | [ (.name // "" | tostring),
@@ -2094,22 +2084,14 @@ fm_backend_herdr_pane_process_agent_state() {  # <session> <pane-id> <harness>
     | @tsv' 2>/dev/null) || { printf 'unreadable'; return 0; }
   while IFS=$'\t' read -r name argv0 args; do
     [ -n "$name$argv0" ] || continue
-    seen=1
     if fm_shuvcode_process_matches "$name" "$args" "$argv0"; then
       printf 'alive'
       return 0
     fi
-    base=${name##*/}
-    base=${base#-}
-    case "$base" in
-      sh|bash|zsh|dash|ash|ksh|mksh|tcsh|csh|fish) shells=1 ;;
-      *) other=1 ;;
-    esac
   done <<EOF
 $rows
 EOF
-  [ "$seen" -eq 1 ] || { printf 'unreadable'; return 0; }
-  if [ "$other" -eq 0 ] && [ "$shells" -eq 1 ] && [ "$fg_pgid" = "$shell_pid" ]; then
+  if fm_backend_herdr_pane_idle_shell_pid "$session" "$pane" >/dev/null; then
     printf 'dead'
   else
     printf 'ambiguous'

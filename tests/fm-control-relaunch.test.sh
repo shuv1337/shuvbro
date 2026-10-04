@@ -1666,6 +1666,28 @@ test_spawn_relaunch_requires_an_idle_opencode_v2_session() {
   pass "fm-spawn --relaunch: an opencode-v2 endpoint is agent-free only when its TUI has exited and its session is idle"
 }
 
+test_opencode_v2_relaunch_after_another_harness_starts_fresh() {
+  local out rc
+  v2_relaunch_case v2-roundtrip rl64
+  printf 'claude' > "$V2R_DIR/fake/becomes"
+  out=$(v2_run control "$V2R_DIR" rl64 relaunch --harness claude --note "hand to claude"); rc=$?
+  expect_code 0 "$rc" "relaunching an opencode-v2 worker onto claude should succeed"$'\n'"$out"
+  [ "$(meta_field "$V2R_DIR" rl64 harness)" = claude ] || fail "the record must move to claude"
+  jq -e '.sessionID == "ses_rl64"' "$V2R_DIR/home/state/rl64.opencode-v2-session.json" >/dev/null \
+    || fail "fixture: the first incarnation's session binding must outlive the claude relaunch"
+
+  printf 'shuvcode' > "$V2R_DIR/fake/becomes"
+  rm -f "$V2R_DIR/fake/v2-launch"
+  out=$(v2_run control "$V2R_DIR" rl64 relaunch --harness opencode-v2 --note "back to shuvcode"); rc=$?
+  expect_code 0 "$rc" "relaunching back onto opencode-v2 should succeed"$'\n'"$out"
+  assert_contains "$(cat "$V2R_DIR/fake/v2-launch")" \
+    "--session-record '$V2R_DIR/home/state/rl64.opencode-v2-session.json' --prompt" \
+    "the replacement must launch through the helper with the task's session record"
+  assert_not_contains "$(cat "$V2R_DIR/fake/v2-launch")" "--resume" \
+    "a session from before the claude incarnation must not be resumed"
+  pass "fm-control relaunch: opencode-v2 after another harness starts a fresh native session"
+}
+
 test_relaunch_moves_a_drifted_item_back_in_flight() {
   local dir out rc=0
   command -v tasks-axi >/dev/null 2>&1 || {
@@ -1739,3 +1761,4 @@ test_relaunch_moves_a_drifted_item_back_in_flight
 test_opencode_v2_relaunch_resumes_the_recorded_session
 test_opencode_v2_relaunch_threads_model_and_effort
 test_spawn_relaunch_requires_an_idle_opencode_v2_session
+test_opencode_v2_relaunch_after_another_harness_starts_fresh

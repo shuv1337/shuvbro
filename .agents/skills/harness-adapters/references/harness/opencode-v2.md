@@ -72,6 +72,6 @@ No pane key reaches the execution: interrupt cancels the exact recorded session,
 Exit is confirmed only when no shuvcode process remains in the endpoint's foreground and the recorded session has no active execution; either fact alone is not a stop.
 On Herdr the endpoint fact comes from the pane's foreground processes, because the shuvcode hook registration still answers after the TUI exits.
 `fm-spawn.sh --relaunch` applies the same two-fact agent-free test, so an exited TUI over an executing or unproven session refuses.
-Relaunch resumes the recorded session in the same endpoint and worktree when it is idle and still bound to this service incarnation, switching its model only when one is named, and admits the re-rendered brief with the progress note as a queued prompt.
-Otherwise the launch helper starts a fresh session and records the new binding.
+Relaunch from opencode-v2 resumes the recorded session in the same endpoint and worktree when it is idle and still bound to this service incarnation, switching its model only when one is named, and admits the re-rendered brief with the progress note as a queued prompt.
+Otherwise, including any relaunch from another harness, the launch helper starts a fresh session and records the new binding.
 `../../../bin/fm-opencode-v2-launch.sh` owns resume, its fallback, and model switching.

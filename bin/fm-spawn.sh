@@ -44,8 +44,9 @@
 #   the new incarnation. For a task recorded on opencode-v2, agent-free means
 #   no shuvcode TUI in the endpoint AND no active execution on its recorded
 #   native session; an exited TUI over an executing or unproven session
-#   refuses. An opencode-v2 replacement launches with --resume, so the helper
-#   continues that recorded session when it can.
+#   refuses. An opencode-v2 replacement of an opencode-v2 task launches with
+#   --resume, so the helper continues that recorded session when it can; after
+#   any other harness it starts a fresh session and replaces the stale binding.
 #   --harness <name> is the explicit per-spawn harness/profile adapter. The old
 #   positional harness arg still works for back-compat.
 #   --model <name> and --effort <low|medium|high|xhigh|max|ultra> are concrete profile
@@ -4057,11 +4058,13 @@ MODELFLAG=$(model_flag_for_harness "$HARNESS" "$MODEL") || exit 1
 EFFORTFLAG=$(effort_flag_for_harness "$HARNESS" "$EFFORT" "$MODEL") || exit 1
 # Preserve the root TUI's unattended permissions and composer handshake while
 # binding an explicitly requested model before its first prompt. A relaunch
-# asks the helper to resume the task's recorded session, which it does only
-# when that session is idle and reachable, falling back to a fresh one.
+# from opencode-v2 asks the helper to resume the task's recorded session, which
+# it does only when that session is idle and reachable, falling back to a fresh
+# one. A relaunch from another harness never resumes: the recorded session
+# predates that incarnation's work.
 if [ "$HARNESS" = opencode-v2 ]; then
   V2_RESUMEFLAG=
-  [ "$RELAUNCH" -ne 1 ] || V2_RESUMEFLAG='--resume '
+  [ "$RELAUNCH" -ne 1 ] || [ "$RELAUNCH_PRIOR_FAMILY" != opencode-v2 ] || V2_RESUMEFLAG='--resume '
   case "$LAUNCH" in
     'shuvcode --standalone --auto --prompt '*)
       LAUNCH="env -u FM_V2_ACTIVATION $(shell_quote "$FM_ROOT/bin/fm-opencode-v2-launch.sh") --session-record $(shell_quote "$STATE_REAL/$ID.opencode-v2-session.json") ${V2_RESUMEFLAG}${MODELFLAG}${LAUNCH#shuvcode --standalone --auto }"

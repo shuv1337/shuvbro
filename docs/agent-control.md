@@ -55,7 +55,7 @@ Removing a worktree, closing an endpoint, or discarding work stays with [`bin/fm
 **`resume` is not a verb.**
 It is not deterministic across the verified adapters: codex, grok, and gemini resume only from a session id printed at exit, opencode continues the most recent session for the cwd, and claude, pi, pi-signed, omp, and kimi have no verified pane-resume contract.
 `relaunch` covers the same need on every adapter, because the brief on disk - not a harness-private session - is the durable instruction.
-opencode-v2 is the one adapter whose relaunch also keeps the conversation: its session is durable shared-service state with an exact recorded binding, so the replacement resumes it when it is idle and still bound to this service incarnation, and still receives the re-rendered brief.
+opencode-v2 is the one adapter whose relaunch also keeps the conversation: its session is durable shared-service state with an exact recorded binding, so an opencode-v2 replacement of an opencode-v2 agent resumes it when it is idle and still bound to this service incarnation, and still receives the re-rendered brief. A relaunch onto opencode-v2 from any other harness starts a fresh session and replaces the stale binding.
 
 ## Transactional relaunch
 
@@ -76,7 +76,7 @@ opencode-v2 is the one adapter whose relaunch also keeps the conversation: its s
    A secondmate relaunch does not require one and never rewrites its standing charter.
 4. **Stop the old agent** through the `exit` verb, with its postcondition.
 5. **Launch the replacement** through its single owner, `bin/fm-spawn.sh --relaunch`, which adopts the recorded endpoint and worktree instead of creating either, clears the previous harness's per-task wiring, and arms a fresh busy generation.
-   An opencode-v2 replacement goes through `bin/fm-opencode-v2-launch.sh --resume`, which owns resuming the recorded session, switching its model when one is named, admitting the brief and note as a queued prompt, and falling back to a fresh session that it records.
+   An opencode-v2 replacement of an opencode-v2 agent goes through `bin/fm-opencode-v2-launch.sh --resume`, which owns resuming the recorded session, switching its model when one is named, admitting the brief and note as a queued prompt, and falling back to a fresh session that it records.
 
 Switching harness is therefore one ordinary relaunch rather than a separate mechanism.
 
