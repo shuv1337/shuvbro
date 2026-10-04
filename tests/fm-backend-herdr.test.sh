@@ -541,6 +541,34 @@ test_stale_shuvcode_registration_cannot_confirm_replacement() {
   pass "Herdr harness switch: the exited shuvcode registration cannot confirm a replacement"
 }
 
+test_recorded_adapter_unknown_registration_uses_foreground() {
+  local dir out n
+  dir=$(v2_state_case codex-startup-unknown)
+  printf '{"result":{"pane":{"pane_id":"w1:p2"}}}\n' > "$dir/responses/1.out"
+  printf '{"result":{"agent":{"pane_id":"w1:p2","agent":"codex","agent_status":"unknown"}}}\n' > "$dir/responses/2.out"
+  for n in 3 4 5 6; do
+    v2_process_info_fixture w1:p2 22712 31000 '[{"pid":31000,"name":"codex","argv":["/home/u/.local/share/mise/installs/codex/latest/bin/codex","--model","gpt-6-astra"]}]' > "$dir/responses/$n.out"
+  done
+  out=$(run_v2_state "$dir" codex)
+  [ "$out" = alive ] || fail "valid codex unknown startup registration must use its own foreground identity, got '$out'"
+  printf '0\n' > "$dir/responses/.count"
+  out=$(run_v2_state "$dir" '')
+  [ "$out" = unreadable ] || fail "an omitted harness must keep the legacy unknown-registration reading, got '$out'"
+  printf '0\n' > "$dir/responses/.count"
+  for n in 3 4 5 6; do
+    v2_process_info_fixture w1:p2 22712 31000 "$V2_LIVE_FOREGROUND" > "$dir/responses/$n.out"
+  done
+  out=$(run_v2_state "$dir" codex)
+  [ "$out" = ambiguous ] || fail "unknown codex registration cannot confirm a foreground shuvcode, got '$out'"
+  printf '0\n' > "$dir/responses/.count"
+  for n in 3 4 5 6; do
+    v2_process_info_fixture w1:p2 22712 22712 '[{"pid":22712,"name":"zsh","argv":["-zsh"]}]' > "$dir/responses/$n.out"
+  done
+  out=$(run_v2_state "$dir" codex)
+  [ "$out" = dead ] || fail "unknown codex registration over a proven idle shell must read dead, got '$out'"
+  pass "Herdr startup: the recorded adapter's unknown registration uses its foreground evidence"
+}
+
 test_exited_v2_husk_and_doorbell_use_recorded_harness() {
   local dir out mode
   for mode in husk ring; do
@@ -4988,6 +5016,7 @@ test_opencode_v2_agent_state_reads_foreground_processes
 test_opencode_v2_nested_worktree_shell
 test_nested_shell_requires_one_treehouse_hop
 test_stale_shuvcode_registration_cannot_confirm_replacement
+test_recorded_adapter_unknown_registration_uses_foreground
 test_exited_v2_husk_and_doorbell_use_recorded_harness
 test_opencode_v2_agent_state_never_guesses_agent_free
 test_opencode_v2_agent_state_settles_a_prompt_helper

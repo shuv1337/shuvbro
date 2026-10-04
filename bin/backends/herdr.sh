@@ -2057,7 +2057,7 @@ fm_backend_herdr_explicit_close_pane_confirmed() {  # <session> <pane_id>
 #              refusal here, never toward closing - this is the conservative
 #              backstop the husk check depends on.
 fm_backend_herdr_pane_agent_state() {  # <session> <pane_id> [harness]
-  local session=$1 pane_id=$2 harness=${3:-} out code presence status process_state
+  local session=$1 pane_id=$2 harness=${3:-} out code presence status registration process_state
   presence=$(fm_backend_herdr_pane_presence_state "$session" "$pane_id")
   if [ "$presence" != present ]; then
     case "$presence" in
@@ -2077,7 +2077,13 @@ fm_backend_herdr_pane_agent_state() {  # <session> <pane_id> [harness]
   # requested adapter's own foreground process proves it up and only the idle
   # shell proves it gone; a still-running shuvcode is not the requested
   # replacement. Omitted-harness callers retain the legacy registry view.
-  if [ -n "$harness" ] && [ "$(printf '%s' "$out" | jq -r '.result.agent.agent // empty' 2>/dev/null)" = shuvcode ]; then
+  # A matching registration can also report unknown while the replacement
+  # starts; use the same positive foreground proof rather than calling that
+  # valid API response unreadable.
+  registration=$(printf '%s' "$out" | jq -r '.result.agent.agent // empty' 2>/dev/null)
+  status=$(printf '%s' "$out" | jq -r '.result.agent.agent_status // empty' 2>/dev/null)
+  if [ -n "$harness" ] && { [ "$registration" = shuvcode ] || \
+      { [ "$registration" = "$harness" ] && [ "$status" = unknown ]; }; }; then
     process_state=$(fm_backend_herdr_pane_process_agent_state "$session" "$pane_id" "$harness")
     case "$process_state" in
       dead) printf 'no-agent' ;;
@@ -2087,7 +2093,6 @@ fm_backend_herdr_pane_agent_state() {  # <session> <pane_id> [harness]
     esac
     return 0
   fi
-  status=$(printf '%s' "$out" | jq -r '.result.agent.agent_status // empty' 2>/dev/null)
   case "$status" in
     working|idle|done|blocked) printf 'live' ;;
     *) printf 'unknown' ;;
