@@ -173,7 +173,7 @@ repair_line() {
       if [ "$V2_INACTIVE" = secondmate ]; then
         printf '%s%s\n' "$prefix" 'automatic OpenCode V2 supervision is inactive in a secondmate home; run this secondmate on a qualified harness, or keep the generic bounded foreground wait over bin/fm-watch.sh, never shell &.'
       elif [ -n "$V2_INACTIVE" ]; then
-        printf '%s%s\n' "$prefix" 'automatic OpenCode V2 supervision is inactive without exact activation; launch bin/fm-opencode-v2-primary.sh --session ID --native-binary PATH on the execution host, or keep the generic bounded foreground wait over bin/fm-watch.sh, never shell &.'
+        printf '%s%s\n' "$prefix" 'automatic OpenCode V2 supervision is inactive without exact activation; relaunch the lead with bin/fm-opencode-v2-lead.sh (or bin/fm-opencode-v2-primary.sh --session ID --native-binary PATH) on the execution host, or keep the generic bounded foreground wait over bin/fm-watch.sh, never shell &.'
       else
         printf '%s%s\n' "$prefix" 'repair missing watcher supervision by letting the OpenCode TUI plugin arm after idle; use bin/fm-watch-arm.sh only as a manual recovery probe if the plugin reports failure.'
       fi
@@ -237,7 +237,7 @@ v2_inactive_notice() {
     printf '%s\n' 'This checkout is a secondmate home, and OpenCode V2 secondmates are not qualified.'
     printf '%s\n' 'Supported: run this secondmate on a qualified harness.'
   else
-    printf '%s\n' 'Activate the exact lead on its execution host with bin/fm-opencode-v2-primary.sh --session ID --native-binary PATH.'
+    printf '%s\n' 'Activate the exact lead on its execution host by relaunching it with bin/fm-opencode-v2-lead.sh, which resolves the session and native executable for bin/fm-opencode-v2-primary.sh --session ID --native-binary PATH.'
     printf '%s\n' 'Plain and linked copies, including external homes, both require this explicit activation; opening a tab never transfers ownership.'
   fi
   printf '%s\n' 'Until then this session has no verified wake adapter, so the unknown-harness fallback below applies.'

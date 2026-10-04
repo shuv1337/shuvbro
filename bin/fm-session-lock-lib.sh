@@ -128,8 +128,11 @@ fm_harness_process_matches() {  # <comm> <args>
 # claude), with no non-harness process between them. Which pid in that run is the
 # session cannot be read off the ancestry at all, so the whole contiguous run is
 # reported and the callers below decide what they need from it.
+#
+# Returns 2 instead of 1 when nothing was found because the walk stopped at a
+# shared-service barrier, the shape a native V2 model shell always has.
 fm_harness_ancestry_pids() {
-  local pid=$$ comm args extending=0 printed=0
+  local pid=$$ comm args extending=0 printed=0 barrier=0
   for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16; do
     comm=$(ps -o comm= -p "$pid" 2>/dev/null) || break
     args=$(ps -o args= -p "$pid" 2>/dev/null)
@@ -137,7 +140,7 @@ fm_harness_ancestry_pids() {
     # harness. Never climb through it and adopt the TUI/job that started it.
     case " $args " in
       *' --service '*)
-        if fm_shuvcode_process_matches "$comm" "${args/--service/}"; then break; fi
+        if fm_shuvcode_process_matches "$comm" "${args/--service/}"; then barrier=1; break; fi
         ;;
     esac
     if fm_harness_process_matches "$comm" "$args"; then
@@ -151,7 +154,9 @@ fm_harness_ancestry_pids() {
     pid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
     [ -n "$pid" ] && [ "$pid" -gt 1 ] || break
   done
-  [ "$printed" -eq 1 ]
+  [ "$printed" -eq 1 ] && return 0
+  [ "$barrier" -eq 1 ] && return 2
+  return 1
 }
 
 # Print the one pid that identifies this session when the session lock is being
@@ -160,7 +165,15 @@ fm_harness_ancestry_pids() {
 # returns, and a lock naming it would look stale moments later while the session
 # is still running. Every non-Claude harness reports a single pid, so this is its
 # innermost match unchanged.
+#
+# Returns 3 instead of 1 when the failure is an unactivated OpenCode V2 lead:
+# OPENCODE_SESSION_ID names a session with no V2 owner registration and the
+# ancestry walk stopped at the shared-service barrier with no harness, which is
+# what a model shell sees after a plain `shuvcode` launch. An inherited session
+# id outside that barrier keeps return 1. Callers use 3 to name activation
+# instead of a process-detection failure.
 fm_harness_ancestry_pid() {
+  local v2_unactivated=0
   # A native V2 model shell belongs to the shared execution service, not the
   # owning TUI's ancestry. The supplemental owner is exact-session scoped.
   if [ -n "${OPENCODE_SESSION_ID:-}" ]; then
@@ -174,10 +187,15 @@ fm_harness_ancestry_pid() {
       v2_probe=0
       node "$v2_lib" probe "$OPENCODE_SESSION_ID" >/dev/null 2>&1 || v2_probe=$?
       if [ "$v2_probe" -ne 3 ]; then printf '%s\n' "$v2_owner" >&2; return 1; fi
+      v2_unactivated=1
     fi
   fi
-  local pids pid outermost=''
-  pids=$(fm_harness_ancestry_pids) || return 1
+  local pids pid outermost='' walk=0
+  pids=$(fm_harness_ancestry_pids) || walk=$?
+  if [ "$walk" -ne 0 ]; then
+    [ "$v2_unactivated" -eq 1 ] && [ "$walk" -eq 2 ] && return 3
+    return 1
+  fi
   while IFS= read -r pid; do
     [ -n "$pid" ] && outermost=$pid
   done <<EOF
