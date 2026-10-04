@@ -1095,8 +1095,11 @@ clear_pause_tracking() {  # <window-key>
 # After fm-crew-state has fallen back to stopped or unknown, paused classification is
 # recovered only for a confidently dead ordinary crew, or for a secondmate, whose
 # endpoint liveness this function deliberately never reads.
+# A current paused: line during the ci step's results wait is paused even though
+# the run-step is working: that wait is the external dependency the line names.
+# An active running or fixing step still outranks the line (crew_absorb_class).
 pause_state_class() {  # <window> <task>
-  local win=$1 task=$2 key last recheck_file class agent_alive kind
+  local win=$1 task=$2 key last recheck_file class agent_alive kind record crew_line
   key=$(window_key "$win")
   last=$(last_status_line "$STATE/$task.status")
   recheck_file="$STATE/.paused-rechecked-$key"
@@ -1121,9 +1124,15 @@ pause_state_class() {  # <window> <task>
     printf 'paused'
     return
   fi
-  class=$(crew_absorb_class "$task")
+  record=$(crew_absorb_record "$task")
+  class=${record%%$'\t'*}
+  crew_line=${record#*$'\t'}
   if [ "$class" = working ]; then
     rm -f "$recheck_file"
+    if status_is_paused "$last" && crew_run_step_is_ci_results_wait "$crew_line"; then
+      printf 'paused'
+      return
+    fi
     printf 'working'
     return
   fi
@@ -2253,10 +2262,12 @@ EOF
           # Decided once per distinct stale hash (the costly state reads run only
           # on first sight, never every poll) via pause_state_class, which returns:
           #   - working: an actively-running pipeline legitimately sits on a static
-          #     pane (e.g. waiting on CI), so absorb and start the wedge timer so a
-          #     genuinely frozen run still escalates past STALE_ESCALATE_SECS;
+          #     pane (e.g. waiting on CI with no declared pause), so absorb and start
+          #     the wedge timer so a genuinely frozen run still escalates past
+          #     STALE_ESCALATE_SECS;
           #   - paused: a declared wait pause_state_class admits (its header owns which
-          #     liveness evidence each kind of crew must supply), so absorb on the long
+          #     liveness evidence each kind of crew must supply, including a current
+          #     paused: line during the ci results wait), so absorb on the long
           #     PAUSE_RESURFACE_SECS cadence instead of wedge-escalating;
           #   - none: no running pipeline, no exact busy verdict, no admitted declared wait.
           #     Surface immediately so firstmate inspects the inconclusive state

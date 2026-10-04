@@ -1796,21 +1796,57 @@ status_span_has_actionable() {  # <status-file> <start-offset>
 # One fm-crew-state.sh read serves BOTH absorb reasons at once. Reading the state
 # authoritatively (not the status log) is what keeps run-step precedence: a crew
 # that appended paused: but then STARTED a run reports working, never paused.
+# A ci step still waiting on check results also reports working here; the idle-pane
+# exception for a current paused: line on that detail belongs to pause_state_class
+# (bin/fm-watch.sh), not to this token.
 # NOT a pure read: fm-crew-state.sh may make a bounded no-mistakes call, so callers
 # run it only on no-verb signal and first-sighting stale paths, never every wake.
 # FM_CREW_STATE_BIN lets tests stub the verdict.
-crew_absorb_class() {  # <id>
-  local id=$1 line state src
-  [ -n "$id" ] || { printf 'none'; return; }
+# crew_absorb_record prints "<class>\t<line>" from that one read so a caller that
+# needs the detail does not pay for a second read. crew_absorb_class prints the class.
+crew_absorb_record() {  # <id>
+  local id=$1 line state src class
+  [ -n "$id" ] || { printf 'none\t'; return; }
   line=$("$FM_CREW_STATE_BIN" "$id" 2>/dev/null) || true
-  case "$line" in state:*) ;; *) printf 'none'; return ;; esac
+  case "$line" in
+    state:*) ;;
+    *) printf 'none\t%s' "$line"; return ;;
+  esac
   state=${line#state: }; state=${state%% *}
-  if [ "$state" = paused ]; then printf 'paused'; return; fi
-  if [ "$state" = working ]; then
+  class=none
+  if [ "$state" = paused ]; then
+    class=paused
+  elif [ "$state" = working ]; then
     src=${line#*source: }; src=${src%% *}
-    case "$src" in run-step|pane) printf 'working'; return ;; esac
+    case "$src" in run-step|pane) class=working ;; esac
   fi
-  printf 'none'
+  printf '%s\t%s' "$class" "$line"
+}
+
+crew_absorb_class() {  # <id>
+  local record
+  record=$(crew_absorb_record "$1")
+  printf '%s' "${record%%$'\t'*}"
+}
+
+# 0 when <crew-state-line> is a working run-step whose detail names the ci
+# step still waiting on check results. fm-crew-state.sh owns that detail string.
+# An active running or fixing step does not match.
+crew_run_step_is_ci_results_wait() {  # <crew-state-line>
+  local line=$1 state src rest detail
+  case "$line" in state:*) ;; *) return 1 ;; esac
+  state=${line#state: }; state=${state%% *}
+  [ "$state" = working ] || return 1
+  rest=${line#*source: }
+  rest=${rest#" "}
+  src=${rest%% *}
+  [ "$src" = run-step ] || return 1
+  detail=${rest#*" · "}
+  [ "$detail" != "$rest" ] || return 1
+  case "$detail" in
+    "ci running, waiting for results"*) return 0 ;;
+  esac
+  return 1
 }
 
 # 0 if crew <id> shows POSITIVE evidence it is still working (crew_absorb_class

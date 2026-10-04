@@ -832,8 +832,50 @@ test_ci_monitoring_still_waiting_stays_working() {
   FM_FAKE_CI_LOGS="CI checks running, waiting for results..."
   local out; out=$(run_crew_state "$d" feat-ciwait)
   assert_contains "$out" "state: working" "ci step still red -> working"
+  assert_contains "$out" "source: run-step" "ci results wait stays run-step sourced"
+  assert_contains "$out" "ci running, waiting for results" "ci results wait names the wait in the detail"
   assert_not_contains "$out" "checks green" "no green marker present -> no checks-green detail"
-  pass "ci-monitoring run with checks not yet green stays working"
+  pass "ci-monitoring run with checks not yet green stays working and names the results wait"
+}
+
+# A worker that declares paused: while checks are still running is describing
+# that external wait. The run-step stays working - validation has not finished -
+# and the detail is the results-wait token the idle-pane classifier matches.
+# The state token itself does not become paused, so a live agent at a decision
+# gate is not reclassified by this detail.
+test_paused_log_during_ci_results_wait_stays_working() {
+  reset_fakes
+  local d; d=$(new_case ci-waiting-paused)
+  make_repo_on_branch "$d/wt" fm/feat-ciwaitpause
+  make_fakebin "$d" >/dev/null
+  fm_write_meta "$d/state/feat-ciwaitpause.meta" "window=fm:fm-feat-ciwaitpause" "worktree=$d/wt" "kind=ship"
+  printf 'paused: waiting on external CI until checks finish\n' > "$d/state/feat-ciwaitpause.status"
+  FM_FAKE_AXI_STATUS="$(run_ci_monitoring fm/feat-ciwaitpause)"
+  FM_FAKE_CI_LOGS="CI checks running, waiting for results..."
+  local out; out=$(run_crew_state "$d" feat-ciwaitpause)
+  assert_contains "$out" "state: working" "paused log during ci results wait stays working"
+  assert_contains "$out" "source: run-step" "paused log during ci results wait stays run-step sourced"
+  assert_contains "$out" "ci running, waiting for results" "paused log during ci results wait keeps the wait detail"
+  assert_not_contains "$out" "state: paused" "paused log must not replace the run-step state token"
+  pass "a paused log during the ci results wait keeps the working run-step and names the wait"
+}
+
+# A paused: line left behind when an active review step is running is not the
+# ci results wait. The detail stays the active step so the idle classifier
+# keeps the wedge timer.
+test_paused_log_during_active_run_is_not_a_ci_results_wait() {
+  reset_fakes
+  local d; d=$(new_case active-paused)
+  make_repo_on_branch "$d/wt" fm/feat-activepause
+  make_fakebin "$d" >/dev/null
+  fm_write_meta "$d/state/feat-activepause.meta" "window=fm:fm-feat-activepause" "worktree=$d/wt" "kind=ship"
+  printf 'paused: holding for the upstream tool release\n' > "$d/state/feat-activepause.status"
+  FM_FAKE_AXI_STATUS="$(run_running fm/feat-activepause)"
+  local out; out=$(run_crew_state "$d" feat-activepause)
+  assert_contains "$out" "state: working" "active run behind a paused log stays working"
+  assert_contains "$out" "validating (running)" "active run behind a paused log keeps the step detail"
+  assert_not_contains "$out" "waiting for results" "an active running step is not a ci results wait"
+  pass "a paused log during an active running step is not named as a ci results wait"
 }
 
 # A later merge-conflict auto-fix round after an earlier green reading must
@@ -2440,6 +2482,8 @@ test_ci_monitoring_no_checks_terminal_surfaces_done
 test_ci_monitoring_green_then_rearm_stays_working
 test_ci_monitoring_no_checks_yet_stays_working
 test_ci_monitoring_still_waiting_stays_working
+test_paused_log_during_ci_results_wait_stays_working
+test_paused_log_during_active_run_is_not_a_ci_results_wait
 test_ci_monitoring_green_then_new_issue_stays_working
 test_ci_ready_done_log_relapse_stays_working
 test_ci_fixing_after_green_stays_working
