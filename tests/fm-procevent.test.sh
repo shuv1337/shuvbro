@@ -1388,11 +1388,13 @@ assert_present "$FM_PROCEVENT_CLAIM_ROOT/identity-src.claim" "uncertain retireme
 pe "$HL" retire identity-src >/dev/null
 pass "transient identity failure preserves the live source for retry"
 
-# A one-shot capture exits as soon as it publishes. Retirement in that window
-# often samples a zombie: kill -0 still succeeds, cmdline is empty, and the
-# zombie keeps its process group signalable. That is a finished generation,
-# not an unreadable live identity. A zombie that still has a live member stays
-# refused, same as any other crashed leader.
+# A runner's exit cleanup only try-acquires the source lock, so a retirement
+# holding that lock while a one-shot capture exits leaves the claim behind with
+# an unreaped owner. kill -0 still succeeds for that zombie, its cmdline is
+# empty, and it keeps its process group signalable. That is a finished
+# generation, not an unreadable live identity. Killing the whole group without
+# reaping its leader reproduces that end state deterministically. A zombie
+# that still has a live member stays refused, same as any other crashed leader.
 start_unreaped_runner() {  # <home> <source-id> <release-file>
   local home=$1 id=$2 release=$3
   FM_HOME="$home" perl - "$release" "$ROOT/bin/fm-procevent.sh" _start "$id" \
@@ -1447,15 +1449,26 @@ zombie_fixture_cleanup() {
   fm_test_cleanup
 }
 trap zombie_fixture_cleanup EXIT
-pe_register "$HZ" lavish zombie-oneshot -- \
-  /bin/sh -c 'printf "session:\n  file: /a.html\n  status: waiting\n"' >/dev/null
+ZO_TRIGGER="$TMP_ROOT/zombie-oneshot-trigger"
+pe_register "$HZ" lavish zombie-oneshot -- "$BLOCKER" "$ZO_TRIGGER" "held" >/dev/null
 ZOMBIE_PARENT=$(start_unreaped_runner "$HZ" zombie-oneshot "$ZOMBIE_RELEASE")
 wait_for "$FM_PROCEVENT_CLAIM_ROOT/zombie-oneshot.claim" \
   || fail "the one-shot zombie fixture did not claim its source"
 ZOMBIE_PID=$(sed -n '2p' "$FM_PROCEVENT_CLAIM_ROOT/zombie-oneshot.claim")
+zo_deadline=$((SECONDS + 20))
+until [ -n "$(zombie_group_child "$ZOMBIE_PID" "$BLOCKER")" ]; do
+  [ "$SECONDS" -lt "$zo_deadline" ] || fail "the one-shot zombie fixture never started its source"
+  sleep 0.05
+done
+kill -KILL -"$ZOMBIE_PID" 2>/dev/null || fail "the one-shot zombie fixture could not stop its group"
 wait_for_zombie "$ZOMBIE_PID" "the one-shot runner"
-wait_for "$HZ/state/.wake-queue" \
-  || fail "the one-shot zombie fixture published no event"
+zo_deadline=$((SECONDS + 20))
+while [ -n "$(zombie_group_child "$ZOMBIE_PID" "$BLOCKER")" ]; do
+  [ "$SECONDS" -lt "$zo_deadline" ] || fail "the one-shot zombie fixture kept a live group member"
+  sleep 0.05
+done
+assert_present "$FM_PROCEVENT_CLAIM_ROOT/zombie-oneshot.claim" \
+  "the exited runner left its claim for retirement to judge"
 sleep 30 &
 ZOMBIE_INNOCENT=$!
 zombie_status=0

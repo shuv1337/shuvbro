@@ -640,7 +640,7 @@ fm_procevent_pid_is_zombie() {
   case "$pid" in ''|*[!0-9]*) return 1 ;; esac
   proc_root=${FM_PROC_ROOT_OVERRIDE:-/proc}
   if [ -r "$proc_root/$pid/stat" ]; then
-    stat_line=$(cat "$proc_root/$pid/stat" 2>/dev/null) || return 1
+    { IFS= read -r stat_line <"$proc_root/$pid/stat"; } 2>/dev/null || return 1
     state=${stat_line##*)}
     state=${state#"${state%%[![:space:]]*}"}
     state=${state%%[[:space:]]*}
@@ -669,7 +669,7 @@ fm_procevent_group_has_live_member() {
   if [ -d /proc ]; then
     for pid_dir in /proc/[0-9]*; do
       [ -r "$pid_dir/stat" ] || continue
-      stat_line=$(cat "$pid_dir/stat" 2>/dev/null) || continue
+      { IFS= read -r stat_line <"$pid_dir/stat"; } 2>/dev/null || continue
       rest=${stat_line##*)}
       read -r state _ pgrp _ <<< "$rest" || continue
       [ "$pgrp" = "$pgid" ] || continue
