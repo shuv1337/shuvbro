@@ -29,14 +29,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 usage() { sed -n '2,/^set -euo/{/^set -euo/d;s/^# \{0,1\}//;p;}' "${BASH_SOURCE[0]}"; }
 die() { echo "error: $*" >&2; exit 2; }
 
-mode=continue session='' binary=''
+mode='continue' session='' binary=''
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --continue) mode=continue; shift ;;
-    --new) mode=new; shift ;;
+    --continue) mode='continue'; shift ;;
+    --new) mode='new'; shift ;;
     --session)
       [ "$#" -ge 2 ] || die '--session needs an ID'
-      mode=session session=$2; shift 2 ;;
+      mode='session' session=$2; shift 2 ;;
     --native-binary)
       [ "$#" -ge 2 ] || die '--native-binary needs a PATH'
       binary=$2; shift 2 ;;

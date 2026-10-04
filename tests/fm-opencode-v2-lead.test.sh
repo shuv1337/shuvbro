@@ -87,6 +87,7 @@ primary_args() { cat "$ROOT_DIR/primary-args" 2>/dev/null; }
 resolve_in() {  # <fakebin> [VAR=val ...]: runs the resolver with that PATH
   local fakebin=$1
   shift
+  # shellcheck disable=SC2016 # expanded by the child bash
   env -u FM_OPENCODE_V2_BIN "$@" PATH="$fakebin:$PATH" bash -c '. "$1"; fm_shuvcode_native_binary' _ "$ROOT/bin/fm-shuvcode-lib.sh"
 }
 
