@@ -1,0 +1,1 @@
+fm-watch-triage.test.sh under nproc CPU spinners + 2 /bin/true fork-churn loops: run1 113 ok/0 not ok, run2 113 ok/0 not ok; no "cannot confirm runner identity" or "captured no process-event result" lines. (run3 stopped early for time.)

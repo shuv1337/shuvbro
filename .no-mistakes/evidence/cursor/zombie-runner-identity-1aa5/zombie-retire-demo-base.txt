@@ -1,0 +1,21 @@
+=== scenario zombie-only (group kill) ===
+runner 12336 stat=Z ; group members:
+     12336   12336 Z    [bash] <defunct>
+$ fm-procevent.sh retire zombie-only
+   error: cannot confirm runner identity; source remains registered: zombie-only
+   exit=1
+   registration: present
+   claim:        present
+   child 14198: gone
+=== scenario zombie-live-child (leader kill) ===
+runner 18251 stat=Z ; group members:
+     18251   18251 Z    [bash] <defunct>
+     20530   18251 S    bash /tmp/zdemo.tqZi9C/blocker.sh /tmp/zdemo.tqZi9C/zombie-live-child.trigger
+     20671   18251 S    perl -e        use strict;       use warnings;       my $limit = shift;       my ($written, $truncated) = (0, 0);       while (1) {         my $count = sysread(STDIN, my $buffer, 65536);         exit 2 unless defined $count;         last if $count == 0;         my $take = $written < $limit ? $limit - $written : 0;         $take = $count if $take > $count;         if ($take > 0) {           my $offset = 0;           while ($offset < $take) {             my $count_written = syswrite(STDOUT, $buffer, $take - $offset, $offset);             exit 2 unless defined $count_written;             $offset += $count_written;           }           $written += $take;         }         $truncated = 1 if $take < $count;       }       exit($truncated ? 3 : 0);      1048576
+     22554   18251 S    sleep 0.05
+$ fm-procevent.sh retire zombie-live-child
+   error: cannot confirm runner identity; source remains registered: zombie-live-child
+   exit=1
+   registration: present
+   claim:        present
+   child 20530: still-running (not signalled)
