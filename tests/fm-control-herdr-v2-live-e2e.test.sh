@@ -69,6 +69,7 @@ chmod +x "$LAB/bin/herdr"
   shuvcode service start >/dev/null
   SERVICE_PID=$(jq -er '.pid' "$XDG_STATE_HOME/shuvcode/service.json")
   SERVICE_IDENTITY=$(node "$ROOT/bin/fm-opencode-v2-owner.mjs" identity "$SERVICE_PID")
+  # shellcheck disable=SC2329 # Invoked through the EXIT trap below.
   cleanup_service() {
     local status=$? current
     current=$(node "$ROOT/bin/fm-opencode-v2-owner.mjs" identity "$SERVICE_PID" 2>/dev/null) || current=''
