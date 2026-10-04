@@ -7,7 +7,7 @@
 # that records its arguments, so every case observes exactly which session and
 # executable would be activated without starting a TUI or touching a service.
 # `shuvcode` on PATH is a fake npm launcher inside a fake package tree: it
-# answers `session list` from a fixture file and records `api session.create`.
+# answers `session list` from a fixture file (honoring --max-count) and records `api session.create`.
 set -u
 
 # shellcheck source=tests/lib.sh
@@ -45,7 +45,14 @@ make_package() {  # <pkg> <platform-root> -> prints the fakebin dir
   cat > "$pkg/bin/launcher.sh" <<'SH'
 #!/usr/bin/env bash
 case "$1 $2" in
-  "session list") cat "$FAKE_SESSIONS" ;;
+  "session list")
+    max=''
+    while [ "$#" -gt 0 ]; do
+      [ "$1" = --max-count ] && max=$2
+      shift
+    done
+    if [ -n "$max" ]; then jq -c --argjson n "$max" '.[:$n]' "$FAKE_SESSIONS"; else cat "$FAKE_SESSIONS"; fi
+    ;;
   "api session.create")
     printf '%s\n' "$4" >> "$FAKE_CREATED"
     printf '{"data":{"id":"ses_created","location":%s}}\n' "$(jq -c .location <<< "$4")"
@@ -144,6 +151,18 @@ test_continue_without_root_session_creates_one() {
   pass "launcher: continue with no session at the code root creates one there and activates it"
 }
 
+test_continue_refuses_when_window_may_be_truncated() {
+  setup_case continue-truncated
+  jq -n --arg root "$ROOT_DIR" '[range(10000) | {id: "ses_wt_\(.)", updated: (20000 - .), directory: ($root + "/.worktrees/w\(.)")}]
+    + [{id: "ses_root_old", updated: 1, directory: $root}]' > "$CASE/sessions.json"
+  run_lead --continue
+  expect_code 2 "$RC" "continue must stop when the session list may be truncated: $OUT"
+  assert_contains "$OUT" "--session ID or --new" "the refusal must say how to choose a session"
+  [ ! -s "$CASE/created" ] || fail "continue created a session although the list may be truncated"
+  [ ! -e "$ROOT_DIR/primary-args" ] || fail "the activation ran although the list may be truncated"
+  pass "launcher: continue refuses to create a session when the session list fills its whole window"
+}
+
 test_new_always_creates() {
   setup_case new
   jq -n --arg root "$ROOT_DIR" '[{id: "ses_root", updated: 900, directory: $root}]' > "$CASE/sessions.json"
@@ -182,6 +201,7 @@ test_resolver_prefers_platform_binary_over_launcher
 test_resolver_refuses_non_native_candidates
 test_continue_resumes_newest_exact_root_session
 test_continue_without_root_session_creates_one
+test_continue_refuses_when_window_may_be_truncated
 test_new_always_creates
 test_explicit_session_and_binary_pass_through
 test_unresolvable_binary_stops_before_activation

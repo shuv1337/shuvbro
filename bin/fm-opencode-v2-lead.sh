@@ -10,7 +10,9 @@
 #                         this code root, creating one when none exists. The
 #                         session list is project-scoped and includes sibling
 #                         copies and worktrees, so only an exact directory
-#                         match counts.
+#                         match counts. When no match is found and the list
+#                         filled its whole window, the launcher stops instead
+#                         of creating a session; pass --session ID or --new.
 #   --new                 create a fresh session at this code root.
 #   --session ID          resume exactly that session.
 #   --native-binary PATH  skip resolution; otherwise fm_shuvcode_native_binary
@@ -60,10 +62,13 @@ create_session() {
 
 case "$mode" in
   continue)
-    sessions=$(shuvcode session list --format json --max-count 100) || die "cannot list sessions for $root"
+    window=10000
+    sessions=$(shuvcode session list --format json --max-count "$window") || die "cannot list sessions for $root"
     session=$(jq -r --arg d "$root" '[.[] | select(.directory == $d)] | max_by(.updated) | .id // empty' <<< "$sessions") \
       || die "cannot read the session list for $root"
-    if [ -z "$session" ]; then
+    if [ -z "$session" ] && [ "$(jq length <<< "$sessions")" -ge "$window" ]; then
+      die "no lead session at $root among the newest $window sessions and the list may be truncated; pass --session ID or --new"
+    elif [ -z "$session" ]; then
       session=$(create_session)
       echo "no lead session found at $root; created $session" >&2
     else
