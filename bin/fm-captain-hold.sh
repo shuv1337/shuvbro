@@ -302,8 +302,16 @@ validate_one_line() {  # <label> <value>
   esac
 }
 
+# FM_CAPTAIN_HOLD_LOCKED_BY names a live caller pid already holding this
+# task's control lock (bin/fm-board.sh answer); this call then runs inside that
+# hold and leaves its release to the caller.
 acquire_task_control_lock() {  # <task-id>
   CAPTAIN_CONTROL_LOCK="$STATE/.control-$1.lock"
+  if [ -n "${FM_CAPTAIN_HOLD_LOCKED_BY:-}" ] \
+    && [ "$(cat "$CAPTAIN_CONTROL_LOCK/pid" 2>/dev/null || true)" = "$FM_CAPTAIN_HOLD_LOCKED_BY" ] \
+    && fm_pid_alive "$FM_CAPTAIN_HOLD_LOCKED_BY"; then
+    return 0
+  fi
   fm_lock_acquire_wait "$CAPTAIN_CONTROL_LOCK"
   CAPTAIN_CONTROL_LOCK_HELD=1
 }

@@ -8,19 +8,24 @@
 //   - a Tailscale Funnel request is refused outright;
 //   - the Host header must name a loopback host or one listed in
 //     config/board-hosts, which defeats DNS rebinding;
-//   - with config/board-logins present, a request must carry an allowlisted
-//     Tailscale-User-Login (set, and stripped from clients, by tailscale serve)
-//     or be a direct loopback request with no proxy headers at all;
+//   - a request must carry an allowlisted Tailscale-User-Login (set, and
+//     stripped from clients, by tailscale serve) or be a direct loopback
+//     request with no proxy headers at all; without config/board-logins only
+//     the direct loopback request is served;
 //   - POST /answer additionally requires application/json, an Origin equal to
 //     the page's own origin, a same-origin Sec-Fetch-Site when sent, a body of
 //     at most 8 KiB with exactly the documented fields, and the per-start
 //     random token embedded in the page.
 // Request values reach fm-board.sh only as argv elements or stdin; no shell is
 // ever involved.
+// Successful answers keep a private, atomic receipt in state/board/answers,
+// keyed by task and card digest. An exact retry (including answer and login)
+// returns that result without another mutation or inbox note, even after a
+// server restart or a new hold. A different answer to that card is refused.
 
 import http from "node:http";
 import { execFile } from "node:child_process";
-import { randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import * as fs from "node:fs";
 import { dirname, join } from "node:path";
 
@@ -33,6 +38,7 @@ const allowedHosts = new Set([...loopbackHosts, ...config.hosts]);
 const allowedLogins = new Set(config.logins.map((login) => login.toLowerCase()));
 const recordDir = join(config.state_dir, "board");
 const recordPath = join(recordDir, "serve.json");
+const answerDir = join(recordDir, "answers");
 const bodyLimit = 8192;
 const answerFields = new Set(["token", "task", "card", "choice", "text", "until"]);
 
@@ -164,18 +170,19 @@ function accessDenied(req) {
       return { status: 403, code: "bad_host", message: "This board does not answer to that host name. Add it to config/board-hosts." };
     }
   }
-  if (allowedLogins.size === 0) return null;
   const login = headerValue(req, "tailscale-user-login");
-  if (login !== undefined) {
-    return allowedLogins.has(login.toLowerCase())
-      ? null
-      : { status: 403, code: "login_refused", message: "This board is not shared with your login." };
-  }
   const direct = loopbackHosts.has(host)
     && headerValue(req, "x-forwarded-for") === undefined
     && forwardedHost === undefined
+    && login === undefined
     && headerValue(req, "tailscale-user-name") === undefined;
-  return direct ? null : { status: 403, code: "login_refused", message: "This board is not shared with your login." };
+  if (direct) return null;
+  if (allowedLogins.size === 0) {
+    return { status: 403, code: "local_only", message: "This board is served to this computer only. List your Tailscale login in config/board-logins to share it." };
+  }
+  return login !== undefined && allowedLogins.has(login.toLowerCase())
+    ? null
+    : { status: 403, code: "login_refused", message: "This board is not shared with your login." };
 }
 
 function servePage(req, res) {
@@ -206,7 +213,8 @@ function serveData(res) {
   }
   const errors = [...(model.errors || [])];
   if (refreshError) errors.push(refreshError);
-  send(res, 200, { ...model, errors, instance, refresh_seconds: config.interval });
+  const age = Math.max(0, Math.round((Date.now() - Date.parse(model.generated)) / 1000));
+  send(res, 200, { ...model, errors, instance, refresh_seconds: config.interval, age_seconds: Number.isFinite(age) ? age : null });
 }
 
 function readBody(req) {
@@ -297,6 +305,48 @@ function validationCode(message) {
   return "bad_request";
 }
 
+function digest(value) {
+  return createHash("sha256").update(JSON.stringify(value)).digest("hex");
+}
+
+async function recordedAnswer(body, args, login) {
+  const receiptPath = join(answerDir, `${digest([body.task, body.card])}.json`);
+  const request = digest([body.choice, body.text ?? null, body.until ?? null, login ?? null]);
+  const errorResult = (code, message, exit = 1) => ({
+    code: exit, stdout: JSON.stringify({ ok: false, code, message }),
+  });
+  try {
+    const receipt = JSON.parse(fs.readFileSync(receiptPath, "utf8"));
+    if (receipt.request !== request) {
+      return errorResult("answer_conflict", "This question already received a different answer. Refresh to see the current question.", 3);
+    }
+    if (receipt.outcome?.ok !== true || receipt.outcome.task !== body.task) throw new Error("invalid receipt");
+    return { code: 0, stdout: JSON.stringify(receipt.outcome) };
+  } catch (error) {
+    if (error.code !== "ENOENT") {
+      return errorResult("outcome_unknown", "The board could not confirm the previous answer. Refresh or ask the lead before answering again.");
+    }
+  }
+  const result = await runBoard(args, body.choice === "reply" ? body.text : "");
+  let outcome;
+  try {
+    outcome = JSON.parse(lastLine(result.stdout));
+  } catch {
+    return errorResult("outcome_unknown", "Your answer may have been recorded. Refresh to check before answering again.");
+  }
+  if (result.code !== 0 || outcome.ok !== true) return result;
+  const tmp = `${receiptPath}.${process.pid}.tmp`;
+  try {
+    fs.mkdirSync(answerDir, { recursive: true, mode: 0o700 });
+    fs.writeFileSync(tmp, `${JSON.stringify({ request, outcome })}\n`, { mode: 0o600 });
+    fs.renameSync(tmp, receiptPath);
+  } catch {
+    try { fs.unlinkSync(tmp); } catch { /* Nothing staged. */ }
+    return errorResult("outcome_unknown", "Your answer was recorded, but its confirmation could not be saved. Refresh or ask the lead before answering again.");
+  }
+  return result;
+}
+
 async function handleAnswer(req, res) {
   const type = (headerValue(req, "content-type") || "").split(";")[0].trim().toLowerCase();
   if (type !== "application/json") {
@@ -337,14 +387,14 @@ async function handleAnswer(req, res) {
   if (body.choice === "reply") args.push("--text-file", "-");
   const login = headerValue(req, "tailscale-user-login");
   if (login !== undefined && /^[A-Za-z0-9._%+@:-]{1,128}$/.test(login)) args.push("--login", login);
-  const run = answerChain.then(() => runBoard(args, body.choice === "reply" ? body.text : ""));
+  const run = answerChain.then(() => recordedAnswer(body, args, login));
   answerChain = run.catch(() => {});
   const result = await run;
   let outcome;
   try {
     outcome = JSON.parse(lastLine(result.stdout));
   } catch {
-    outcome = { ok: false, code: "record_failed", message: "Your answer was not recorded." };
+    outcome = { ok: false, code: "outcome_unknown", message: "Your answer may have been recorded. Refresh to check before answering again." };
   }
   const status = result.code === 0 ? 200 : result.code === 2 ? 400 : result.code === 3 ? 409 : 500;
   process.stderr.write(`fm-board: answer ${body.task} ${body.choice}: ${outcome.ok ? outcome.outcome : outcome.code}\n`);
