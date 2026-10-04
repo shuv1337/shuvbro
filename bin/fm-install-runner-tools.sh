@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# fm-install-runner-tools.sh - user-local tools the self-hosted CI image lacks.
+# fm-install-runner-tools.sh - pinned user-local tools for CI runners.
 #
 # Installs pinned binaries into <dest>/bin with no root, apt, or sudo.
 # Ruby is the ruby-builder release (the same family setup-ruby uses).
