@@ -476,6 +476,19 @@ test_answers_land_through_the_intake() {
   out=$(post_answer "$(jq -cn --arg t "$BOARD_TOKEN" '{token: $t, task: "sample-ship", card: ("c" * 64), choice: "yes"}')")
   expect_refusal "$out" 409 not_waiting "an answered held item could still be answered from the board"
 
+  hold "$home" sample-ship --reason "Merge PR 5 now? Recommend yes"
+  i=0
+  until [ -n "$(card_of sample-ship)" ]; do
+    i=$((i + 1))
+    [ "$i" -le 100 ] || fail "a same-reason re-hold did not return answered work to Waiting on you: $(board_data)"
+    sleep 0.1
+  done
+  out=$(post_answer "$(answer_body sample-ship no)")
+  [ "$(body_of "$out" | jq -r '.outcome')" = recorded ] || fail "a repeated no on re-asked work was not recorded: $out"
+  board_data | jq -e 'any(.with_lead[]; .id == "sample-ship" and .answer == "no")
+    and all(.waiting_on_you[]; .id != "sample-ship")' >/dev/null \
+    || fail "the same no to a re-asked question left it waiting on the captain: $(board_data)"
+
   hold "$home" sample-ship --reason "Merge PR 5 after the docs land? Recommend yes"
   i=0
   until [ -n "$(card_of sample-ship)" ]; do
@@ -513,14 +526,14 @@ test_answers_land_through_the_intake() {
   task_show "$home" call-option | grep -F "Answer: All at once" >/dev/null || fail "the declared option label was not recorded"
 
   notes=$(inbox_notes "$home")
-  [ "$notes" = 7 ] || fail "expected one captain inbox note per answer, found $notes"
+  [ "$notes" = 8 ] || fail "expected one captain inbox note per answer, found $notes"
   for id in call-yes sample-ship sample-plain call-later call-reply call-option; do
     grep -l -F "Live board answer for $id:" "$home"/state/inbox/*.note >/dev/null \
       || fail "no inbox note announced the answer for $id"
   done
   grep -h -F "deferred until $until" "$home"/state/inbox/*.note >/dev/null || fail "the deferral note lacks its date"
   rows=$(awk -F '\t' '$3 == "check" && $4 ~ /^inbox:/' "$home/state/.wake-queue" | wc -l | tr -d ' ')
-  [ "$rows" = 7 ] || fail "expected seven check wakes for the lead, found $rows: $(cat "$home/state/.wake-queue")"
+  [ "$rows" = 8 ] || fail "expected eight check wakes for the lead, found $rows: $(cat "$home/state/.wake-queue")"
 
   data=$(board_data)
   printf '%s' "$data" | jq -e --arg d "$until" '
@@ -532,8 +545,40 @@ test_answers_land_through_the_intake() {
     || fail "an answered captain question is shown as Recently done: $data"
   out=$(post_answer "$(jq -cn --arg t "$BOARD_TOKEN" '{token: $t, task: "call-yes", card: ("b" * 64), choice: "yes"}')")
   expect_refusal "$out" 409 not_waiting "an already answered question was answered again"
-  [ "$(inbox_notes "$home")" = 7 ] || fail "a refused repeat answer woke the lead"
+  [ "$(inbox_notes "$home")" = 8 ] || fail "a refused repeat answer woke the lead"
   pass "yes, no, later, typed replies, and declared options land through the intake with board provenance and one wake each, and only yes releases held work"
+}
+
+test_later_that_cannot_defer_is_still_recorded() {
+  local home real out show until
+  home=$(make_home later-fails)
+  hold "$home" sample-ship --reason "Merge PR 5 now? Recommend yes"
+  real=$(command -v tasks-axi)
+  cat > "$home/fakebin/tasks-axi" <<EOF
+#!/usr/bin/env bash
+if [ "\${1:-}" = hold ]; then
+  for arg in "\$@"; do
+    [ "\$arg" != --until ] || { echo "tasks-axi: the date gate is unavailable" >&2; exit 1; }
+  done
+fi
+exec "$real" "\$@"
+EOF
+  chmod +x "$home/fakebin/tasks-axi"
+  start_board "$home"
+  until=$(utc_day 7)
+
+  out=$(post_answer "$(answer_body sample-ship later "$(jq -cn --arg d "$until" '{until: $d}')")")
+  [ "$(status_of "$out")" = 200 ] || fail "a recorded Later whose deferral failed was reported as a failure: $out"
+  body_of "$out" | jq -e '.ok == true and .outcome == "not_deferred" and (.message | test("^Recorded, but it could not be moved"))' \
+    >/dev/null || fail "a recorded Later whose deferral failed has no distinct, consistent outcome: $out"
+  show=$(task_show "$home" sample-ship)
+  printf '%s\n' "$show" | grep -F "held: yes" >/dev/null || fail "a failed deferral released the work: $show"
+  printf '%s\n' "$show" | grep -F "Answer: later, until $until" >/dev/null || fail "the Later answer was not recorded: $show"
+  printf '%s\n' "$show" | grep -F "hold_until: $until" >/dev/null && fail "the failed deferral still set the date: $show"
+  [ "$(inbox_notes "$home")" = 1 ] || fail "a recorded Later whose deferral failed did not wake the lead"
+  grep -h -F "deferring until $until failed" "$home"/state/inbox/*.note >/dev/null \
+    || fail "the lead's note does not say the deferral failed: $(cat "$home"/state/inbox/*.note)"
+  pass "a Later whose deferral fails is still recorded, reported as not deferred, and wakes the lead"
 }
 
 test_a_home_that_never_opts_in_is_untouched() {
@@ -566,4 +611,5 @@ test_page_and_data_are_guarded
 test_answer_requests_are_validated
 test_tailscale_login_allowlist
 test_answers_land_through_the_intake
+test_later_that_cannot_defer_is_still_recorded
 test_a_home_that_never_opts_in_is_untouched

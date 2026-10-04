@@ -62,7 +62,9 @@
 # with the old click.
 #
 # answer prints exactly one JSON line, {"ok":true,"outcome":...,"message":...}
-# or {"ok":false,"code":...,"message":...}, and exits 0 when recorded, 2 for an
+# or {"ok":false,"code":...,"message":...}, and exits 0 when recorded (a Later
+# whose deferral fails after its answer was recorded reports outcome
+# not_deferred and still wakes the lead), 2 for an
 # invalid request, 3 when the item is no longer the one the captain saw, and 1
 # when recording failed. Free text is at most 500 characters and becomes one
 # line; dates must be after today (UTC) and at most 366 days out.
@@ -416,7 +418,7 @@ valid_until() {  # <YYYY-MM-DD> <today>
 command_answer() {
   local id=${1:-} card='' choice='' until='' text_file='' login='' text='' have_text=0
   local item lead source label answer_value mode intake_mode reason title outcome rc out note_body note_out note_id
-  local today summary
+  local today summary defer_error=''
   trap model_cleanup EXIT
   [ "$#" -ge 1 ] || { usage >&2; exit 2; }
   shift
@@ -562,10 +564,12 @@ command_answer() {
     done <<EOF
 $(printf '%s' "$item" | jq -r 'if .choices[0].id == "yes" then empty else .choices[].label end')
 EOF
-    if ! out=$("$SCRIPT_DIR/fm-captain-hold.sh" "$@" 2>&1 </dev/null); then
-      answer_result 1 record_failed "Recorded, but not deferred: $(printf '%s' "$out" | tail -1 | sed 's/^fm-captain-hold: //' | cut -c1-300)"
+    if out=$("$SCRIPT_DIR/fm-captain-hold.sh" "$@" 2>&1 </dev/null); then
+      outcome=deferred
+    else
+      outcome=not_deferred
+      defer_error=$(printf '%s' "$out" | tail -1 | sed 's/^fm-captain-hold: //' | cut -c1-300)
     fi
-    outcome=deferred
   fi
 
   note_body=$(
@@ -579,6 +583,7 @@ EOF
       released) printf 'Recorded through the %s: the held work is released with this answer.\n' "$source" ;;
       recorded) printf 'Recorded through the %s: the held work stays held until you act on this answer.\n' "$source" ;;
       deferred) printf 'Recorded through the %s: deferred until %s; it returns to the captain then.\n' "$source" "$until" ;;
+      not_deferred) printf 'Recorded through the %s, but deferring until %s failed (%s); the work stays held, so re-hold it with that date.\n' "$source" "$until" "$defer_error" ;;
     esac
   )
   if ! note_out=$(printf '%s\n' "$note_body" | "$SCRIPT_DIR/fm-inbox.sh" note - 2>&1); then
@@ -587,6 +592,9 @@ EOF
   note_id=$(printf '%s\n' "$note_out" | sed -n 's/^queued //p' | head -1)
   if [ "$outcome" = deferred ]; then
     answer_result 0 "$outcome" "Moved to $until. It comes back to you then." "$note_id" "$id"
+  fi
+  if [ "$outcome" = not_deferred ]; then
+    answer_result 0 "$outcome" "Recorded, but it could not be moved to $until. $lead will pick it up." "$note_id" "$id"
   fi
   answer_result 0 "$outcome" "Recorded. $lead will pick it up." "$note_id" "$id"
 }

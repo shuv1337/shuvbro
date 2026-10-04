@@ -83,7 +83,9 @@
 # an answer that does not let held work go ahead - a no, a deferral, or a reply
 # the lead still has to act on - so the merge entrypoints keep refusing the
 # task. It refuses a task that is not an open captain call, and an exact retry
-# is a no-op.
+# - the newest recorded note carries this digest and is newer than the
+# hold-set stamp - is a no-op, so the same answer to a re-asked call is
+# recorded again.
 #
 # ONE KEYED-ANSWER INTAKE, FED BY EVERY CHANNEL.
 # "A keyed answer resolves its matching captain-held task" is a single
@@ -1004,12 +1006,22 @@ apply_pending_retained_artifact() {  # <task-id>
 }
 
 record_answer_keeping_hold() {  # <task-id> <shown-body>
-  local id=$1 body marker stamp tmp
+  local id=$1 body marker stamp tmp newest newest_at hold_set
   body=$(decode_shown_value "$2") \
     || fail "could not decode the existing body for $id"
   marker="Recorded answer digest: $DECISION_DIGEST"
-  case "$body" in
-    *"$marker"*) : ;;
+  newest=$(printf '%s\n' "$body" | awk '
+    /^Captain answer recorded: / { at = substr($0, 26); digest = ""; if ((getline line) > 0) digest = line }
+    END { printf "%s\t%s", at, digest }')
+  newest_at=${newest%%$'\t'*}
+  hold_set=$(body_hold_set_timestamp "$body")
+  case "${newest#*$'\t'}" in
+    "$marker")
+      [ -n "$newest_at" ] && [ -n "$hold_set" ] && [[ "$newest_at" > "$hold_set" ]] && newest=retry
+      ;;
+  esac
+  case "$newest" in
+    retry) : ;;
     *)
       stamp=${FM_CAPTAIN_HOLD_NOW:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
       tmp=$(umask 077; mktemp "${TMPDIR:-/tmp}/fm-captain-hold-record.XXXXXX") \
