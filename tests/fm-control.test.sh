@@ -891,6 +891,17 @@ esac
 exit 0
 SH
   chmod +x "$1/fakebin/herdr"
+  # The idle-shell proof cross-checks the pane's shell pid against ps: the
+  # stub's shell 4000 is a lone, sleeping process with no children.
+  cat > "$1/fakebin/herdr-ps" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  '-axo pid=,ppid=') printf '%s\n' '4000 1' ;;
+  '-p 4000 -o stat=') printf '%s\n' 'Ss' ;;
+  *) exit 1 ;;
+esac
+SH
+  chmod +x "$1/fakebin/herdr-ps"
 }
 
 # v2_control_case <name> [backend]: sets V2C_DIR to a case whose task t1 runs
@@ -922,7 +933,7 @@ run_v2_control() {
     FM_CONTROL_POLL=0.01 FM_CONTROL_SETTLE_WAIT=0.05 \
     FM_CONTROL_EXIT_WAIT="${FM_CONTROL_EXIT_WAIT:-0.5}" FM_CONTROL_LAUNCH_WAIT=0.05 \
     FM_BACKEND_HERDR_SUBMIT_MIN_SLEEP=0 FM_BACKEND_HERDR_SUBMIT_POLLS=1 \
-    FM_FAKE_NEVER_DIES="${FM_FAKE_NEVER_DIES:-}" \
+    FM_FAKE_NEVER_DIES="${FM_FAKE_NEVER_DIES:-}" FM_HERDR_PS_BIN="$dir/fakebin/herdr-ps" \
     "$CONTROL" "$@" 2>&1
 }
 
@@ -1039,6 +1050,7 @@ test_opencode_v2_herdr_exit_ignores_the_stale_registration() {
        bash -c '. "$1/bin/fm-backend.sh"; fm_backend_agent_state herdr fmses:w1:p2' _ "$ROOT")" = alive ] \
     || fail "fixture: the Herdr registration must still claim a live agent, or this case proves nothing"
   [ "$(PATH="$V2C_DIR/fakebin:$PATH" FM_FAKE_DIR="$V2C_DIR/fake" FM_HOME="$V2C_DIR/home" \
+       FM_HERDR_PS_BIN="$V2C_DIR/fakebin/herdr-ps" \
        bash -c '. "$1/bin/fm-backend.sh"; fm_backend_agent_state herdr fmses:w1:p2 opencode-v2' _ "$ROOT")" = dead ] \
     || fail "an opencode-v2 pane back at its shell must read agent-free whatever the registration says"
   pass "fm-control exit: a Herdr shuvcode exit is confirmed from the pane's processes, not its stale registration"
