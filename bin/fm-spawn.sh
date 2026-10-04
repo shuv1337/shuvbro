@@ -3188,7 +3188,6 @@ opencode_v2_failure_evidence() {
   fi
   excerpt=
   while IFS= read -r line || [ -n "$line" ]; do
-    [ -n "${line//[[:space:]]/}" ] || continue
     line=${line//$'\t'/ }
     line=${line//$'\r'/ }
     if [ -n "$excerpt" ]; then
@@ -3196,7 +3195,7 @@ opencode_v2_failure_evidence() {
     else
       excerpt=$line
     fi
-  done < <(printf '%s\n' "$pane" | tail -n 8)
+  done < <(printf '%s\n' "$pane" | grep -v '^[[:space:]]*$' | tail -n 8)
   if [ "${#excerpt}" -gt 400 ]; then
     excerpt=${excerpt: -400}
   fi

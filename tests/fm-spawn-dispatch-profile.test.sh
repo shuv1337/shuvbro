@@ -416,6 +416,8 @@ test_claude_threads_model_and_effort() {
 #   FM_FAKE_V2_PREFILL=yes  the launch helper only pre-fills the composer (the
 #                           older-release fallback) instead of auto-submitting
 #   FM_FAKE_V2_PANE_NOTE    extra line on the shell screen, before the TUI
+# Like a real pane dump, the shell screen is padded with blank rows to pane
+# height; rows hold spaces so command substitution cannot strip them.
 # A kill-window retires the screen to "window gone", so a failure that
 # captured after the close cannot still see the pre-close diagnostic.
 make_opencode_v2_tmux() {
@@ -440,6 +442,7 @@ fake_screen() {
         printf '%s\n' "$FM_FAKE_V2_PANE_NOTE"
       fi
       printf '$ \n'
+      printf '%.0s  \n' 1 2 3 4 5 6 7 8 9 10 11 12
       ;;
   esac
 }
