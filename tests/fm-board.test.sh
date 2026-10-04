@@ -643,7 +643,7 @@ EOF
 
 test_failed_later_repair_is_not_success_or_answerable() {
   local home real out until
-  home=$(make_home later-repair-fails)
+  home=$(make_home "${1:-later-repair-fails}")
   hold "$home" sample-ship --reason "Merge PR 5 now? Recommend yes"
   real=$(command -v tasks-axi)
   cat > "$home/fakebin/tasks-axi" <<EOF
@@ -663,6 +663,7 @@ fi
 exec "$real" "\$@"
 EOF
   chmod +x "$home/fakebin/tasks-axi"
+  [ "${1:-}" != note-fails ] || printf 'unavailable\n' > "$home/state/inbox"
   start_board "$home"
   until=$(utc_day 7)
   out=$(post_answer "$(answer_body sample-ship later "$(jq -cn --arg d "$until" '{until: $d}')")")
@@ -671,11 +672,21 @@ EOF
   board_data | jq -e 'any(.with_lead[]; .id == "sample-ship")
     and all(.waiting_on_you[]; .id != "sample-ship")' >/dev/null \
     || fail "a failed Later repair offered Yes/No again: $(board_data)"
-  [ "$(inbox_notes "$home")" = 1 ] || fail "a failed Later repair did not wake the lead about the recorded answer"
-  grep -h -F "the follow-up record did not land, so the outcome is uncertain" "$home"/state/inbox/*.note >/dev/null \
-    || fail "the lead's note does not say the failed repair left the outcome uncertain: $(cat "$home"/state/inbox/*.note)"
+  if [ "${1:-}" = note-fails ]; then
+    body_of "$out" | jq -e '.message | contains("Bro was not notified")' >/dev/null \
+      || fail "a failed Later repair silently ignored its inbox-note failure: $out"
+    [ "$(inbox_notes "$home")" = 0 ] || fail "the notification failure was not exercised"
+  else
+    [ "$(inbox_notes "$home")" = 1 ] || fail "a failed Later repair did not wake the lead about the recorded answer"
+    grep -h -F "the follow-up record did not land, so the outcome is uncertain" "$home"/state/inbox/*.note >/dev/null \
+      || fail "the lead's note does not say the failed repair left the outcome uncertain: $(cat "$home"/state/inbox/*.note)"
+  fi
   local_merge_refused "$home" sample-ship
-  pass "a failed Later repair reports failure and wakes the lead without restoring answer buttons or releasing work"
+  if [ "${1:-}" = note-fails ]; then
+    pass "a failed Later repair explicitly reports an inbox-note failure and keeps the work held"
+  else
+    pass "a failed Later repair reports failure and wakes the lead without restoring answer buttons or releasing work"
+  fi
 }
 
 test_declared_option_keeps_held_work_held() {
@@ -837,15 +848,17 @@ JS
 
 test_page_recovers_a_lost_committed_response() {
   local home
-  home=$(make_home lost-response)
+  home=$(make_home "${1:-lost-response}")
   hold "$home" sample-ship --reason "Merge PR 5 now? Recommend yes"
   hold "$home" lost-call --title "Close the question?" --reason "Close it?"
   start_board "$home"
-  node - "$BOARD_PORT" <<'JS' || fail "the page did not recover the committed answer"
+  in_home "$home" env FM_BOARD_TEST_REASK="${1:-}" FM_BOARD_TEST_HOLD="$ROOT/bin/fm-captain-hold.sh" \
+    node - "$BOARD_PORT" <<'JS' || fail "the page did not recover the committed answer"
 const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const port = process.argv[2];
 const origin = `http://127.0.0.1:${port}`;
+const reask = process.env.FM_BOARD_TEST_REASK === 'reask-after-loss';
 (async () => {
   const page = await (await fetch(origin)).text();
   const nodes = new Map();
@@ -854,6 +867,7 @@ const origin = `http://127.0.0.1:${port}`;
     return nodes.get(id);
   };
   let posts = 0, committedBody;
+  const requests = [];
   let loseEveryResponse = false;
   const context = vm.createContext({
     console, Date, Map, Set, CSS: { escape: (s) => s }, setInterval: () => {},
@@ -871,14 +885,29 @@ const origin = `http://127.0.0.1:${port}`;
       const response = await fetch(new URL(path, origin), { ...options, headers });
       if (options.method === 'POST') {
         posts++;
+        requests.push(JSON.parse(options.body));
         if (posts === 1 || loseEveryResponse) {
           committedBody = options.body;
           assert.equal(response.status, 200);
           assert.equal((await response.json()).outcome, loseEveryResponse ? 'closed' : 'released');
+          if (posts === 1 && reask) {
+            require('node:child_process').execFileSync(process.env.FM_BOARD_TEST_HOLD,
+              ['hold', 'sample-ship', '--reason', 'Merge only after docs?'], { env: process.env });
+            let observed = false;
+            for (let i = 0; i < 300; i++) {
+              const data = await (await fetch(new URL('board.json', origin))).json();
+              if (data.waiting_on_you.some((w) => w.id === 'sample-ship' && w.card !== requests[0].card)) {
+                observed = true; break;
+              }
+              await new Promise((resolve) => setTimeout(resolve, 100));
+            }
+            assert.ok(observed, 'the re-asked card never reached the page recovery read');
+          }
           // The real answer committed; discard its response on the phone side.
           throw new TypeError('connection lost after commit');
         }
-        assert.equal(options.body, committedBody, 'recovery changed the original click');
+        if (posts === 2) assert.equal(options.body, committedBody, 'recovery changed the original click');
+        if (posts === 2 && reask) vm.runInContext('drafts.set("sample-ship", "Reply to the new question")', context);
       }
       return response;
     },
@@ -888,12 +917,25 @@ const origin = `http://127.0.0.1:${port}`;
   await vm.runInContext('answer("sample-ship", "yes")', context);
   await vm.runInContext('refresh()', context);
   assert.equal(posts, 2, 'a lost response was not checked with the same request');
+  if (reask) {
+    assert.match(node('you').innerHTML, /Merge only after docs/);
+    assert.doesNotMatch(node('you').innerHTML, / disabled|feedback recorded/,
+      'the old receipt disabled or marked the new question as answered');
+    assert.equal(vm.runInContext('drafts.get("sample-ship")', context), 'Reply to the new question',
+      'the old receipt discarded a draft for the new question');
+  }
   assert.match(node('answered').innerHTML, /Recorded/);
   assert.doesNotMatch(node('answered').innerHTML + node('you').innerHTML, /Nothing was recorded|Not recorded:/);
+  if (reask) {
+    await vm.runInContext('answer("sample-ship", "no")', context);
+    await vm.runInContext('refresh()', context);
+    assert.notEqual(requests[2].card, requests[0].card, 'the next answer reused the old question');
+    assert.match(node('lead').innerHTML, /You answered: no/);
+  }
   loseEveryResponse = true;
   await vm.runInContext('answer("lost-call", "yes")', context);
   await vm.runInContext('refresh()', context);
-  assert.equal(posts, 4);
+  assert.equal(posts, reask ? 5 : 4);
   assert.match(node('banner').innerHTML, /may have been recorded/);
   assert.match(node('banner').innerHTML, /data-act="refresh"/);
   assert.doesNotMatch(node('banner').innerHTML, /Nothing was recorded|Not recorded:/);
@@ -905,9 +947,18 @@ const origin = `http://127.0.0.1:${port}`;
   assert.doesNotMatch(node('banner').innerHTML, /Not recorded:/);
 })().catch((error) => { console.error(error); process.exitCode = 1; });
 JS
-  task_show "$home" sample-ship | grep -F 'held: no' >/dev/null || fail "the committed answer did not release work"
-  [ "$(inbox_notes "$home")" = 2 ] || fail "a lost response recovery duplicated the inbox note"
-  pass "the actual page recovers a response lost after a committed release without duplicating the answer"
+  if [ "${1:-}" = reask-after-loss ]; then
+    task_show "$home" sample-ship | grep -F 'held: yes' >/dev/null || fail "the new No released re-asked work"
+    [ "$(inbox_notes "$home")" = 3 ] || fail "recovery duplicated a note or the new question could not be answered"
+  else
+    task_show "$home" sample-ship | grep -F 'held: no' >/dev/null || fail "the committed answer did not release work"
+    [ "$(inbox_notes "$home")" = 2 ] || fail "a lost response recovery duplicated the inbox note"
+  fi
+  if [ "${1:-}" = reask-after-loss ]; then
+    pass "an old receipt leaves a re-asked card and its draft untouched, and the new question can be answered"
+  else
+    pass "the actual page recovers a response lost after a committed release without duplicating the answer"
+  fi
 }
 
 test_answer_replay_survives_restart_without_reapplying() {
@@ -1002,11 +1053,13 @@ test_same_second_answer_still_moves_to_answered
 test_reasking_an_answered_call_never_offers_the_old_question
 test_later_that_cannot_defer_is_still_recorded
 test_failed_later_repair_is_not_success_or_answerable
+test_failed_later_repair_is_not_success_or_answerable note-fails
 test_declared_option_keeps_held_work_held
 test_reask_during_an_answer_never_takes_the_old_click
 test_board_without_logins_is_local_only
 test_page_staleness_ignores_the_phone_clock
 test_page_recovers_a_lost_committed_response
+test_page_recovers_a_lost_committed_response reask-after-loss
 test_answer_replay_survives_restart_without_reapplying
 test_confirmation_storage_failure_reports_unknown
 test_a_home_that_never_opts_in_is_untouched

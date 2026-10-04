@@ -119,13 +119,14 @@ let last = null;
 let receivedAt = 0;
 let offline = false;
 let lastWaitingSignature = "";
-const cardState = new Map();   // task id -> {state, message}
+const cardState = new Map();   // task id -> {card, state, message}
 const panels = new Map();      // task id -> "later" | "reply"
 const drafts = new Map();      // task id -> reply text
 let recentlyAnswered = [];     // {title, message, at}
 
 function choicesHtml(w) {
-  const st = cardState.get(w.id) || {};
+  const saved = cardState.get(w.id);
+  const st = saved && saved.card === w.card ? saved : {};
   const busy = st.state === "pending" || st.state === "recorded";
   const dis = busy ? " disabled" : "";
   const open = panels.get(w.id);
@@ -170,10 +171,12 @@ function renderWaiting(d) {
   const all = d.waiting_on_you || [];
   const live = all.filter((w) => !w.aged);
   const older = all.filter((w) => w.aged);
-  const ids = new Set(all.filter((w) => w.answerable).map((w) => w.id));
+  const cards = new Map(all.filter((w) => w.answerable).map((w) => [w.id, w.card]));
   for (const [id, st] of cardState) {
-    if (!ids.has(id)) {
-      if (st.state === "recorded") recentlyAnswered.push({ message: st.message, title: st.title, at: Date.now() });
+    if (cards.get(id) !== st.card) {
+      if (st.state === "recorded") recentlyAnswered.push({
+        message: (cards.has(id) ? "Previous question: " : "") + st.message, title: st.title, at: Date.now(),
+      });
       cardState.delete(id); panels.delete(id); drafts.delete(id);
     }
   }
@@ -265,10 +268,25 @@ function findItem(id) {
   return ((last && last.waiting_on_you) || []).find((w) => w.answerable && w.id === id);
 }
 
+// A late response belongs to the card that was clicked, never to a re-ask or
+// its new draft. Keep old successes visible separately from the current card.
+function setCardState(item, state, message) {
+  const current = findItem(item.id);
+  const saved = cardState.get(item.id);
+  if ((current && current.card !== item.card) || (!current && saved && saved.card !== item.card)) {
+    if (state === "recorded") recentlyAnswered.push({
+      message: `Previous question: ${message}`, title: item.title, at: Date.now(),
+    });
+    return false;
+  }
+  cardState.set(item.id, { card: item.card, state, message, title: item.title });
+  return true;
+}
+
 async function answer(id, choice, extra) {
   const item = findItem(id);
   if (!item) return;
-  cardState.set(id, { state: "pending", message: "Recording your answer…", title: item.title });
+  setCardState(item, "pending", "Recording your answer…");
   panels.delete(id);
   lastWaitingSignature = "";
   renderWaiting(last);
@@ -296,11 +314,10 @@ async function answer(id, choice, extra) {
     }
   }
   if (result.ok) {
-    cardState.set(id, { state: "recorded", message: result.message || "Recorded.", title: item.title });
-    drafts.delete(id);
+    if (setCardState(item, "recorded", result.message || "Recorded.")) drafts.delete(id);
   } else {
-    const message = result.message || "The answer could not be confirmed.";
-    cardState.set(id, { state: "failed", message, title: item.title });
+    let message = result.message || "The answer could not be confirmed.";
+    if (!setCardState(item, "failed", message)) message = `Previous question: ${message}`;
     if (result.code === "outcome_unknown" || result.code === "not_waiting" || result.code === "repair_failed") {
       $("banner").innerHTML = `<div class="banner">${esc(message)} <button data-act="refresh">Refresh</button></div>`;
     }

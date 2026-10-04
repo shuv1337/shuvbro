@@ -625,7 +625,9 @@ EOF
     esac
   )
   if [ "$outcome" = repair_failed ]; then
-    printf '%s\n' "$note_body" | "$SCRIPT_DIR/fm-inbox.sh" note - >/dev/null 2>&1 || true
+    if ! printf '%s\n' "$note_body" | "$SCRIPT_DIR/fm-inbox.sh" note - >/dev/null 2>&1; then
+      answer_result 1 repair_failed "Later was recorded, but the date and follow-up could not be confirmed. $lead was not notified. Mention it in chat; the work stays held."
+    fi
     answer_result 1 repair_failed "Later could not be confirmed after the date failed. The work stays held. Refresh or ask $lead before answering again."
   fi
   if ! note_out=$(printf '%s\n' "$note_body" | "$SCRIPT_DIR/fm-inbox.sh" note - 2>&1); then
