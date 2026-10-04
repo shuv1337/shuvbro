@@ -570,6 +570,42 @@ test_same_second_answer_still_moves_to_answered() {
   pass "a no recorded in the same second as the hold still moves the item to Answered"
 }
 
+# Re-asking an answered call takes more than one backlog write. A wrapper around
+# tasks-axi reads the board after every write, so each state a concurrent
+# refresh could capture is checked: the old question must never be offered
+# again, or a click on it is refused once the re-ask lands.
+test_reasking_an_answered_call_never_offers_the_old_question() {
+  local home real seen final
+  home=$(make_home re-ask)
+  real=$(command -v tasks-axi)
+  seen="$home/seen-cards"
+  : > "$seen"
+  cat > "$home/fakebin/tasks-axi" <<SH
+#!/usr/bin/env bash
+"$real" "\$@" || exit \$?
+case "\${1:-}" in
+  hold|update)
+    "$BOARD" model | jq -r '.waiting_on_you[] | select(.answerable and .id == "sample-ship") | "\(.card) \(.reason)"' >> "$seen"
+    ;;
+esac
+SH
+  chmod +x "$home/fakebin/tasks-axi"
+  hold "$home" sample-ship --reason "Merge PR 5 now? Recommend yes"
+  printf 'sample-ship\tno\tNo - in reply to: Merge PR 5 now? Recommend yes\trecord\n' \
+    | in_home "$home" "$ROOT/bin/fm-captain-hold.sh" answers --source "live board" >/dev/null \
+    || fail "the first no was not recorded"
+  : > "$seen"
+  hold "$home" sample-ship --reason "Merge PR 5 after the docs land? Recommend yes"
+  final=$(in_home "$home" "$BOARD" model | jq -r '.waiting_on_you[] | select(.answerable and .id == "sample-ship") | "\(.card) \(.reason)"')
+  [ -n "$final" ] && [ "${final#* }" = "Merge PR 5 after the docs land? Recommend yes" ] \
+    || fail "the re-asked call is not waiting on the captain: $final"
+  [ -s "$seen" ] || fail "no intermediate board read was observed during the re-ask"
+  if grep -v -x -F "$final" "$seen" | grep -q .; then
+    fail "while the call was re-asked the board offered a question that was not the re-asked one: $(grep -v -x -F "$final" "$seen" | sort -u)"
+  fi
+  pass "re-asking an answered call never offers the already-answered question while the re-ask is written"
+}
+
 test_later_that_cannot_defer_is_still_recorded() {
   local home real out show until
   home=$(make_home later-fails)
@@ -636,5 +672,6 @@ test_answer_requests_are_validated
 test_tailscale_login_allowlist
 test_answers_land_through_the_intake
 test_same_second_answer_still_moves_to_answered
+test_reasking_an_answered_call_never_offers_the_old_question
 test_later_that_cannot_defer_is_still_recorded
 test_a_home_that_never_opts_in_is_untouched

@@ -39,6 +39,7 @@ const answerFields = new Set(["token", "task", "card", "choice", "text", "until"
 let model = null;
 let refreshError = null;
 let refreshing = null;
+let refreshAfterCurrent = null;
 let answerChain = Promise.resolve();
 
 function parseConfig(raw) {
@@ -95,6 +96,20 @@ function refresh() {
     }
   })();
   return refreshing;
+}
+
+// A refresh whose snapshot starts after this call. Joining one already in
+// flight could publish records read before an answer was written, so the page
+// would keep offering the question it just answered.
+function freshRefresh() {
+  if (!refreshing) return refresh();
+  if (!refreshAfterCurrent) {
+    refreshAfterCurrent = refreshing.then(() => {
+      refreshAfterCurrent = null;
+      return refresh();
+    });
+  }
+  return refreshAfterCurrent;
 }
 
 function lastLine(text) {
@@ -335,7 +350,7 @@ async function handleAnswer(req, res) {
   process.stderr.write(`fm-board: answer ${body.task} ${body.choice}: ${outcome.ok ? outcome.outcome : outcome.code}\n`);
   // Refresh before replying, within a bound, so the page's next read already
   // shows the answered item gone or the changed question in place.
-  await Promise.race([refresh(), new Promise((resolve) => setTimeout(resolve, 5000))]);
+  await Promise.race([freshRefresh(), new Promise((resolve) => setTimeout(resolve, 5000))]);
   send(res, status, outcome);
 }
 

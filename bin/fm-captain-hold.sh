@@ -858,6 +858,16 @@ write_hold_set_stamp() {  # <task-id> <shown-body> <timestamp> <preserve-existin
   rm -f -- "$tmp"
 }
 
+set_captain_hold() {  # <task-id> <reason> <until-or-empty>
+  if [ -n "$3" ]; then
+    tasks_axi hold "$1" --reason "$2" --kind captain --until "$3" >/dev/null \
+      || fail "could not hold task $1 for the captain"
+  else
+    tasks_axi hold "$1" --reason "$2" --kind captain >/dev/null \
+      || fail "could not hold task $1 for the captain"
+  fi
+}
+
 command_hold() {
   local id=${1:-} title='' reason='' repo='' origin='' until='' show state existing_title body='' hold_kind hold_set occurrence
   local existing_hold_kind='' existing_held='' preserve_hold_set=0 hold_answered existing_hold_set options='' option_count=0 seen_options='' lower_option
@@ -946,9 +956,15 @@ command_hold() {
         || fail "could not create task $id"
     fi
   fi
-  # Publish the timestamp before the captain-hold annotation. A concurrent
-  # snapshot may see the harmless stamp by itself, but can never see a newly
-  # held task without the timestamp that defines this hold lifecycle's age.
+  # Order the two writes so a concurrent snapshot never reads a captain call as
+  # waiting with a question it is not being asked. A task not yet held gets its
+  # timestamp first, so it can never appear held without the stamp that defines
+  # this lifecycle's age. A call that is already held and answered gets its new
+  # reason first: until the restamp lands, its recorded answer still reads as
+  # newer than the hold, so the old question is never offered as unanswered.
+  if [ "$existing_hold_kind" = captain ] && [ "$existing_held" = yes ] && [ "$preserve_hold_set" = 0 ]; then
+    set_captain_hold "$id" "$reason" "$until"
+  fi
   show=$(task_show "$id") || fail "task $id disappeared before recording its hold-set stamp"
   if [ "$preserve_hold_set" = 0 ]; then
     body=$(decode_shown_value "$(show_field "$show" body)") \
@@ -963,13 +979,7 @@ command_hold() {
     [ "$(show_field_value "$show" body | sed -n '2p')" = "$HOLD_OPTIONS_PREFIX$options" ] \
       || fail "task $id did not retain its declared options"
   fi
-  if [ -n "$until" ]; then
-    tasks_axi hold "$id" --reason "$reason" --kind captain --until "$until" >/dev/null \
-      || fail "could not hold task $id for the captain"
-  else
-    tasks_axi hold "$id" --reason "$reason" --kind captain >/dev/null \
-      || fail "could not hold task $id for the captain"
-  fi
+  set_captain_hold "$id" "$reason" "$until"
   show=$(task_show "$id") || fail "task $id disappeared while holding it"
   hold_kind=$(show_field_value "$show" hold_kind)
   [ "$hold_kind" = captain ] || fail "task $id did not retain its captain hold"
