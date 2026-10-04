@@ -1,0 +1,12 @@
+### FIXED (00fac99) LC_ALL=en_US.UTF-8 bin/fm-test-run.sh --check-coverage
+FM_TEST_COVERAGE ok total=218 parallel=24 serial=181 serial_shards=5 serial_unhinted=12 herdr=13
+exit=0
+
+### FIXED (00fac99) LC_ALL=C bin/fm-test-run.sh --check-coverage
+FM_TEST_COVERAGE ok total=218 parallel=24 serial=181 serial_shards=5 serial_unhinted=12 herdr=13
+exit=0
+
+### BASE (4b14c03) LC_ALL=en_US.UTF-8 bin/fm-test-run.sh --check-coverage
+comm: file 2 is not in sorted order
+comm: input is not in sorted order
+exit=1

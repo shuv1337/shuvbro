@@ -1,0 +1,17 @@
+### New test vs FIXED runner, ambient LANG=en_US.UTF-8 LC_ALL=unset
+ok - exact suite coverage: --all lists every tests/*.test.sh once
+ok - portable shard union, disjointness, and coverage guard hold
+FOCUSED_TESTS_PASSED
+exit=0
+
+### New test vs FIXED runner, CI-like LC_ALL=C
+ok - exact suite coverage: --all lists every tests/*.test.sh once
+ok - portable shard union, disjointness, and coverage guard hold
+FOCUSED_TESTS_PASSED
+exit=0
+
+### New test vs BASE runner (4b14c03), CI-like LC_ALL=C -- must FAIL to prove regression is caught
+ok - exact suite coverage: --all lists every tests/*.test.sh once
+not ok - coverage guard must succeed under en_US.utf8: comm: file 2 is not in sorted order
+comm: input is not in sorted order
+exit=1

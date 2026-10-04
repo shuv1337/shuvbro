@@ -1,0 +1,7 @@
+### Adversarial: 30 unhinted probe tests with mixed-case/punctuation names (C vs en_US collation differ), LC_ALL=en_US.UTF-8 bin/fm-test-run.sh --check-coverage
+### Expect: exit 1 from the real unhinted-share guard, with no comm sort-order warning
+fm-test-run: coverage guard: 42 of 211 portable serial scripts have no measured duration hint (max 15%)
+fm-test-run: refresh the hints from a green run's timing artifacts: docs/fm-test-portable-shards.md
+exit=1
+comm_sort_warnings=0
+listed_unhinted_lines=42
