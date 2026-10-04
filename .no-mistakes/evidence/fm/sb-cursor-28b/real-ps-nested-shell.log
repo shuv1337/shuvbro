@@ -1,0 +1,22 @@
+process tree (pane shell -> ... -> foreground):
+2784831 2784827 Ss   bash            bash --norc -c (exec -a treehouse bash -c "ZDOTDIR=/home/shuv/.cache/agent-ws/realps.VBQWAX/zd zsh -l; :" ); :
+2784841 2784831 S    bash            treehouse -c ZDOTDIR=/home/shuv/.cache/agent-ws/realps.VBQWAX/zd zsh -l; :
+2784845 2784841 S+   zsh             zsh -l
+pane shell=2784831 foreground pgid=2784845 zsh=2784845
+MODE=treehouse verdict=dead
+
+process tree (pane shell -> ... -> foreground):
+2786268 2786265 Ss   bash            bash --norc -c (exec -a script-wrapper bash -c "ZDOTDIR=/home/shuv/.cache/agent-ws/realps.kkFF9o/zd zsh -l; :" ); :
+2786285 2786268 S    bash            script-wrapper -c ZDOTDIR=/home/shuv/.cache/agent-ws/realps.kkFF9o/zd zsh -l; :
+2786294 2786285 S+   zsh             zsh -l
+pane shell=2786268 foreground pgid=2786294 zsh=2786294
+MODE=other verdict=ambiguous
+
+process tree (pane shell -> ... -> foreground):
+2787782 2787780 Ss   bash            bash --norc -c (exec -a treehouse bash -c "bash -c \"ZDOTDIR=/home/shuv/.cache/agent-ws/realps.kBM2li/zd zsh -l; :\"; :" ); :
+2787785 2787782 S    bash            treehouse -c bash -c "ZDOTDIR=/home/shuv/.cache/agent-ws/realps.kBM2li/zd zsh -l; :"; :
+2787786 2787785 S    bash            bash -c ZDOTDIR=/home/shuv/.cache/agent-ws/realps.kBM2li/zd zsh -l; :
+2787787 2787786 S+   zsh             zsh -l
+pane shell=2787782 foreground pgid=2787787 zsh=2787787
+MODE=twohop verdict=ambiguous
+

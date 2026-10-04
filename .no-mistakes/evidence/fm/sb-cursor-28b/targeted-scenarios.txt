@@ -1,0 +1,52 @@
+ok - watcher: acknowledgement silences an unwritable ladder without a stale wake
+ok - watcher: unwritable ladder bookkeeping surfaces a stale wake after the doorbell
+ok - watcher: a spent ring budget emits exactly one ordinary stale wake for recovery
+ok - watcher: a positively dead pane is never typed into and surfaces exactly one stale wake
+ok - watcher: dead-pane recovery overrides stale busy state
+ok - watcher: recorded opencode-v2 defeats a stale Herdr registration without ringing the shell
+ok - fm-control relaunch: a linked spawning home preserves committed and unfinished work in the recorded copy
+ok - fm-control relaunch: durable task metadata survives replacement launch publication
+ok - fm-control relaunch: the progress note lands in the instructions the replacement reads
+ok - fm-control relaunch: a ship task refuses without the progress note its replacement needs
+ok - fm-control relaunch: a prefixed recorded harness can switch adapters transactionally
+ok - fm-control relaunch: a prefixed command requires an explicit replacement harness
+ok - fm-control relaunch: explicit model and effort win over the recorded ones
+ok - fm-control relaunch: wiring cleanup failure refuses replacement arming
+ok - fm-control relaunch: a ship task keeps its recorded harness instead of re-reading crew config
+ok - fm-spawn --relaunch: with no explicit harness it reuses the task's recorded one, never the crew default
+ok - fm-control relaunch: failed journal replacement preserves durable phase
+ok - fm-spawn relaunch: prepublication abort removes replacement state
+ok - fm-spawn --relaunch: pending closes refuse before replacement begins
+ok - fm-spawn --relaunch: an unrecorded task is refused
+ok - fm-spawn --relaunch: refuses to start a replacement outside the copy holding the work
+ok - fm-control relaunch: an opencode-v2 worker is replaced in place and resumes its recorded session
+ok - fm-spawn --relaunch: an opencode-v2 endpoint is agent-free only when its TUI has exited and its session is idle
+ok - Herdr control relaunch: a stale shuvcode registration cannot confirm an unstarted claude replacement
+ok - Herdr control relaunch: the replacement's own foreground process confirms it under a sticky shuvcode registration
+ok - stale needs-decision over active run is superseded
+ok - stale blocked over active run is superseded
+ok - socket refusal or missing socket over a stale fixing run reports blocked
+ok - stale checks-green status log does not mask CI relapse
+ok - top-level fixing is not overridden by a stale ci running row
+ok - top-level fixing is not overridden by a stale done log
+ok - a husk pane (agent gone) still reads gone for reclaim
+ok - crew state: recorded opencode-v2 process evidence defeats its stale Herdr registration
+ok - dead window ignores stale status log
+ok - herdr client selection: a live pane behind a stale shadowing client reads alive
+ok - fm_backend_herdr_agent_state: an opencode-v2 pane is classified from its foreground processes, not its stale registration
+ok - Herdr worktree wrapper: the lone descendant foreground shell proves the agent exited
+ok - Herdr nested shell: only pane shell -> one Treehouse wrapper -> lone shell proves exit
+ok - Herdr harness switch: the exited shuvcode registration cannot confirm a replacement
+ok - Herdr exited worker: husk and doorbell consumers use recorded-harness evidence
+ok - fm_backend_herdr_create_task: closes every confirmed same-labeled husk only after creating the replacement
+ok - fm_backend_herdr_create_task: refuses success when a preexisting husk tab remains after replacement
+ok - fm_backend_herdr_create_task: creates the replacement tab BEFORE closing the husk tab, never the reverse
+ok - herdr presentation reclaim: exact agent-free husk survives duplicate parent labels while its sibling stays untouched
+ok - fm_backend_herdr_busy_state: done -> idle, blocked -> idle (surfaced like a stale pane, not suppressed as busy)
+ok - fm_backend_herdr_composer_state: a native idle Pi separator composer reads empty
+ok - fm_backend_herdr_composer_state: real Pi composer text remains pending
+ok - fm_backend_herdr_composer_state: an incomplete lower Pi separator cannot inherit a stale empty row
+ok - fm_backend_herdr_composer_state: Pi separators never authorize working, non-Pi, unreadable, or over-tall targets
+ok - fm_backend_herdr_composer_state: a live unbordered prompt row below a stale bordered decorative box still wins (not misread as the box's own row)
+ok - fm-peek/fm-send: explicit stale targets matching metadata use the recorded backend
+ok - fm_backend_herdr_escalation_marker keys the dedupe marker exactly like the watcher's .stale-<key>
