@@ -1388,6 +1388,34 @@ assert_present "$FM_PROCEVENT_CLAIM_ROOT/identity-src.claim" "uncertain retireme
 pe "$HL" retire identity-src >/dev/null
 pass "transient identity failure preserves the live source for retry"
 
+# A one-shot runner can pass its live identity check and then finish and be
+# reaped before retirement reads its process group. That finished generation
+# must be released, not refused as an unconfirmable identity (issue #16 under
+# load). A ps shim makes the runner's group exit right at the pgid read.
+HV="$TMP_ROOT/hv"; new_home "$HV"
+VANISH_TRIGGER="$TMP_ROOT/vanish-trigger"
+pe_register "$HV" lavish vanish-src -- "$BLOCKER" "$VANISH_TRIGGER" "vanish" >/dev/null
+pe "$HV" reconcile >/dev/null
+wait_for "$FM_PROCEVENT_CLAIM_ROOT/vanish-src.claim" || fail "vanish fixture runner did not claim its source"
+vanish_pid=$(sed -n '2p' "$FM_PROCEVENT_CLAIM_ROOT/vanish-src.claim")
+VANISH_FAKEBIN=$(fm_fakebin "$TMP_ROOT/vanish-tools")
+cat > "$VANISH_FAKEBIN/ps" <<SH
+#!/usr/bin/env bash
+if [ "\$*" = "-o pgid= -p $vanish_pid" ]; then
+  kill -KILL -$vanish_pid 2>/dev/null
+  for _ in \$(seq 1 100); do kill -0 $vanish_pid 2>/dev/null || break; sleep 0.05; done
+fi
+exec $(command -v ps) "\$@"
+SH
+chmod +x "$VANISH_FAKEBIN/ps"
+vanish_status=0
+vanish_out=$(PATH="$VANISH_FAKEBIN:$PATH" pe "$HV" retire vanish-src 2>&1) || vanish_status=$?
+[ "$vanish_status" -eq 0 ] || fail "retirement refused a runner that exited before its pgid read: $vanish_out"
+kill -0 "$vanish_pid" 2>/dev/null && fail "the vanish fixture runner was not gone before retirement finished"
+assert_absent "$HV/state/procevent/vanish-src.source" "a runner gone before its pgid read is retired"
+assert_absent "$FM_PROCEVENT_CLAIM_ROOT/vanish-src.claim" "a runner gone before its pgid read releases its claim"
+pass "a runner that exits between its identity check and pgid read is retired"
+
 # A runner's exit cleanup only try-acquires the source lock, so a retirement
 # holding that lock while a one-shot capture exits leaves the claim behind with
 # an unreaped owner. kill -0 still succeeds for that zombie, its cmdline is

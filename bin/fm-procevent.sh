@@ -1321,7 +1321,16 @@ runner_group_signal() {  # <signal> <pid> <identity> [proved]
       1) fm_procevent_group_has_live_member "$pid" && return 2; return 1 ;;
       *) return 2 ;;
     esac
-    pgid=$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d '[:space:]') || return 2
+    pgid=$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d '[:space:]')
+    if [ -z "$pgid" ]; then
+      # A one-shot runner can finish and be reaped between its identity match
+      # and this read. Judge it again: only a now-stale leader whose group has
+      # no live member is the finished generation; anything else still refuses.
+      fm_procevent_pid_state "$pid" "$identity"
+      [ "$?" -eq 1 ] || return 2
+      fm_procevent_group_has_live_member "$pid" && return 2
+      return 1
+    fi
     [ "$pgid" = "$pid" ] || return 2
   fi
   # KNOWN LIMIT: portable shell cannot make this verification and signal atomic,
