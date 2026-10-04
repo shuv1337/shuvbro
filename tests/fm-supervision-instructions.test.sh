@@ -2,8 +2,9 @@
 # Tests for harness-aware supervision instruction rendering.
 set -u
 
-# shellcheck source=tests/lib.sh
-. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+# shellcheck source=tests/fm-opencode-v2-acceptance-lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/fm-opencode-v2-acceptance-lib.sh"
+v2_assert_test_namespace || exit 1
 
 TMP_ROOT=$(fm_test_tmproot fm-supervision-instructions)
 RENDER="$ROOT/bin/fm-supervision-instructions.sh"
@@ -303,7 +304,7 @@ test_activated_linked_external_home() {
   make_plain_checkout "$plain"
   git -C "$plain" worktree add -q "$linked" -b activated-linked
   mkdir -p "$home/state" "$home/config"
-  out=$(CODE="$ROOT" LEAD_ROOT="$linked" LEAD_HOME="$home" FM_V2_REGISTRY_NAMESPACE="test-render-$$-$RANDOM" node --input-type=module <<'JS'
+  out=$(CODE="$ROOT" LEAD_ROOT="$linked" LEAD_HOME="$home" node --input-type=module <<'JS'
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 import {pathToFileURL} from 'node:url';

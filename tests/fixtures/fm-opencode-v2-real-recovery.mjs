@@ -5,6 +5,8 @@ import * as fs from "node:fs";
 import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
+import { assertTestRegistry, cleanupTestRegistry } from "../assets/fm-opencode-v2-test-registry.mjs";
+assertTestRegistry();
 const source = process.env.ROOT, lab = process.env.LAB;
 const owner = await import(pathToFileURL(source + "/bin/fm-opencode-v2-owner.mjs"));
 const { createWatchArmCoordinator } = await import(pathToFileURL(source + "/.opencode/plugins/lib/fm-watch-arm-v2.js"));
@@ -41,6 +43,7 @@ process.env.FM_POLL = "1"; process.env.FM_HEARTBEAT = "999999"; process.env.FM_C
 process.env.FM_STALE = "999999";
 process.env.FM_HOME = home; process.env.FM_ROOT_OVERRIDE = root; process.env.FM_STATE_OVERRIDE = state; process.env.FM_CONFIG_OVERRIDE = paths.config;
 process.env.FM_V2_REGISTRY_NAMESPACE += "-real";
+assertTestRegistry();
 process.env.OPENCODE_PASSWORD = "sentinel-not-a-real-credential";
 process.env.OPENCODE_SERVER_PASSWORD = "second-sentinel-not-a-real-credential";
 process.env.FM_V2_SERVICE_URL = "http://127.0.0.1:9999"; // inherited routing is not the frozen binding
@@ -161,5 +164,5 @@ echo safe >> '${state}/check-probes'
   await assert.rejects(journal.deliver(unconfirmed), /confirmation first/);
   console.log("real idle watcher TERM: one generation/admission, confirmed live successor; preparation failure retains continuity; credentials absent from evaluator, arm, watcher and custom check; no-row retention passed");
 } finally {
-  await coordinator?.cleanup(); owner.publish("retire", record); owner.publish("cleanup-test-namespace", {});
+  await coordinator?.cleanup(); owner.publish("retire", record); cleanupTestRegistry(source);
 }

@@ -2,11 +2,114 @@
 # Credential-free behavioral coverage for the native exact-session contract.
 # Live native loader/service/Herdr qualification is separate and opt-in.
 set -u
-# shellcheck source=tests/lib.sh
-. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+# shellcheck source=tests/fm-opencode-v2-acceptance-lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/fm-opencode-v2-acceptance-lib.sh"
+v2_assert_test_namespace || exit 1
 TMP_ROOT=$(fm_test_tmproot fm-opencode-v2-plugin)
 export NODE_NO_WARNINGS=1
-export FM_V2_REGISTRY_NAMESPACE="test-$$-$RANDOM"
+
+test_standalone_registry_guard() {
+  local fixture namespace out home="$TMP_ROOT/guard-home" lab="$TMP_ROOT/guard-lab"
+  local preload="--import=$ROOT/tests/assets/fm-opencode-v2-scratch-home.mjs"
+  # A foreign HOME breaks version-manager node shims; pin the resolved binary.
+  local -a scratch=(env HOME="$TMP_ROOT/not-the-registry-home" PATH="$(dirname "$V2_NODE_BIN"):$PATH" FM_V2_TEST_SCRATCH_HOME="$home" NODE_OPTIONS="$preload")
+  mkdir -p "$home/.local/state/shuvbro/opencode-v2/default"
+  mkdir -p "$home/.local/state/shuvbro/opencode-v2/test-existing"
+  printf 'untouched sentinel\n' > "$home/.local/state/shuvbro/opencode-v2/default/sentinel"
+  out=$("${scratch[@]}" FM_V2_REGISTRY_NAMESPACE=test-positive ROOT="$ROOT" node --input-type=module <<'JS'
+import assert from 'node:assert/strict';
+import {userInfo} from 'node:os';
+import {pathToFileURL} from 'node:url';
+const owner=await import(pathToFileURL(process.env.ROOT+'/bin/fm-opencode-v2-owner.mjs'));
+const expected=process.env.FM_V2_TEST_SCRATCH_HOME+'/.local/state/shuvbro/opencode-v2/test-positive';
+assert.equal(userInfo().homedir,process.env.FM_V2_TEST_SCRATCH_HOME);
+assert.equal(owner.registry(),expected);
+console.log(expected);
+owner.publish('cleanup-test-namespace',{});
+JS
+  ) || fail "scratch registry positive control failed"
+  [ "$out" = "$home/.local/state/shuvbro/opencode-v2/test-positive" ] || fail "registry redirect landed elsewhere"
+  for fixture in fixtures/fm-opencode-v2-provider-host.mjs fixtures/fm-opencode-v2-real-recovery.mjs assets/fm-opencode-v2-native-harness.mjs; do
+    for namespace in unset default '../unsafe' test-existing; do
+      if [ "$namespace" = unset ]; then
+        out=$(env -u FM_V2_REGISTRY_NAMESPACE "${scratch[@]:1}" ROOT="$ROOT" LAB="$lab" node "$ROOT/tests/$fixture" 2>&1) && fail "standalone $fixture accepted unset namespace"
+      else
+        out=$("${scratch[@]}" FM_V2_REGISTRY_NAMESPACE="$namespace" ROOT="$ROOT" LAB="$lab" node "$ROOT/tests/$fixture" 2>&1) && fail "standalone $fixture accepted $namespace namespace"
+      fi
+      [[ "$out" == *refusing*registry*namespace* ]] || fail "standalone guard was not the refusal: $out"
+      [ "$(find "$home/.local/state/shuvbro/opencode-v2" -type f | wc -l)" = 1 ] || fail "standalone fixture wrote to disposable default registry"
+      [ "$(cat "$home/.local/state/shuvbro/opencode-v2/default/sentinel")" = 'untouched sentinel' ] || fail "standalone fixture changed default contents"
+      [ ! -e "$lab" ] || fail "standalone fixture mutated its lab before registry guard"
+    done
+  done
+  pass "positive OS-user-home redirect and standalone refusal preserve scratch default even when HOME differs"
+}
+test_standalone_registry_guard
+
+test_inherited_lock_registry_boundary() {
+  local home="$TMP_ROOT/lock-registry-home" trace="$TMP_ROOT/lock-registry.trace" out
+  mkdir -p "$home/.local/state/shuvbro/opencode-v2/default"
+  printf 'lock sentinel\n' > "$home/.local/state/shuvbro/opencode-v2/default/sentinel"
+  # The child shell, not this fixture, expands its identity and root variables.
+  # shellcheck disable=SC2016
+  out=$(env -u FM_V2_TEST_NAMESPACE_FILE OPENCODE_SESSION_ID=ses_inherited_registry_probe FM_V2_ACTIVATION=inherited-probe FM_V2_REGISTRY_NAMESPACE=default \
+    FM_V2_TEST_SCRATCH_HOME="$home" NODE_OPTIONS="--import=$ROOT/tests/assets/fm-opencode-v2-scratch-home.mjs" \
+    bash -c '. "$1/tests/lib.sh"; [ -z "${OPENCODE_SESSION_ID:-}" ] && [ -z "${FM_V2_ACTIVATION:-}" ] || exit 91; node --input-type=module -e '\''import {pathToFileURL} from "node:url"; const owner=await import(pathToFileURL(process.argv[1]+"/bin/fm-opencode-v2-owner.mjs")); console.log(owner.registry());'\'' "$1"' _ "$ROOT" 2>&1) || fail "common native boundary positive control failed: $out"
+  [[ "$out" == *"$home/.local/state/shuvbro/opencode-v2/fmtest"* ]] || fail "common boundary did not replace inherited default"
+  [ "$(find "$home/.local/state/shuvbro/opencode-v2" -mindepth 1 -maxdepth 1 -type d | wc -l)" = 1 ] || fail "common native namespace survived exit cleanup"
+  if ! command -v strace >/dev/null; then
+    printf 'skip: inherited lock registry access trace requires strace\n'
+    return
+  fi
+  out=$(env -u FM_V2_TEST_NAMESPACE_FILE OPENCODE_SESSION_ID=ses_inherited_registry_probe FM_V2_ACTIVATION=inherited-probe FM_V2_REGISTRY_NAMESPACE=default \
+    FM_V2_TEST_SCRATCH_HOME="$home" NODE_OPTIONS="--import=$ROOT/tests/assets/fm-opencode-v2-scratch-home.mjs" \
+    strace -f -e trace=%file -o "$trace" bash "$ROOT/tests/fm-session-lock-ancestry.test.sh" 2>&1) || fail "inherited lock-path suite failed: $out"
+  [[ "$out" == *'ok -'* ]] || fail "lock-path regression exercised no cases"
+  if grep -F "$V2_REGISTRY_HOME/.local/state/shuvbro/opencode-v2" "$trace" >/dev/null \
+    || grep -F "$home/.local/state/shuvbro/opencode-v2/default" "$trace" >/dev/null; then
+    fail "inherited lock-path script accessed real registry or scratch default"
+  fi
+  [ "$(find "$home/.local/state/shuvbro/opencode-v2" -type f | wc -l)" = 1 ] || fail "lock-path suite wrote registry records"
+  [ "$(cat "$home/.local/state/shuvbro/opencode-v2/default/sentinel")" = 'lock sentinel' ] || fail "lock-path suite changed default"
+  pass "inherited native identity is stripped at common setup; lock-path access trace touches neither real registry nor scratch default"
+}
+test_inherited_lock_registry_boundary
+
+test_watcher_subshell_count() {
+  [ -d /proc/$$ ] || { printf 'skip: watcher process count regression requires procfs\n'; return; }
+  local script role pid second child ready _ old new
+  for role in fm-watch fm-watch-arm; do
+    script="$TMP_ROOT/count-$role/bin/$role.sh"
+    mkdir -p "$(dirname "$script")"
+    cat > "$script" <<'SH'
+while :; do
+  x=$(printf '%s\n' "$BASHPID" > "$1"; while [ ! -e "$2" ]; do sleep 0.1; done; printf y)
+done
+SH
+    ready="$TMP_ROOT/$role-child"
+    bash "$script" "$ready" "$TMP_ROOT/never-ready" & pid=$!
+    v2_track "$pid"
+    for _ in $(seq 1 100); do [ -s "$ready" ] && break; sleep 0.02; done
+    [ -s "$ready" ] || fail "count fixture did not start its command substitution"
+    child=$(cat "$ready"); v2_track "$child"
+    old=$(pgrep -f "^bash $script" | wc -l)
+    new=$(v2_script_process_count "$script")
+    [ "$old" = 2 ] && [ "$new" = 1 ] || fail "$role count reproduction expected old=2 new=1; got old=$old new=$new"
+    singleton_fixture() { [ "$(v2_script_process_count "$script")" = 1 ]; }
+    v2_confirm_singleton singleton_fixture || fail "one $role plus its command substitution failed singleton confirmation"
+    bash "$script" "$ready-second" "$TMP_ROOT/never-ready" & second=$!
+    v2_track "$second"
+    for _ in $(seq 1 100); do [ -s "$ready-second" ] && break; sleep 0.02; done
+    [ -s "$ready-second" ] || fail "second count fixture did not start"
+    v2_track "$(cat "$ready-second")"
+    [ "$(v2_script_process_count "$script")" = 2 ] || fail "real second $role was hidden"
+    if v2_confirm_singleton singleton_fixture; then fail "persistent duplicate $role passed singleton confirmation"; fi
+    kill "$pid" "$child" "$second" "$(cat "$ready-second")" 2>/dev/null || true
+    wait "$pid" "$second" 2>/dev/null || true
+    pass "$role reproduction: old count=2 new count=1 for one parent plus subshell; genuine duplicate=2 and fails stable singleton check"
+  done
+}
+test_watcher_subshell_count
 
 test_native_exact_owner_and_transport() {
   local out
@@ -230,6 +333,7 @@ const owner=await import(pathToFileURL(root+'/bin/fm-opencode-v2-owner.mjs'));
 const session=await import(pathToFileURL(root+'/bin/fm-opencode-v2-session.mjs'));
 const me=owner.identity(process.pid),endpoint='http://127.0.0.1:23456';
 process.env.FM_V2_REGISTRY_NAMESPACE='test-endpoint-'+process.pid;
+fs.appendFileSync(process.env.FM_V2_TEST_NAMESPACE_FILE, process.env.FM_V2_REGISTRY_NAMESPACE+'\n');
 process.env.FIXTURE_STATE=lab+'/native';process.env.FIXTURE_PID=String(process.pid);process.env.FIXTURE_ROOT=root;process.env.FIXTURE_LOG=lab+'/api.log';process.env.FIXTURE_ACTIVE=lab+'/active';
 fs.writeFileSync(lab+'/native/service.json',JSON.stringify({pid:me.pid,url:endpoint,password:'private-fixture'}),{mode:0o600});
 fs.writeFileSync(lab+'/bin/shuvcode',`#!/usr/bin/env node
