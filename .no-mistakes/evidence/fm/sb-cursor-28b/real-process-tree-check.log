@@ -1,0 +1,25 @@
+--- A: pane shell -> treehouse -> lone idle zsh -l (issue #31 shape)
+    PID    PPID STAT COMMAND
+3182287 3182279 S     \_ bash /tmp/tmp.YMUJRUab6F/run.25685.sh
+3182288 3182287 S     |   \_ treehouse -c ZDOTDIR=/tmp/tmp.YMUJRUab6F/zd zsh -l </tmp/tmp.YMUJRUab6F/fifo.24990 >/dev/null 2>&1; true
+3182289 3182288 S     |       \_ zsh -l
+stale registration: shuvcode/idle
+  agent_state(opencode-v2) => dead   [expect dead]
+  agent_state(no harness)  => alive   [legacy view]
+--- B: pane shell -> non-Treehouse intermediate (script) -> zsh -l
+    PID    PPID STAT COMMAND
+3184956 3182279 S     \_ bash /tmp/tmp.YMUJRUab6F/run.31573.sh
+3184966 3184956 S     |   \_ script -c ZDOTDIR=/tmp/tmp.YMUJRUab6F/zd zsh -l </tmp/tmp.YMUJRUab6F/fifo.22628 >/dev/null 2>&1; true
+3184970 3184966 S     |       \_ zsh -l
+stale registration: shuvcode/idle
+  agent_state(opencode-v2) => ambiguous   [expect ambiguous]
+  agent_state(no harness)  => alive   [legacy view]
+--- C: pane shell -> treehouse -> treehouse -> zsh -l (two hops)
+    PID    PPID STAT COMMAND
+3187925 3182279 S     \_ bash /tmp/tmp.YMUJRUab6F/run.25993.sh
+3187926 3187925 S     |   \_ treehouse -c (exec -a treehouse bash -c ZDOTDIR=/tmp/tmp.YMUJRUab6F/zd\ zsh\ -l\ \</tmp/tmp.YMUJRUab6F/fifo.11117\ \>/dev/null\ 2\>\&1\;\ true); true; true
+3187927 3187926 S     |       \_ treehouse -c ZDOTDIR=/tmp/tmp.YMUJRUab6F/zd zsh -l </tmp/tmp.YMUJRUab6F/fifo.11117 >/dev/null 2>&1; true
+3187928 3187927 S     |           \_ zsh -l
+stale registration: shuvcode/idle
+  agent_state(opencode-v2) => ambiguous   [expect ambiguous]
+  agent_state(no harness)  => alive   [legacy view]
