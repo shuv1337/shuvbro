@@ -96,7 +96,8 @@ start_board() {  # <home>
   [ "${#BOARD_TOKEN}" -eq 64 ] || fail "the served page carried no answer token"
 }
 
-# http <method> <path> <headers-json> [<body>] prints the status line, then the body.
+# http <method> <path> <headers-json> [<body>] prints the status code, the
+# response headers as one JSON line, then the body.
 http() {
   # shellcheck disable=SC2016  # JavaScript template literals, not shell expansions.
   node -e '
@@ -249,7 +250,7 @@ EOF
     (.queued | map({key: .id, value: .note}) | from_entries) == {
       "call-dated": "back to you on 2026-08-01",
       "call-blocked": "back to you after migration-task",
-      "plain-queued": "after work-gated"}
+      "plain-queued": "after Ship the widget"}
     and (.done | length) == 12 and .done[0].pr == "https://github.com/sample/repo/pull/100"
     and .fyi == [{text: "A release is pending", detail: null, link: "https://example.com/r"},
                  {text: "Unsafe link dropped", detail: null, link: null}]
@@ -489,7 +490,7 @@ test_a_home_that_never_opts_in_is_untouched() {
   grep -F "not serving" "$home/../opt-out-status.out" >/dev/null || fail "status did not say no board is running"
   in_home "$home" "$BOARD" model > "$TMP_ROOT/opt-out-model.json" || fail "the read-only model failed"
   in_home "$home" "$BOARD" unit > "$TMP_ROOT/opt-out-unit.txt" || fail "the unit printer failed"
-  grep -F "ExecStart=$ROOT/bin/fm-board.sh serve" "$TMP_ROOT/opt-out-unit.txt" >/dev/null \
+  grep -F "ExecStart=\"$ROOT/bin/fm-board.sh\" serve" "$TMP_ROOT/opt-out-unit.txt" >/dev/null \
     || fail "the printed unit does not run this home's board"
   changed=$(find "$home" -newer "$stamp" ! -type d -print)
   [ -z "$changed" ] || fail "reading the board for a home that never serves one wrote files: $changed"

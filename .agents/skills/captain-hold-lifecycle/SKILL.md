@@ -52,6 +52,7 @@ Bearings reads the resulting structured state and must never compensate by scrap
 A captain inbox note that begins `Live board answer for <task>` carries an answer the live board already recorded through `answers`, or a Later the board already deferred with `hold --until`, so never run `answer` for it again.
 Treat it as the captain's word on exactly the question the card showed, under every `AGENTS.md` authority rule: a Yes on a card whose question named one concrete merge or other boundary-crossing action is the captain's explicit word for that action only, and anything broader still needs the captain in chat.
 A typed reply that asks something back or changes the ask is recorded but not settled: re-hold released work with the follow-up, or hold a new task when the question row closed, and relay it in chat.
+The board releases held work whatever the answer, so when the answer does not approve that work going ahead - a No, or a reply that defers or changes it - re-hold or retire the work before the queue is next re-evaluated.
 A Later needs nothing beyond the date it already carries.
 Acknowledge the note with `bin/fm-inbox.sh drain --ack <id>` once it is handled.
 

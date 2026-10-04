@@ -279,11 +279,10 @@ project_model() {  # <snapshot-file> <notes-json> <errors-json>
              title: ((.title // .id) | trunc(300)),
              repo: (.repo | text_or_null),
              links: [ (.links // [])[] | select(web_link) ],
-             note: (if .hold_kind == "captain" and .hold_bucket == "dated" then "back to you on \(.hold_until)"
-                    elif .hold_kind == "captain" and .hold_bucket == "blocked" then
-                      "back to you after \(.unresolved_blocker_ids | join(", "))"
-                    elif ((.unresolved_blocker_ids // []) | length) > 0 then
-                      "after \(.unresolved_blocker_ids | join(", "))"
+             note: (([ (.unresolved_blocker_ids // [])[] | ($by_id[.].title // .) ] | join(", ")) as $after
+               | if .hold_kind == "captain" and .hold_bucket == "dated" then "back to you on \(.hold_until)"
+                    elif .hold_kind == "captain" and .hold_bucket == "blocked" then "back to you after \($after)"
+                    elif $after != "" then "after \($after)"
                     elif .hold_reason != null then "on hold: \(.hold_reason)"
                     else null end)} ],
         done: ([ $records[] | select(.state == "done") ][:12]
@@ -522,6 +521,7 @@ EOF
       summary=$label
       label="$label - in reply to: $reason"
     fi
+    label=$(printf '%s' "$label" | tr '\t\r\n' '   ')
     out=$(printf '%s\t%s\t%s\t%s\n' "$id" "$answer_value" "$label" "$mode" \
       | "$SCRIPT_DIR/fm-captain-hold.sh" answers --source "$source" 2>/dev/null) || true
     if ! printf '%s\n' "$out" | grep -Fxq "closed: $id"; then
@@ -628,18 +628,23 @@ command_status() {
   exit 1
 }
 
+# systemd reads % as a specifier and needs quotes around values with spaces.
+unit_value() {  # <text>
+  printf '%s' "$1" | sed -e 's/%/%%/g' -e 's/\\/\\\\/g' -e 's/"/\\"/g'
+}
+
 command_unit() {
   [ "$#" -eq 0 ] || { usage >&2; exit 2; }
   cat <<EOF
 [Unit]
-Description=shuvbro live board for $FM_HOME
+Description=shuvbro live board for $(unit_value "$FM_HOME")
 After=network.target
 
 [Service]
 Type=simple
-Environment=FM_HOME=$FM_HOME
-Environment=PATH=$PATH
-ExecStart=$SCRIPT_DIR/fm-board.sh serve
+Environment="FM_HOME=$(unit_value "$FM_HOME")"
+Environment="PATH=$(unit_value "$PATH")"
+ExecStart="$(unit_value "$SCRIPT_DIR/fm-board.sh")" serve
 Restart=on-failure
 RestartSec=5
 

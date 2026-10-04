@@ -9,7 +9,7 @@ A home that never starts it behaves exactly as before.
 `bin/fm-board.sh serve` runs the board for the active `FM_HOME` in the foreground at `http://127.0.0.1:8795/`.
 It listens on the loopback interface only, never on a network address.
 Each home on one host needs its own port, set in `config/board-port` or `FM_BOARD_PORT`.
-`bin/fm-board.sh status` says whether this home's board is answering, and refuses to start a second board for a home that already has one.
+`bin/fm-board.sh status` says whether this home's board is answering, and `serve` refuses to start a second board for a home that already has one.
 `bin/fm-board.sh unit` prints a systemd user unit that keeps the board running; save it under `~/.config/systemd/user/` and enable it yourself.
 The board needs `node` and `jq` beyond the usual toolbelt, and it adds no npm dependency.
 [Configuration](configuration.md#live-board-configboard-port-configboard-hosts-configboard-logins-databoard-notesjson) owns the schema of every file named here.
