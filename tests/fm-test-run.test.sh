@@ -25,8 +25,9 @@ test_list_all_exact_suite_coverage() {
     done | LC_ALL=C sort
   )
   [ -n "$listed" ] || fail "--list --all printed nothing"
-  missing=$(comm -23 <(printf '%s\n' "$expected") <(printf '%s\n' "$listed") || true)
-  extra=$(comm -13 <(printf '%s\n' "$expected") <(printf '%s\n' "$listed") || true)
+  # GNU comm checks order in the active locale, so it must match the C sorts.
+  missing=$(LC_ALL=C comm -23 <(printf '%s\n' "$expected") <(printf '%s\n' "$listed") || true)
+  extra=$(LC_ALL=C comm -13 <(printf '%s\n' "$expected") <(printf '%s\n' "$listed") || true)
   [ -z "$missing" ] || fail "--list --all missing scripts: $missing"
   [ -z "$extra" ] || fail "--list --all unexpected scripts: $extra"
   # No duplicates.
@@ -972,6 +973,7 @@ test_exclude_family() {
 
 test_portable_shard_union_and_coverage_guard() {
   local s1 s2 proven serial herdr all_count union_count overlap out first
+  local utf8_locale cov_err msg
   s1=$("$RUNNER" --list --lane portable-parallel-1)
   s2=$("$RUNNER" --list --lane portable-parallel-2)
   proven=$("$RUNNER" --list --proven-isolated)
@@ -979,7 +981,7 @@ test_portable_shard_union_and_coverage_guard() {
   herdr=$("$RUNNER" --list --family real-herdr-gated)
   [ -n "$s1" ] && [ -n "$s2" ] || fail "portable parallel shards must be non-empty"
   # Shards disjoint.
-  overlap=$(comm -12 <(printf '%s\n' "$s1" | LC_ALL=C sort) <(printf '%s\n' "$s2" | LC_ALL=C sort) || true)
+  overlap=$(LC_ALL=C comm -12 <(printf '%s\n' "$s1" | LC_ALL=C sort) <(printf '%s\n' "$s2" | LC_ALL=C sort) || true)
   [ -z "$overlap" ] || fail "portable parallel shards overlap: $overlap"
   # Union of shards equals proven-isolated.
   [ "$(printf '%s\n' "$s1" "$s2" | LC_ALL=C sort -u)" = \
@@ -990,7 +992,25 @@ test_portable_shard_union_and_coverage_guard() {
     && fail "portable lanes must not include real-herdr-gated smoke"
   printf '%s\n' "$herdr" | grep -Fq 'tests/fm-backend-herdr-smoke.test.sh' \
     || fail "herdr family must include smoke"
-  out=$("$RUNNER" --check-coverage)
+  # en_US.UTF-8 collation disagrees with C byte order on these paths.
+  # Run the guard in that locale when it is installed so a C-locale CI
+  # job still catches a comm that was sorted with LC_ALL=C and compared
+  # in the ambient locale.
+  utf8_locale=$(locale -a 2>/dev/null | grep -E '^(en_US\.utf8|en_US\.UTF-8)$' | head -n 1 || true)
+  cov_err=$(mktemp "${TMPDIR:-/tmp}/fm-test-run-cov.XXXXXX")
+  if [ -n "$utf8_locale" ]; then
+    out=$(LC_ALL="$utf8_locale" "$RUNNER" --check-coverage 2>"$cov_err") \
+      || { msg=$(cat "$cov_err"); rm -f "$cov_err"; fail "coverage guard must succeed under $utf8_locale: $msg"; }
+  else
+    out=$("$RUNNER" --check-coverage 2>"$cov_err") \
+      || { msg=$(cat "$cov_err"); rm -f "$cov_err"; fail "coverage guard must succeed: $msg"; }
+  fi
+  if grep -q 'not in sorted order' "$cov_err"; then
+    msg=$(cat "$cov_err")
+    rm -f "$cov_err"
+    fail "coverage guard must not warn about sort order: $msg"
+  fi
+  rm -f "$cov_err"
   assert_contains "$out" "FM_TEST_COVERAGE ok" "coverage guard success marker"
   all_count=$("$RUNNER" --list --all | wc -l | tr -d ' ')
   union_count=$(printf '%s\n' "$s1" "$s2" "$serial" "$herdr" | LC_ALL=C sort -u | wc -l | tr -d ' ')
