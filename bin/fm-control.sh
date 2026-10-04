@@ -101,6 +101,9 @@
 #   FM_CONTROL_EXIT_WAIT         alive->dead wait after the exit command (30)
 #   FM_CONTROL_LAUNCH_WAIT       dead->alive wait after a relaunch (90)
 #   FM_CONTROL_EXIT_RETRIES      Enter retries for the exit command (3)
+#   FM_CONTROL_EXIT_SETTLE       pause after typing the exit command, before
+#                                its dismiss key and Enter (1.2). Codex needs
+#                                the slash popup to exist before Escape.
 set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -152,6 +155,7 @@ SETTLE_WAIT=${FM_CONTROL_SETTLE_WAIT:-5}
 EXIT_WAIT=${FM_CONTROL_EXIT_WAIT:-30}
 LAUNCH_WAIT=${FM_CONTROL_LAUNCH_WAIT:-90}
 EXIT_RETRIES=${FM_CONTROL_EXIT_RETRIES:-3}
+EXIT_SETTLE=${FM_CONTROL_EXIT_SETTLE:-1.2}
 
 die() {  # <message>
   echo "error: $1" >&2
@@ -522,13 +526,23 @@ do_exit() {
       ;;
   esac
   cmd=$(fm_control_exit_command "$HARNESS")
+  dismiss=$(fm_control_exit_dismiss_key "$HARNESS") \
+    || die "task $ID records harness '${HARNESS:-none}', which has no verified exit dismiss mechanics; fm-control refuses to guess one"
+  # Orca can deliver Enter but not Escape. Skip the dismiss there rather than
+  # failing the whole exit; the Enter retry remains.
+  if [ -n "$dismiss" ] && ! fm_control_backend_supports_key "$BACKEND" "$dismiss"; then
+    dismiss=
+  fi
   # The submit verdict is NOT the postcondition here: a successful exit command
   # destroys the composer the verdict is read from, so a post-exit read can
   # legitimately report anything. Only a hard transport failure aborts; the
   # authoritative proof is the agent-state wait below. The retried Enter still
   # matters, because a slash command opens a completion popup on some TUIs that
-  # swallows the first Enter.
-  verdict=$(fm_backend_send_text_submit "$BACKEND" "$T" "$cmd" "$EXIT_RETRIES" "$POLL" 1.2 "$LABEL") \
+  # swallows the first Enter. Codex's popup keeps swallowing every Enter while
+  # it is open, so FM_CONTROL_EXIT_DISMISS_KEY is sent before each of those
+  # Enters (fm_control_exit_dismiss_key).
+  verdict=$(FM_CONTROL_EXIT_DISMISS_KEY=$dismiss \
+    fm_backend_send_text_submit "$BACKEND" "$T" "$cmd" "$EXIT_RETRIES" "$POLL" "$EXIT_SETTLE" "$LABEL") \
     || die "the exit command could not be sent to task $ID on $BACKEND"
   [ "$verdict" != send-failed ] \
     || die "the exit command could not be sent to task $ID on $BACKEND"

@@ -7,7 +7,7 @@ Verified on 2026-06-11 with codex-cli 0.139.0 unless a fact gives a newer versio
 | Fact | Value |
 |---|---|
 | Busy state | Unknown until a semantic source is live-verified: the app-server turn lifecycle is unreachable for a pane worker, and project lifecycle hooks did not fire for a Firstmate-launched worker. |
-| Exit command | `/quit`; its slash popup needs about one second between text and Enter, which the shared submit path used by the control plane handles. |
+| Exit command | `/quit`, after Escape dismisses the slash popup that appears about one second after the command is typed. |
 | Interrupt | Single Escape. |
 | Skill invocation | `$<skill>`, for example `$no-mistakes`; `/<skill>` is Claude-only and Codex rejects it as "Unrecognized command". |
 | Resume | `codex resume <session-id>`, using the id printed on quit. |
@@ -18,6 +18,16 @@ Verified on 2026-06-11 with codex-cli 0.139.0 unless a fact gives a newer versio
 A directory trust dialog appears on the first run for a repository root: "Do you trust the contents of this directory?"
 Accept it with Enter and verify the instructions begin processing.
 The decision persists for the repository, so later worktrees of the same project skip it.
+
+## Exit popup
+
+An exact `/quit` draft opens the slash popup on the row `/quit` with the description `exit Codex`.
+Enter while that popup is open is consumed by the completion row.
+The composer keeps `/quit` and the row stays visible, so the process keeps running.
+Escape dismisses the popup and leaves the draft unchanged.
+The following Enter runs the bare `/quit` command.
+`bin/fm-control.sh` waits about one second after typing, then sends Escape before each submit Enter (`fm_control_exit_dismiss_key` in `bin/fm-control-lib.sh`).
+Checked against the Codex TUI composer on 2026-10-04: `handle_key_event_with_slash_popup` dismisses on Escape without editing the draft, and a bare `/quit` plus Enter dispatches quit once the popup is gone.
 
 ## Skill popup
 
