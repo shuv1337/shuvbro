@@ -823,6 +823,48 @@ test_arm_hup_cleans_child_and_temp_output() {
   pass "arm cleans child watcher and temp output on HUP"
 }
 
+test_arm_term_during_poll_sleep_retires_promptly() {
+  # Plugins retire an arm with SIGTERM and wait, under a short deadline, for
+  # its output pipe to close. A watcher idling in its cycle wait must honor the
+  # signal at once, and no orphaned sleep may keep that pipe open, so the whole
+  # chain closes in a small fraction of the poll interval.
+  local dir state fakebin armout fifo eof armpid lock_pid i status poll=60 bound=100
+  dir=$(make_case arm-term-poll-sleep)
+  state="$dir/state"
+  fakebin="$dir/fakebin"
+  armout="$dir/arm.out"
+  fifo="$dir/arm.fifo"
+  eof="$dir/arm.eof"
+  [ $((bound / 10)) -lt "$poll" ] || fail "retirement bound must be shorter than the poll interval it proves is interrupted"
+  mkfifo "$fifo" || fail "could not create arm output fifo"
+  { cat "$fifo" > "$armout"; touch "$eof"; } &
+  PATH="$fakebin:$PATH" FM_HOME="$dir" FM_STATE_OVERRIDE="$state" FM_POLL="$poll" FM_SIGNAL_GRACE=1 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$WATCH_ARM" > "$fifo" 2>&1 &
+  armpid=$!
+  i=0
+  while [ "$i" -lt 80 ]; do
+    grep -qF 'watcher: started pid=' "$armout" 2>/dev/null && break
+    sleep 0.1
+    i=$((i + 1))
+  done
+  grep -qF 'watcher: started pid=' "$armout" || fail "arm did not start before the TERM retirement check"
+  lock_pid=$(cat "$state/.watch.lock/pid" 2>/dev/null || true)
+  # Let the first cycle finish so the watcher is parked in its poll wait.
+  sleep 1
+  is_live_non_zombie "$lock_pid" || fail "watcher exited before the TERM retirement check"
+  kill -TERM "$armpid" 2>/dev/null || fail "could not send TERM to arm"
+  i=0
+  while [ "$i" -lt "$bound" ] && [ ! -e "$eof" ]; do
+    sleep 0.1
+    i=$((i + 1))
+  done
+  [ -e "$eof" ] || fail "arm output pipe stayed open past $((bound / 10))s after TERM while the watcher slept a ${poll}s poll"
+  wait_for_exit "$armpid" 20
+  status=$?
+  [ "$status" -eq 143 ] || fail "arm did not exit with TERM status (got $status)"
+  ! is_live_non_zombie "$lock_pid" || fail "TERM retirement left the watcher running"
+  pass "arm TERM during the watcher's poll wait retires the arm, watcher and output pipe promptly"
+}
+
 test_arm_propagates_immediate_wake_before_confirmation() {
   local dir state fakebin armout drain_out check_file rc
   dir=$(make_case arm-immediate-wake)
@@ -1227,6 +1269,7 @@ test_arm_attaches_and_waits_for_live_fresh_watcher
 test_attached_arm_signal_is_recorded_in_cycle_ledger
 test_arm_starts_and_self_heals
 test_arm_hup_cleans_child_and_temp_output
+test_arm_term_during_poll_sleep_retires_promptly
 test_arm_propagates_immediate_wake_before_confirmation
 test_arm_waits_for_peer_beacon_after_child_stands_down
 test_arm_fails_loud_when_no_fresh_watcher_confirmable

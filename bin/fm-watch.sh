@@ -1606,6 +1606,19 @@ heartbeat_scan_finds_actionable() {
   return "$found"
 }
 
+# watch_sleep: the watcher's cycle and signal-grace waits. Bash defers a trap
+# until a foreground child exits, so a foreground `sleep POLL` held a
+# HUP/INT/TERM exit - and with it the arm's retirement - for up to POLL seconds.
+# Waiting on a background sleep lets the trap run at once; watcher_cleanup reaps
+# the sleep so it cannot keep the arm's inherited output pipes open afterwards.
+WATCH_SLEEP_PID=
+watch_sleep() {
+  sleep "$1" &
+  WATCH_SLEEP_PID=$!
+  wait "$WATCH_SLEEP_PID" 2>/dev/null || true
+  WATCH_SLEEP_PID=
+}
+
 # event_wait_or_sleep: the terminal wait of each supervision cycle. For a home
 # with push-capable windows (herdr), it replaces the blind `sleep POLL` with a
 # bounded wait on the backend's native transition stream, so a crew going
@@ -1640,7 +1653,7 @@ event_wait_or_sleep() {
   done < <(recorded_windows)
 
   if [ "${#windows[@]}" -eq 0 ]; then
-    sleep "$POLL"
+    watch_sleep "$POLL"
     return
   fi
 
@@ -1656,7 +1669,7 @@ event_wait_or_sleep() {
     _event_cap_fails=0
   fi
   if [ "$_event_cap_ok" != 1 ]; then
-    sleep "$POLL"
+    watch_sleep "$POLL"
     return
   fi
 
@@ -1673,7 +1686,7 @@ event_wait_or_sleep() {
       # pure polling for the rest of this watcher process.
       _event_cap_fails=$((_event_cap_fails + 1))
       [ "$_event_cap_fails" -ge "$EVENT_CAP_FAIL_MAX" ] && _event_cap_ok=0
-      sleep "$POLL"
+      watch_sleep "$POLL"
       ;;
     *)
       # 1: a clean full-budget wait with no actionable edge - the reader already
@@ -1794,6 +1807,7 @@ watcher_cleanup() {
       transition=release-lock-existing
     fi
   fi
+  [ -z "${WATCH_SLEEP_PID:-}" ] || kill "$WATCH_SLEEP_PID" 2>/dev/null || true
   fm_active_check_stop || cleanup_status=1
   fm_check_output_cleanup
   fm_custom_check_snapshot_cleanup
@@ -2009,7 +2023,7 @@ while :; do
   # signature for an already-pending file (last write wins below).
   pending=$(scan_signals)
   if [ -n "$pending" ]; then
-    sleep "$SIGNAL_GRACE"
+    watch_sleep "$SIGNAL_GRACE"
     pending=$(printf '%s\n%s' "$pending" "$(scan_signals)")
     # The final coalesced signal set is the watcher-carried status-change
     # trigger for this home's published summary. Start it before either
