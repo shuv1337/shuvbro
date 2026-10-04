@@ -389,7 +389,18 @@ run_v2_state() {  # <dir> <harness>
   fb=$(make_herdr_fakebin "$dir")
   PATH="$fb:$PATH" FM_HERDR_LOG="$dir/log" FM_HERDR_RESPONSES="$dir/responses" \
     FM_HERDR_PS_BIN="$dir/ps" FM_BACKEND_HERDR_IDLE_SHELL_PROOF_POLLS=3 \
-    bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_agent_state default:w1:p2 "$1"' "$ROOT" "$2"
+    bash -c '
+      . "$0/bin/backends/herdr.sh"
+      case "${2:-state}" in
+        husk) fm_backend_herdr_tab_is_husk default w1:p2 "$1" && printf husk ;;
+        ring)
+          . "$0/bin/fm-task-inbox-lib.sh"
+          fm_task_inbox_ring herdr default:w1:p2 /missing/001.msg fm-test "$1"
+          printf "%s" "$?"
+          ;;
+        *) fm_backend_herdr_agent_state default:w1:p2 "$1" ;;
+      esac
+    ' "$ROOT" "$2" "${3:-state}"
 }
 
 v2_state_case() {  # <name> -> echoes a fresh case dir
@@ -458,6 +469,85 @@ test_opencode_v2_agent_state_settles_a_prompt_helper() {
   out=$(run_v2_state "$dir" opencode-v2)
   [ "$out" = ambiguous ] || fail "a pane busy with another foreground process must read ambiguous, got '$out'"
   pass "fm_backend_herdr_agent_state: an opencode-v2 pane settles past a prompt helper but never past a busy foreground"
+}
+
+test_stale_shuvcode_registration_cannot_confirm_replacement() {
+  local dir out
+  dir=$(v2_state_case stale-switch)
+  printf '{"result":{"pane":{"pane_id":"w1:p2"}}}\n' > "$dir/responses/1.out"
+  printf '{"result":{"agent":{"agent":"shuvcode","agent_status":"idle"}}}\n' > "$dir/responses/2.out"
+  v2_process_info_fixture w1:p2 22712 22712 '[{"pid":22712,"name":"zsh","argv":["-zsh"]}]' > "$dir/responses/3.out"
+  cp "$dir/responses/3.out" "$dir/responses/4.out"
+  out=$(run_v2_state "$dir" claude)
+  [ "$out" = dead ] || fail "a stale shuvcode registration over a shell cannot confirm a replacement claude, got '$out'"
+  dir=$(v2_state_case stale-switch-live)
+  printf '{"result":{"pane":{"pane_id":"w1:p2"}}}\n' > "$dir/responses/1.out"
+  printf '{"result":{"agent":{"agent":"shuvcode","agent_status":"working"}}}\n' > "$dir/responses/2.out"
+  v2_process_info_fixture w1:p2 22712 40069 "$V2_LIVE_FOREGROUND" > "$dir/responses/3.out"
+  out=$(run_v2_state "$dir" codex)
+  [ "$out" = ambiguous ] || fail "a surviving shuvcode must not count as the requested codex replacement, got '$out'"
+  dir=$(v2_state_case fresh-switch)
+  printf '{"result":{"pane":{"pane_id":"w1:p2"}}}\n' > "$dir/responses/1.out"
+  printf '{"result":{"agent":{"agent":"claude","agent_status":"working"}}}\n' > "$dir/responses/2.out"
+  out=$(run_v2_state "$dir" claude)
+  [ "$out" = alive ] || fail "a newly registered replacement must read alive, got '$out'"
+  pass "Herdr harness switch: the exited shuvcode registration cannot confirm a replacement"
+}
+
+test_exited_v2_husk_and_doorbell_use_recorded_harness() {
+  local dir out mode
+  for mode in husk ring; do
+    dir=$(v2_state_case "consumer-$mode")
+    printf '{"result":{"pane":{"pane_id":"w1:p2"}}}\n' > "$dir/responses/1.out"
+    v2_process_info_fixture w1:p2 22712 22712 '[{"pid":22712,"name":"zsh","argv":["-zsh"]}]' > "$dir/responses/2.out"
+    cp "$dir/responses/2.out" "$dir/responses/3.out"
+    out=$(run_v2_state "$dir" opencode-v2 "$mode")
+    case "$mode:$out" in husk:husk|ring:3) ;; *) fail "exited v2 $mode consumer returned '$out'" ;; esac
+    assert_not_contains "$(cat "$dir/log")" $'agent\x1fget' "the consumer must select the recorded adapter's process proof"
+  done
+  pass "Herdr exited worker: husk and doorbell consumers use recorded-harness evidence"
+}
+
+test_opencode_v2_nested_worktree_shell() {
+  local dir out n
+  dir=$(v2_state_case nested-worktree)
+  cat > "$dir/ps" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  "-axo pid=,ppid=") printf '1 0\n22712 1\n28000 22712\n30000 28000\n' ;;
+  "-p 30000 -o stat=") printf 'Ss+\n' ;;
+  *) exit 1 ;;
+esac
+SH
+  printf '{"result":{"pane":{"pane_id":"w1:p2"}}}\n' > "$dir/responses/1.out"
+  for n in 2 3 4 5; do
+    v2_process_info_fixture w1:p2 22712 30000 '[{"pid":30000,"name":"zsh","argv":["zsh","-l"]}]' > "$dir/responses/$n.out"
+  done
+  out=$(run_v2_state "$dir" opencode-v2)
+  [ "$out" = dead ] || fail "a lone idle worktree shell descending from the pane shell must read dead, got '$out'"
+  # An agent sharing that nested foreground group is still positively alive.
+  printf '0\n' > "$dir/responses/.count"
+  v2_process_info_fixture w1:p2 22712 30000 "$V2_LIVE_FOREGROUND" > "$dir/responses/2.out"
+  out=$(run_v2_state "$dir" opencode-v2)
+  [ "$out" = alive ] || fail "a live shuvcode below the worktree wrapper must read alive, got '$out'"
+  # A script shell is not an interactive prompt, even with matching ancestry.
+  printf '0\n' > "$dir/responses/.count"
+  for n in 2 3 4 5; do
+    v2_process_info_fixture w1:p2 22712 30000 '[{"pid":30000,"name":"zsh","argv":["zsh","-c","read input"]}]' > "$dir/responses/$n.out"
+  done
+  out=$(run_v2_state "$dir" opencode-v2)
+  [ "$out" = ambiguous ] || fail "a descendant script shell must not prove an idle interactive prompt, got '$out'"
+  # A sibling process under the wrapper keeps the ancestry proof ambiguous.
+  printf '0\n' > "$dir/responses/.count"
+  for n in 2 3 4 5; do
+    v2_process_info_fixture w1:p2 22712 30000 '[{"pid":30000,"name":"zsh","argv":["zsh","-l"]}]' > "$dir/responses/$n.out"
+  done
+  sed "s/28000 22712/28000 22712\\\\n28001 28000/" "$dir/ps" > "$dir/ps.next"
+  mv "$dir/ps.next" "$dir/ps"
+  chmod +x "$dir/ps"
+  out=$(run_v2_state "$dir" opencode-v2)
+  [ "$out" = ambiguous ] || fail "a wrapper with another child cannot prove the agent gone, got '$out'"
+  pass "Herdr worktree wrapper: the lone descendant foreground shell proves the agent exited"
 }
 
 test_opencode_v2_agent_state_never_guesses_agent_free() {
@@ -4809,6 +4899,9 @@ test_workspace_label_different_secondmates_get_different_labels
 test_cli_helper_sets_env_and_appends_trailing_session_flag
 test_agent_state_bypasses_a_stale_client_shadowing_a_compatible_one
 test_opencode_v2_agent_state_reads_foreground_processes
+test_opencode_v2_nested_worktree_shell
+test_stale_shuvcode_registration_cannot_confirm_replacement
+test_exited_v2_husk_and_doorbell_use_recorded_harness
 test_opencode_v2_agent_state_never_guesses_agent_free
 test_opencode_v2_agent_state_settles_a_prompt_helper
 test_cli_caches_the_selected_client_within_a_process
