@@ -1315,7 +1315,10 @@ runner_group_signal() {  # <signal> <pid> <identity> [proved]
     state=$?
     case "$state" in
       0) ;;
-      1) fm_procevent_group_alive "$pid" && return 2; return 1 ;;
+      # State 1 is a stale leader. A zombie keeps the numeric group signalable
+      # without being a live member, so only a non-zombie member still refuses
+      # the stop. A zombie-only group is the finished generation.
+      1) fm_procevent_group_has_live_member "$pid" && return 2; return 1 ;;
       *) return 2 ;;
     esac
     pgid=$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d '[:space:]') || return 2

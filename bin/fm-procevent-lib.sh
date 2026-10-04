@@ -596,15 +596,16 @@ fm_procevent_claim_capture_reservation_remove_locked() {
 
 # fm_procevent_claim_generation_gone_locked
 # True only when the loaded claim's owner is stale and the process group it led
-# independently has no members left. The separate group check also covers a
+# independently has no live members left. The separate group check also covers a
 # reused live pid whose identity differs while the old generation survives.
 # A live matched owner (state 0), an unreadable identity (state 2), and a
 # crashed leader with a still-live ambiguous group (state 3) all return false.
+# An unreaped zombie is not a live member.
 fm_procevent_claim_generation_gone_locked() {
   local state=0
   fm_procevent_pid_state "${FM_PROCEVENT_CLAIM_PID:-}" "${FM_PROCEVENT_CLAIM_IDENTITY:-}" || state=$?
   [ "$state" -eq 1 ] \
-    && ! fm_procevent_group_alive "${FM_PROCEVENT_CLAIM_PID:-}"
+    && ! fm_procevent_group_has_live_member "${FM_PROCEVENT_CLAIM_PID:-}"
 }
 
 # Capture-reservation cleanup for a claim being reclaimed.
@@ -622,32 +623,103 @@ fm_procevent_claim_capture_reservation_reclaim_locked() {
 }
 
 # fm_procevent_group_alive <pid>
-# True while any process remains in the runner's numeric process group. A runner
-# starts as its own group leader, but after that leader exits a same-numbered
-# group may be reused, so group presence prevents proving the generation gone.
+# True while the numeric process group can still be signalled. A zombie leader
+# keeps this true, which is what a proved stop needs in order to reach a child
+# that survived TERM. It is not proof a live member remains; that check is
+# fm_procevent_group_has_live_member.
 fm_procevent_group_alive() {
   case "$1" in ''|*[!0-9]*) return 1 ;; esac
   kill -0 -"$1" 2>/dev/null
+}
+
+# fm_procevent_pid_is_zombie <pid>
+# True when the pid is an unreaped zombie or dead task. kill -0 still succeeds
+# for those, and they have no cmdline, so an identity read cannot name them.
+fm_procevent_pid_is_zombie() {
+  local pid=$1 proc_root stat_line state
+  case "$pid" in ''|*[!0-9]*) return 1 ;; esac
+  proc_root=${FM_PROC_ROOT_OVERRIDE:-/proc}
+  if [ -r "$proc_root/$pid/stat" ]; then
+    stat_line=$(cat "$proc_root/$pid/stat" 2>/dev/null) || return 1
+    state=${stat_line##*)}
+    state=${state#"${state%%[![:space:]]*}"}
+    state=${state%%[[:space:]]*}
+    case "$state" in
+      Z|X) return 0 ;;
+    esac
+    return 1
+  fi
+  state=$(LC_ALL=C ps -p "$pid" -o stat= 2>/dev/null | tr -d '[:space:]') || return 1
+  case "$state" in
+    Z*|X*) return 0 ;;
+  esac
+  return 1
+}
+
+# fm_procevent_group_has_live_member <pgid>
+# True when a non-zombie process still belongs to this numeric process group.
+# A zombie leader keeps kill -0 on the group succeeding; that is not a live
+# member. A signalable group this scan cannot identify stays live, so a missed
+# read cannot prove the generation gone.
+fm_procevent_group_has_live_member() {
+  local pgid=$1 pid_dir stat_line rest state pgrp saw_group_member=0
+  local line_pgid line_stat
+  case "$pgid" in ''|*[!0-9]*) return 1 ;; esac
+  kill -0 -"$pgid" 2>/dev/null || return 1
+  if [ -d /proc ]; then
+    for pid_dir in /proc/[0-9]*; do
+      [ -r "$pid_dir/stat" ] || continue
+      stat_line=$(cat "$pid_dir/stat" 2>/dev/null) || continue
+      rest=${stat_line##*)}
+      read -r state _ pgrp _ <<< "$rest" || continue
+      [ "$pgrp" = "$pgid" ] || continue
+      saw_group_member=1
+      case "$state" in
+        Z|X) ;;
+        *) return 0 ;;
+      esac
+    done
+    [ "$saw_group_member" -eq 1 ] && return 1
+    kill -0 -"$pgid" 2>/dev/null || return 1
+    return 0
+  fi
+  while read -r _ line_pgid line_stat _; do
+    [ "$line_pgid" = "$pgid" ] || continue
+    saw_group_member=1
+    case "$line_stat" in
+      Z*|X*) ;;
+      *) return 0 ;;
+    esac
+  done < <(LC_ALL=C ps -A -o pid= -o pgid= -o stat= 2>/dev/null)
+  [ "$saw_group_member" -eq 1 ] && return 1
+  kill -0 -"$pgid" 2>/dev/null || return 1
+  return 0
 }
 
 # fm_procevent_pid_state <pid> <identity>
 # 0 live match, 1 stale, 2 uncertain, 3 ambiguous leaderless group.
 #
 # State 3 is the crash cut: the runner leader is gone, but a process group with
-# its numeric id still has members. That group may be the old generation or a
-# leaderless group created after PID/PGID reuse, so cleanup preserves the claim
-# without signalling the group or starting a replacement.
+# its numeric id still has a non-zombie member. That group may be the old
+# generation or a leaderless group created after PID/PGID reuse, so cleanup
+# preserves the claim without signalling the group or starting a replacement.
+# An unreaped zombie leader is already gone. kill -0 still succeeds and its
+# cmdline is empty, which is not an unreadable live identity. The zombie alone
+# does not keep the group alive.
 fm_procevent_pid_state() {
   local pid=$1 expected=$2 actual
-  if ! fm_pid_alive "$pid"; then
-    fm_procevent_group_alive "$pid" && return 3
+  if ! fm_pid_alive "$pid" || fm_procevent_pid_is_zombie "$pid"; then
+    fm_procevent_group_has_live_member "$pid" && return 3
     return 1
   fi
   if actual=$(fm_pid_identity "$pid" 2>/dev/null); then
     [ "$actual" = "$expected" ] && return 0
     return 1
   fi
-  fm_pid_alive "$pid" || { fm_procevent_group_alive "$pid" && return 3; return 1; }
+  if ! fm_pid_alive "$pid" || fm_procevent_pid_is_zombie "$pid"; then
+    fm_procevent_group_has_live_member "$pid" && return 3
+    return 1
+  fi
   return 2
 }
 
