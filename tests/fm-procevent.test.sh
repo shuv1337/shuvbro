@@ -1489,6 +1489,45 @@ ZOMBIE_PARENT=
 ZOMBIE_PID=
 pass "an unreaped one-shot runner is retired without a live identity"
 
+# Other processes on a busy host exit between a scan listing /proc and reading
+# each entry. Those vanished entries say nothing about the runner's group, so a
+# zombie-only group must still be judged gone while they churn.
+CHURN_ROOT="$TMP_ROOT/zombie-churn-proc"; mkdir -p "$CHURN_ROOT"
+CHURN_RELEASE="$TMP_ROOT/zombie-churn-reap"
+CHURN_PIDFILE="$TMP_ROOT/zombie-churn.pid"
+perl - "$CHURN_RELEASE" "$CHURN_PIDFILE" <<'PL' &
+my ($release, $pidfile) = @ARGV;
+defined(my $pid = fork) or exit 125;
+if ($pid == 0) { setpgrp(0, 0) or exit 125; exit 0; }
+open(my $fh, '>', $pidfile) or exit 125; print $fh "$pid\n"; close $fh;
+my $deadline = time + ($ENV{FM_TEST_STUB_MAX_BLOCK_SECONDS} // 120);
+while (!-e $release && time < $deadline) { select undef, undef, undef, 0.05; }
+waitpid($pid, 0) == $pid or exit 125;
+PL
+CHURN_PARENT=$!
+wait_for "$CHURN_PIDFILE" || fail "the churn fixture never forked its zombie leader"
+CHURN_PID=$(cat "$CHURN_PIDFILE")
+wait_for_zombie "$CHURN_PID" "the churn fixture leader"
+mkdir -p "$CHURN_ROOT/$CHURN_PID" "$CHURN_ROOT/1" "$CHURN_ROOT/4194301" "$CHURN_ROOT/4194302"
+cp "/proc/$CHURN_PID/stat" "$CHURN_ROOT/$CHURN_PID/stat" 2>/dev/null \
+  || printf '%s (sh) Z 1 %s %s 0\n' "$CHURN_PID" "$CHURN_PID" "$CHURN_PID" >"$CHURN_ROOT/$CHURN_PID/stat"
+printf '1 (init) S 0 1 1 0\n' >"$CHURN_ROOT/1/stat"
+churn_status=0
+FM_PROC_ROOT_OVERRIDE="$CHURN_ROOT" bash -c \
+  '. "$1/bin/fm-procevent-lib.sh"; fm_procevent_group_has_live_member "$2"' \
+  _ "$ROOT" "$CHURN_PID" || churn_status=$?
+[ "$churn_status" -eq 1 ] \
+  || fail "entries that vanished mid-scan kept a zombie-only group live (status $churn_status)"
+printf '4194301 (sh) S 1 %s %s 0\n' "$CHURN_PID" "$CHURN_PID" >"$CHURN_ROOT/4194301/stat"
+churn_status=0
+FM_PROC_ROOT_OVERRIDE="$CHURN_ROOT" bash -c \
+  '. "$1/bin/fm-procevent-lib.sh"; fm_procevent_group_has_live_member "$2"' \
+  _ "$ROOT" "$CHURN_PID" || churn_status=$?
+[ "$churn_status" -eq 0 ] || fail "a live member listed beside churn was not seen (status $churn_status)"
+touch "$CHURN_RELEASE"
+wait "$CHURN_PARENT" 2>/dev/null || true
+pass "unrelated processes exiting mid-scan do not keep a zombie-only group live"
+
 HCZ="$TMP_ROOT/zombie-child"; new_home "$HCZ"
 ZOMBIE_RELEASE="$HCZ/reap"
 CZ_TRIGGER="$TMP_ROOT/zombie-child-trigger"
