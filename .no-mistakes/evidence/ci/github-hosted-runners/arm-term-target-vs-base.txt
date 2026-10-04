@@ -1,0 +1,19 @@
+[target] arm pid=920749 watcher pid=920766; started line: watcher: started pid=920766 (beacon fresh)
+[target] processes before TERM:
+        PID    PPID ELAPSED COMMAND
+     921380  920766       2 sleep 60
+[target] arm output pipe closed 0.10s after TERM (arm exit=143)
+[target] watcher pid 920766 gone
+[target] orphan 'sleep 60' children of watcher: none
+[target] arm output:
+    watcher: started pid=920766 (beacon fresh)
+
+[base] arm pid=924460 watcher pid=924477; started line: watcher: started pid=924477 (beacon fresh)
+[base] processes before TERM:
+        PID    PPID ELAPSED COMMAND
+     925013  924477       2 sleep 60
+[base] arm output pipe closed 57.91s after TERM (arm exit=143)
+[base] watcher pid 924477 gone
+[base] orphan 'sleep 60' children of watcher: none
+[base] arm output:
+    watcher: started pid=924477 (beacon fresh)

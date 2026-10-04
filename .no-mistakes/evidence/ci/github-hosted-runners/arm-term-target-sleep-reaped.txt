@@ -1,0 +1,9 @@
+[target-rerun] arm pid=1020135 watcher pid=1020151; started line: watcher: started pid=1020151 (beacon fresh)
+[target-rerun] processes before TERM:
+        PID    PPID ELAPSED COMMAND
+    1020683 1020151       2 sleep 60
+[target-rerun] arm output pipe closed 0.10s after TERM (arm exit=143)
+[target-rerun] watcher pid 1020151 gone
+[target-rerun] cycle sleep pid 1020683 after retirement: reaped
+[target-rerun] arm output:
+    watcher: started pid=1020151 (beacon fresh)
