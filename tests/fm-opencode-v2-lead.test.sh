@@ -55,7 +55,11 @@ case "$1 $2" in
     ;;
   "api session.create")
     printf '%s\n' "$4" >> "$FAKE_CREATED"
-    printf '{"data":{"id":"ses_created","location":%s}}\n' "$(jq -c .location <<< "$4")"
+    if [ -n "${FAKE_CREATE_DIRECTORY:-}" ]; then
+      printf '{"data":{"id":"ses_created","location":{"directory":"%s"}}}\n' "$FAKE_CREATE_DIRECTORY"
+    else
+      printf '{"data":{"id":"ses_created","location":%s}}\n' "$(jq -c .location <<< "$4")"
+    fi
     ;;
   *) exit 9 ;;
 esac
@@ -173,6 +177,15 @@ test_new_always_creates() {
   pass "launcher: new creates a fresh session even when one exists at the code root"
 }
 
+test_new_refuses_a_session_created_elsewhere() {
+  setup_case new-elsewhere
+  FAKE_CREATE_DIRECTORY=/elsewhere run_lead --new
+  expect_code 2 "$RC" "a session created outside the code root must stop the launch: $OUT"
+  assert_contains "$OUT" "did not return a top-level session at $ROOT_DIR" "the refusal must name the expected root"
+  [ ! -e "$ROOT_DIR/primary-args" ] || fail "the activation ran with a session created elsewhere"
+  pass "launcher: a created session outside the code root stops before activation"
+}
+
 test_explicit_session_and_binary_pass_through() {
   setup_case explicit
   printf 'not json\n' > "$CASE/sessions.json"
@@ -204,5 +217,6 @@ test_continue_resumes_newest_exact_root_session
 test_continue_without_root_session_creates_one
 test_continue_refuses_when_window_may_be_truncated
 test_new_always_creates
+test_new_refuses_a_session_created_elsewhere
 test_explicit_session_and_binary_pass_through
 test_unresolvable_binary_stops_before_activation

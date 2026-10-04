@@ -142,14 +142,14 @@ fm_shuvcode_native_binary() {
     *) return 1 ;;
   esac
   base=shuvcode-linux-$arch
-  if [ "$arch" = x64 ] && ! grep -qw avx2 /proc/cpuinfo 2>/dev/null; then
+  if [ "$arch" = x64 ] && ! grep -Eqi '(^|[[:space:]])avx2([[:space:]]|$)' /proc/cpuinfo 2>/dev/null; then
     names=("$base-baseline" "$base")
   else
     names=("$base" "$base-baseline")
   fi
-  # The launcher's own musl test: the C library ldd reports, not whether a
-  # musl loader merely happens to be installed beside glibc.
-  if ldd --version 2>&1 | grep -qi musl; then
+  # The launcher's own musl test: an Alpine release file or the C library ldd
+  # reports, not whether a musl loader merely happens to be installed.
+  if [ -e /etc/alpine-release ] || ldd --version 2>&1 | grep -qi musl; then
     names=("${names[@]/%/-musl}" "${names[@]}")
   else
     names=("${names[@]}" "${names[@]/%/-musl}")

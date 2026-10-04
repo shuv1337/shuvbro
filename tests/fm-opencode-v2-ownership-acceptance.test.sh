@@ -60,9 +60,9 @@ test_unregistered_session_is_refused() {
   out=$(lock_in_shell ses_other "$HOME_DIR")
   printf '%s' "$out" | jq -e '.code != 0' >/dev/null || fail "another session on the same service took the lead's home lock: $out"
   [ "$(cat "$HOME_DIR/state/.lock")" = "$V2_OWNER_PID" ] || fail "the refused session changed .lock"
-  printf '%s' "$out" | jq -e '(.stderr | test("not activated for session ses_other")) and (.stderr | test("fm-opencode-v2-lead.sh --session ses_other")) and (.stderr | test("cannot locate harness") | not)' >/dev/null \
-    || fail "the unactivated session's refusal did not name its activation relaunch: $out"
-  pass "ownership: another session on the same service is refused the registered lead's home lock and told how to activate"
+  printf '%s' "$out" | jq -e --arg p "$V2_OWNER_PID" '(.stderr | test("session ses_other is not the activated lead")) and (.stderr | test("holds this home.s fleet lock \\(pid " + $p + "\\)")) and (.stderr | test("relaunch|cannot locate harness") | not)' >/dev/null \
+    || fail "the unactivated session's refusal did not name the live lead holding the lock: $out"
+  pass "ownership: another session on the same service is refused the registered lead's home lock and told the live lead holds it"
 }
 
 test_shell_without_session_identity_never_locks() {

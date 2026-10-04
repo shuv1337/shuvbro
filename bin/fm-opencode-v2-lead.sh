@@ -57,7 +57,8 @@ create_session() {
   local created
   created=$(shuvcode api session.create --data "$(jq -cn --arg d "$root" '{location: {directory: $d}}')") \
     || die "cannot create a session at $root"
-  jq -er '.data.id' <<< "$created" 2>/dev/null || die "session create returned no session id: $created"
+  jq -er --arg d "$root" '.data | select(.parentID == null and .location.directory == $d) | .id | select(test("^ses_[A-Za-z0-9_-]+$"))' <<< "$created" 2>/dev/null \
+    || die "session create did not return a top-level session at $root: $created"
 }
 
 case "$mode" in

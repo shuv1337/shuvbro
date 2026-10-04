@@ -35,12 +35,24 @@ fi
 
 # An unactivated OpenCode V2 lead (return 3) must name the activation it is
 # missing, not a process-detection failure: its model shell runs under the
-# shared service, which no ancestry walk may climb through.
+# shared service, which no ancestry walk may climb through. While another live
+# session holds the lock, activation would be refused too, so name the holder.
 v2_unactivated_error() {
-  local session=${OPENCODE_SESSION_ID:-} binary
+  local session=${OPENCODE_SESSION_ID:-} binary holder lead primary
   [[ "$session" =~ ^ses_[A-Za-z0-9_-]+$ ]] || session='<session-id>'
-  binary=$(fm_shuvcode_native_binary 2>/dev/null) || binary='<installed-native-shuvcode-executable>'
-  echo "error: OpenCode V2 lead is not activated for session $session, so it cannot own this home's fleet lock; exit this client and relaunch with $SCRIPT_DIR/fm-opencode-v2-lead.sh --session $session (equivalent: $SCRIPT_DIR/fm-opencode-v2-primary.sh --session $session --native-binary $binary)" >&2
+  holder=$(cat "$LOCK" 2>/dev/null || true)
+  if [ -f "$LOCK" ] && [ ! -L "$LOCK" ] && [[ "$holder" =~ ^[0-9]+$ ]] && fm_harness_pid_alive "$holder"; then
+    echo "error: OpenCode V2 session $session is not the activated lead, and another live firstmate session holds this home's fleet lock (pid $holder); this client stays a read-only observer" >&2
+    return
+  fi
+  printf -v lead '%q' "$SCRIPT_DIR/fm-opencode-v2-lead.sh"
+  printf -v primary '%q' "$SCRIPT_DIR/fm-opencode-v2-primary.sh"
+  if binary=$(fm_shuvcode_native_binary 2>/dev/null); then
+    printf -v binary '%q' "$binary"
+  else
+    binary='<installed-native-shuvcode-executable>'
+  fi
+  echo "error: OpenCode V2 lead is not activated for session $session, so it cannot own this home's fleet lock; exit this client and relaunch with $lead --session $session (equivalent: $primary --session $session --native-binary $binary)" >&2
 }
 me=$(fm_harness_ancestry_pid) || {
   rc=$?

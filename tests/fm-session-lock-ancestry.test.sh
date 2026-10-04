@@ -294,7 +294,13 @@ field= pid=
 while [ "$#" -gt 0 ]; do
   case "$1" in -o) field=$2; shift 2 ;; -p) pid=$2; shift 2 ;; *) shift ;; esac
 done
+if [ "${FAKE_NO_BARRIER:-0}" = 1 ]; then
+  case "$field" in comm=|args=) echo bash ;; ppid=) echo 1 ;; esac
+  exit 0
+fi
 case "$pid:$field" in
+  "${FAKE_HOLDER:-none}:comm=") echo shuvcode ;;
+  "${FAKE_HOLDER:-none}:args=") echo 'shuvcode -c' ;;
   710:comm=) echo shuvcode ;;
   710:args=) echo 'shuvcode serve --service' ;;
   710:ppid=) echo 700 ;;
@@ -316,7 +322,9 @@ SH
 # A plain `shuvcode` launch leaves its model shell under the shared service
 # barrier with an OPENCODE_SESSION_ID that has no V2 owner registration. The
 # real fm-lock.sh must name that missing activation and the relaunch command,
-# not a process-detection failure; with no session id the generic error stays.
+# not a process-detection failure. With no session id, or a session id
+# inherited outside the barrier, the generic error stays; while another live
+# session holds the lock, the refusal names that holder instead.
 test_unactivated_v2_lead_lock_names_activation() {
   local dir fakebin out rc native session=ses_unactivated_lock_probe
   dir="$TMP_ROOT/v2-unactivated"
@@ -328,7 +336,13 @@ field= pid=
 while [ "$#" -gt 0 ]; do
   case "$1" in -o) field=$2; shift 2 ;; -p) pid=$2; shift 2 ;; *) shift ;; esac
 done
+if [ "${FAKE_NO_BARRIER:-0}" = 1 ]; then
+  case "$field" in comm=|args=) echo bash ;; ppid=) echo 1 ;; esac
+  exit 0
+fi
 case "$pid:$field" in
+  "${FAKE_HOLDER:-none}:comm=") echo shuvcode ;;
+  "${FAKE_HOLDER:-none}:args=") echo 'shuvcode -c' ;;
   710:comm=) echo shuvcode ;;
   710:args=) echo 'shuvcode serve --service' ;;
   710:ppid=) echo 700 ;;
@@ -359,6 +373,22 @@ SH
   expect_code 1 "$rc" "a service shell with no session id must not acquire the lock"
   assert_contains "$out" "cannot locate harness process in ancestry" "without a session id the generic ancestry error must remain"
   assert_not_contains "$out" "not activated" "without a session id there is no V2 session to name"
+
+  out=$(PATH="$fakebin:$PATH" FAKE_NO_BARRIER=1 OPENCODE_SESSION_ID=$session \
+    FM_STATE_OVERRIDE="$dir/state" "$ROOT/bin/fm-lock.sh" 2>&1) && rc=0 || rc=$?
+  expect_code 1 "$rc" "an inherited session id outside the service must not acquire the lock"
+  assert_contains "$out" "cannot locate harness process in ancestry" "outside the service barrier the generic ancestry error must remain"
+  assert_not_contains "$out" "not activated" "an inherited session id outside the service barrier is not an unactivated lead"
+  [ ! -e "$dir/state/.lock" ] || fail "a refused shell wrote .lock"
+
+  printf '%s\n' "$$" > "$dir/state/.lock"
+  out=$(PATH="$fakebin:$PATH" FAKE_HOLDER=$$ OPENCODE_SESSION_ID=$session FM_OPENCODE_V2_BIN=$native \
+    FM_STATE_OVERRIDE="$dir/state" "$ROOT/bin/fm-lock.sh" 2>&1) && rc=0 || rc=$?
+  expect_code 1 "$rc" "an unactivated V2 session must not take a live holder's lock"
+  assert_contains "$out" "another live firstmate session holds this home's fleet lock (pid $$)" "the refusal must name the live holder"
+  assert_not_contains "$out" "relaunch" "a relaunch would be refused while a live lead holds the lock"
+  [ "$(cat "$dir/state/.lock")" = "$$" ] || fail "the refused unactivated session changed .lock"
+  rm -f "$dir/state/.lock"
   pass "session-lock: an unactivated V2 lead's lock refusal names the activation relaunch, not process detection"
 }
 
