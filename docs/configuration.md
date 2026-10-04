@@ -11,7 +11,7 @@ The shared orchestrator behavior lives in [`AGENTS.md`](../AGENTS.md) - edit it 
 This section is the single owner of the top-level operational-home layout; producer script headers and their help own exact child-file fields and mutation contracts.
 The tracked code root contains the shared instruction, skill, documentation, workflow, and `bin/` surfaces, while each effective `FM_HOME` contains private operational directories.
 `data/` holds durable private fleet records such as the project and secondmate registries, captain preferences, optional shared captain preferences, learnings, backlog, briefs, scout reports, and explicitly installed content-addressed extension packages under `data/extensions/packages/`.
-`state/` holds runtime records such as task metadata, append-only status events, endpoint signals, watcher and wake-queue coordination, inactive terminal-outcome receipts under `state/terminal-outcomes/`, enabled extension working namespaces under `state/extensions/`, away-mode state, generated Relay artifacts, parent-side remote ledger copies under `state/secondmate-summary-cache/`, one-shot Bearings reconcile requests under `state/reconcile-notify/`, private secondmate config-reread generations with their retry and quarantine state, per-task steering-inbox records under `state/<id>.inbox/` (`bin/fm-task-inbox-lib.sh`), and parent-owned secondmate pending-reply records under `state/pending-replies/` (`bin/fm-pending-reply-lib.sh`).
+`state/` holds runtime records such as task metadata, append-only status events, endpoint signals, watcher and wake-queue coordination, inactive terminal-outcome receipts under `state/terminal-outcomes/`, enabled extension working namespaces under `state/extensions/`, away-mode state, generated Relay artifacts, parent-side remote ledger copies under `state/secondmate-summary-cache/`, one-shot Bearings reconcile requests under `state/reconcile-notify/`, private secondmate config-reread generations with their retry and quarantine state, per-task steering-inbox records under `state/<id>.inbox/` (`bin/fm-task-inbox-lib.sh`), parent-owned secondmate pending-reply records under `state/pending-replies/` (`bin/fm-pending-reply-lib.sh`), and the optional live board's runtime record under `state/board/` (`bin/fm-board.sh`).
 `config/` holds local gitignored operating choices, including explicit extension bindings under `config/extensions.d/`, and `projects/` holds the local project clones that Firstmate reads but changes only through the narrow guarded and concrete captain-approved exceptions in `AGENTS.md`.
 Untracked files and directories whose names begin with `scratchpad` are also gitignored, so temporary scratch does not make porcelain-based secondmate sync guards treat a home as dirty.
 
@@ -976,6 +976,34 @@ Each account, model and voice file above is read as its first line that is not b
 The two read files are parsed differently: `config/voice-read-scope` must hold the bare word and nothing but blank space around it, so a comment header there refuses instead of being skipped, while every line of `config/voice-read-deny` that is not blank and not a `#` comment is one more substring.
 `FM_VOICE_RELAY` and `FM_VOICE_PYTHON` belong to the laptop rather than to a home, so they have no config file: `bin/fm-voice-client.py` requires the relay path as a flag or that variable and carries no default path.
 
+## Live board (config/board-port, config/board-hosts, config/board-logins, data/board-notes.json)
+
+`bin/fm-board.sh` runs the optional [live board](live-board.md), and nothing below is read unless that board is started for the home.
+This section is the single owner of the board's configuration schema; the script's header owns its mechanics, and `docs/live-board.md` owns setup, exposure, and the threat model.
+Each file is local and gitignored and is never inherited by a secondmate home, so every home that wants a board runs its own on its own port.
+
+| File | Environment | Holds |
+| --- | --- | --- |
+| `config/board-port` | `FM_BOARD_PORT` | Loopback port, default `8795`; `0` picks a free port. |
+| `config/board-hosts` | none | One bare host name per line, beyond the always-accepted loopback names, that the board may be reached by, such as this machine's tailnet name. |
+| `config/board-logins` | none | One Tailscale login per line; when present, a request is served only with an allowlisted `Tailscale-User-Login` header or as a direct loopback request with no proxy headers. |
+
+Blank lines and `#` comments are ignored in all three, and a malformed host name, login, or port stops `serve` naming the file to fix.
+`FM_BOARD_INTERVAL` (default 10, 2 to 300) sets how many seconds pass between rebuilds of the board's data.
+
+`data/board-notes.json` is the lead's curated list of notes the fleet records do not carry, a JSON list of objects:
+
+```json
+[
+  {"kind": "fyi", "text": "<one-line note>", "detail": "<optional longer text>", "link": "<optional http or https URL>"},
+  {"kind": "you", "text": "<something only the captain can do>"}
+]
+```
+
+A `fyi` note appears under Heads-up and a `you` note under Waiting on you, without answer buttons because it is not a held task.
+Text is cut at 500 characters and detail at 2000, a link that is not `http` or `https` is dropped, an entry without text is skipped and counted, and a file that is not a JSON list is reported on the board rather than hiding the rest.
+The lead keeps the file current with inspect-then-update and removes a note once it no longer applies; an absent file means no notes.
+
 ## Environment variables
 
 Runtime tuning via environment variables (defaults shown):
@@ -1138,6 +1166,9 @@ FM_INBOX_REGION=        # overrides config/inbox-region for fm-inbox.sh say and 
 FM_INBOX_STT_MODEL=     # overrides config/inbox-stt-model for fm-inbox.sh say
 FM_INBOX_ASK_MODEL=     # overrides config/inbox-ask-model for fm-inbox.sh ask
 FM_INBOX_PROFILE=       # overrides config/inbox-profile; explicitly empty forces ambient credentials
+# live board; see "Live board" above
+FM_BOARD_PORT=          # overrides config/board-port; 0 picks a free loopback port
+FM_BOARD_INTERVAL=10    # seconds between board data rebuilds, 2..300
 ```
 
 `fm-teardown.sh` retries only Git's `Unable to create '...index.lock': File exists` return failure up to `FM_TREEHOUSE_RETURN_LOCK_RETRIES` times.

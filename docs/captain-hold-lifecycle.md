@@ -13,6 +13,8 @@ It never reads report bodies, review artifacts, terminal output, or chat.
 The `hold` subcommand is the mandatory captain-hold creation path: it uses an existing task or creates one when nothing exists to hold, records its UTC hold-set timestamp as the leading line of the task body, then invokes the underlying tasks-axi hold operation and verifies both records.
 Publishing the stamp first ensures a snapshot cannot observe a newly captain-held task without the timestamp that defines its age.
 Retries of an active hold preserve its hold-set timestamp, while re-holding released work starts a new timestamped lifecycle; a closed task is refused rather than reopened, and `--until` stores the captain's own deferral date through tasks-axi's date gate.
+A hold may declare the answer choices a captain surface offers with repeatable `--option`: they are written as one machine-owned `Captain hold options:` line directly under the stamp, never into the tasks-axi hold reason, and every hold call restates the whole set, so a hold without `--option` clears it and a surface falls back to yes or no.
+`bin/fm-fleet-snapshot.sh` exposes that set as `hold_options`, read only from that position, so body prose that merely looks like an options line declares nothing.
 
 The `answer` subcommand records the captain's exact words and resolves the call in the same act: it closes a question-shaped call, while `answer --release` frees a captain-gated work item to proceed without completing it.
 It requires a non-empty captain decision file of at most 8192 bytes, durably writes a resolution block carrying the decision digest and a `Resolution mode:` while retaining the leading hold-set stamp until the selected `tasks-axi done` or `tasks-axi unhold` transition succeeds, then restores the successful record's resolution-first body ordering (the previous body remains preserved below the block and archived through tasks-axi `--archive-body`).
@@ -55,11 +57,13 @@ A key that names no task, names a task that is not captain-held, or names a task
 
 `bind`, `unbind`, and `binding` record that a captured-answer source feeds this intake, as a private record under `state/decision-bindings/`; an unbound source feeds nothing, so the path is opt-in per source, and `bind` deliberately does not require the source to exist yet.
 
-Two channels feed that one intake today, and both are ordinary callers rather than special cases.
+Three channels feed that one intake today, and each is an ordinary caller rather than a special case.
 `bin/fm-send.sh --resolve-key` is the chat channel: its status-log close for a key the status log still owns is owned by that script's header, and a key the status log no longer owns is resolved to a still-open captain-held task - the key as a task id, then the legacy derived identity - and fed as one keyed line.
 `bin/fm-procevent.sh` is the captured-result channel: after capture, a bound built-in source has its result passed to `bin/fm-procevent-<adapter>.sh answers <result-file>` and whatever that prints is piped into the intake, so any built-in adapter with an `answers` command works and the runner names no adapter, parses no result, and carries no decision rule.
 Trusted external process-event adapters intentionally expose no answer operation and cannot feed this authority-bearing intake; [`extension-bindings.md`](extension-bindings.md#trust-boundary) owns that boundary.
 `bin/fm-procevent-lavish.sh answers` is one such adapter command; it reads only rows tagged `choice`, relays a card's declared close mode, and can never let freeform captain prose forge a task id or a mode.
+`bin/fm-board.sh answer` is the [live board](live-board.md) channel: it feeds one keyed line with `--source "live board..."`, declares the close mode on every card it renders - a question row closes and other held work is released - and pins the answer to a digest of the exact question shown, so a re-asked question refuses the old click.
+Its Later button is a deferral rather than an answer and re-holds through `hold --until`, keeping the reason and declared options; every recorded board answer then wakes the lead through `bin/fm-inbox.sh note`.
 
 ## Reconcile: re-check reality, never a blind close
 
@@ -200,6 +204,9 @@ The captured-source coverage proves Lavish deduplicates each card before separat
 The board's half is pinned in `tests/fm-bearings-board.test.sh`: every published decision card carries exactly one reconcile option, authored options reserve that value across every card type, recommendations name authored options, a decision card whose structured subject appears in the payload's landed rows is dropped while a genuinely open one is kept even when an unrelated landed id contains its key after a newline, a build requires a fresh authoritative listed-open result before binding or arming, a reopen retires the pre-reopen source generation and waits for a fresh live listener, and a rebuild of an already-armed board with no live listener starts one.
 That suite drives its Lavish session through a protocol-shaped stub, and `tests/fm-bearings-board-lavish-live-e2e.test.sh` is the default-on capability guard for the installed provider; [`verification/process-event-sources.md`](verification/process-event-sources.md) owns the version-scoped evidence.
 [`verification/process-event-sources.md`](verification/process-event-sources.md) owns the process-event ownership and reclamation evidence exercised by `tests/fm-procevent.test.sh`.
+
+The live board channel is pinned in `tests/fm-board.test.sh`: yes, no, declared options, and typed replies close or release through this intake with board provenance, Later re-holds with its date and declared options, every recorded answer queues exactly one captain inbox wake, and refused requests change nothing.
+The declared-options head of the task body is pinned in this suite's `test_declared_options_travel_with_the_hold`, and its snapshot projection in `tests/fm-fleet-snapshot-view.test.sh`.
 
 `tests/fm-classify-decision-key.test.sh` pins `status_key_closing_verb` itself: it separates a resolution from the durable-transfer close and from a still-open key, reports the last real transition across re-openings and both key positions, and treats a prose mention as no transition.
 

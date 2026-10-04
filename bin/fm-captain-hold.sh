@@ -20,7 +20,7 @@
 # and secondmate-home ownership aligned with the work that discovered the call.
 #
 # Usage:
-#   fm-captain-hold.sh hold <task-id> --reason <reason> \
+#   fm-captain-hold.sh hold <task-id> --reason <reason> [--option <label>]... \
 #     [--title <title>] [--repo <repo>] [--origin <origin-id>] [--until YYYY-MM-DD]
 #   fm-captain-hold.sh answer <task-id> --decision-file <path> [--release]
 #   fm-captain-hold.sh answers [<legacy-origin> | --any-origin] --source <provenance>   (keyed answers on stdin)
@@ -46,6 +46,15 @@
 # A task already closed is refused rather than reopened. `--until` records the
 # captain's own deferral date through `tasks-axi hold --until`, so a "revisit
 # later" answer is stored as a date instead of a live card.
+# `--option` (repeatable, at most six) declares the answer choices a
+# captain-facing surface offers for this call instead of the default yes or
+# no. The set is written as one `Captain hold options: <a> | <b>` line directly
+# under the hold-set stamp, never into the tasks-axi hold reason, and it travels
+# with the reason: every hold call states the whole set, so a hold without
+# `--option` clears an earlier one. Each label is one line of at most 120 bytes
+# with no `|` or control character, labels are unique ignoring case, and
+# `later` and `reconcile` are refused because a surface always offers its own
+# deferral and the intake reserves reconcile.
 #
 # `answer` records the captain's exact words and resolves the call in the same
 # act. It requires a non-empty captain decision file of at most 8192 bytes and
@@ -731,25 +740,71 @@ body_hold_set_timestamp() {  # <decoded-task-body>
     | head -1
 }
 
-write_hold_set_stamp() {  # <task-id> <shown-body> <timestamp> <preserve-existing-0-or-1>
-  local id=$1 body=$2 hold_set=$3 preserve=$4 existing new_body tmp
+HOLD_OPTIONS_PREFIX='Captain hold options: '
+HOLD_OPTIONS_MAX=6
+
+# One declared answer choice: refused rather than silently reshaped, because a
+# label the surface shows must be exactly what the lead declared.
+validate_hold_option() {  # <label>
+  local value=$1 lower
+  validate_one_line option "$value"
+  [ "$(printf '%s' "$value" | LC_ALL=C wc -c | tr -d ' ')" -le 120 ] \
+    || fail "option must be at most 120 bytes: $value"
+  case "$value" in
+    *'|'*) fail "option must not contain |: $value" ;;
+    ' '*|*' ') fail "option must not start or end with a space: $value" ;;
+  esac
+  if printf '%s' "$value" | LC_ALL=C grep -q '[[:cntrl:]]'; then
+    fail "option must not contain control characters"
+  fi
+  lower=$(printf '%s' "$value" | tr '[:upper:]' '[:lower:]')
+  case "$lower" in
+    later|reconcile) fail "option $value is reserved: a captain surface always offers its own deferral, and reconcile is reserved by the keyed-answer intake" ;;
+  esac
+}
+
+# Writes the machine-owned head of the task body: the hold-set stamp, then the
+# declared options line when there is one. Only an options line directly under
+# the stamp is this script's, so prose elsewhere in the body is never touched.
+write_hold_set_stamp() {  # <task-id> <shown-body> <timestamp> <preserve-existing-0-or-1> [<options-line>]
+  local id=$1 body=$2 hold_set=$3 preserve=$4 options=${5:-} existing original new_body tmp had_options=0
   body=$(decode_shown_value "$body") \
     || fail "could not decode the existing body for $id"
+  original=$body
   existing=$(body_hold_set_timestamp "$body")
-  if [ "$preserve" = 1 ] && [ -n "$existing" ]; then
-    return 0
-  fi
   if [ -n "$existing" ]; then
+    [ "$preserve" != 1 ] || hold_set=$existing
     body=${body#"Captain hold set: $existing"}
     case "$body" in
       $'\n\n'*) body=${body#$'\n\n'} ;;
       $'\n'*) body=${body#$'\n'} ;;
     esac
+    case "$body" in
+      "$HOLD_OPTIONS_PREFIX"*)
+        had_options=1
+        case "$body" in
+          *$'\n'*) body=${body#*$'\n'} ;;
+          *) body='' ;;
+        esac
+        case "$body" in
+          $'\n'*) body=${body#$'\n'} ;;
+        esac
+        ;;
+    esac
+    # An active hold retried with no options to add or clear keeps its body
+    # byte for byte, as it always has.
+    if [ "$preserve" = 1 ] && [ -z "$options" ] && [ "$had_options" = 0 ]; then
+      return 0
+    fi
   fi
   new_body=$(printf 'Captain hold set: %s' "$hold_set")
+  if [ -n "$options" ]; then
+    new_body=$(printf '%s\n%s%s' "$new_body" "$HOLD_OPTIONS_PREFIX" "$options")
+  fi
   if [ -n "$body" ]; then
     new_body=$(printf '%s\n\n%s' "$new_body" "$body")
   fi
+  [ "$new_body" != "$original" ] || return 0
   tmp=$(umask 077; mktemp "${TMPDIR:-/tmp}/fm-captain-hold-stamp.XXXXXX") \
     || fail "cannot stage the hold-set stamp"
   if ! printf '%s\n' "$new_body" > "$tmp"; then
@@ -765,7 +820,7 @@ write_hold_set_stamp() {  # <task-id> <shown-body> <timestamp> <preserve-existin
 
 command_hold() {
   local id=${1:-} title='' reason='' repo='' origin='' until='' show state existing_title body='' hold_kind hold_set occurrence
-  local existing_hold_kind='' existing_held='' preserve_hold_set=0
+  local existing_hold_kind='' existing_held='' preserve_hold_set=0 options='' option_count=0 seen_options='' lower_option
   [ "$#" -ge 1 ] || { usage >&2; exit 2; }
   shift
   while [ "$#" -gt 0 ]; do
@@ -775,6 +830,19 @@ command_hold() {
       --repo) shift; repo=${1:-} ;;
       --origin) shift; origin=${1:-} ;;
       --until) shift; until=${1:-} ;;
+      --option)
+        shift
+        validate_hold_option "${1:-}"
+        lower_option=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
+        case "$seen_options" in
+          *$'\n'"$lower_option"$'\n'*) fail "option is declared twice: $1" ;;
+        esac
+        seen_options="${seen_options:-$'\n'}$lower_option"$'\n'
+        option_count=$((option_count + 1))
+        [ "$option_count" -le "$HOLD_OPTIONS_MAX" ] \
+          || fail "at most $HOLD_OPTIONS_MAX options may be declared"
+        options="${options:+$options | }$1"
+        ;;
       *) usage >&2; exit 2 ;;
     esac
     shift
@@ -834,10 +902,14 @@ command_hold() {
   # snapshot may see the harmless stamp by itself, but can never see a newly
   # held task without the timestamp that defines this hold lifecycle's age.
   show=$(task_show "$id") || fail "task $id disappeared before recording its hold-set stamp"
-  write_hold_set_stamp "$id" "$(show_field "$show" body)" "$hold_set" "$preserve_hold_set"
+  write_hold_set_stamp "$id" "$(show_field "$show" body)" "$hold_set" "$preserve_hold_set" "$options"
   show=$(task_show "$id") || fail "task $id disappeared while recording its hold-set stamp"
   [ -n "$(body_hold_set_timestamp "$(show_field_value "$show" body)")" ] \
     || fail "task $id did not retain its hold-set stamp"
+  if [ -n "$options" ]; then
+    [ "$(show_field_value "$show" body | sed -n '2p')" = "$HOLD_OPTIONS_PREFIX$options" ] \
+      || fail "task $id did not retain its declared options"
+  fi
   if [ -n "$until" ]; then
     tasks_axi hold "$id" --reason "$reason" --kind captain --until "$until" >/dev/null \
       || fail "could not hold task $id for the captain"
