@@ -1388,6 +1388,216 @@ assert_present "$FM_PROCEVENT_CLAIM_ROOT/identity-src.claim" "uncertain retireme
 pe "$HL" retire identity-src >/dev/null
 pass "transient identity failure preserves the live source for retry"
 
+# A one-shot runner can pass its live identity check and then finish and be
+# reaped before retirement reads its process group. That finished generation
+# must be released, not refused as an unconfirmable identity (issue #16 under
+# load). A ps shim makes the runner's group exit right at the pgid read.
+HV="$TMP_ROOT/hv"; new_home "$HV"
+VANISH_TRIGGER="$TMP_ROOT/vanish-trigger"
+pe_register "$HV" lavish vanish-src -- "$BLOCKER" "$VANISH_TRIGGER" "vanish" >/dev/null
+pe "$HV" reconcile >/dev/null
+wait_for "$FM_PROCEVENT_CLAIM_ROOT/vanish-src.claim" || fail "vanish fixture runner did not claim its source"
+vanish_pid=$(sed -n '2p' "$FM_PROCEVENT_CLAIM_ROOT/vanish-src.claim")
+VANISH_FAKEBIN=$(fm_fakebin "$TMP_ROOT/vanish-tools")
+cat > "$VANISH_FAKEBIN/ps" <<SH
+#!/usr/bin/env bash
+if [ "\$*" = "-o pgid= -p $vanish_pid" ]; then
+  kill -KILL -$vanish_pid 2>/dev/null
+  for _ in \$(seq 1 100); do kill -0 $vanish_pid 2>/dev/null || break; sleep 0.05; done
+fi
+exec $(command -v ps) "\$@"
+SH
+chmod +x "$VANISH_FAKEBIN/ps"
+vanish_status=0
+vanish_out=$(PATH="$VANISH_FAKEBIN:$PATH" pe "$HV" retire vanish-src 2>&1) || vanish_status=$?
+[ "$vanish_status" -eq 0 ] || fail "retirement refused a runner that exited before its pgid read: $vanish_out"
+kill -0 "$vanish_pid" 2>/dev/null && fail "the vanish fixture runner was not gone before retirement finished"
+assert_absent "$HV/state/procevent/vanish-src.source" "a runner gone before its pgid read is retired"
+assert_absent "$FM_PROCEVENT_CLAIM_ROOT/vanish-src.claim" "a runner gone before its pgid read releases its claim"
+pass "a runner that exits between its identity check and pgid read is retired"
+
+# A runner's exit cleanup only try-acquires the source lock, so a retirement
+# holding that lock while a one-shot capture exits leaves the claim behind with
+# an unreaped owner. kill -0 still succeeds for that zombie, its cmdline is
+# empty, and it keeps its process group signalable. That is a finished
+# generation, not an unreadable live identity. Killing the whole group without
+# reaping its leader reproduces that end state deterministically. A zombie
+# that still has a live member stays refused, same as any other crashed leader.
+start_unreaped_runner() {  # <home> <source-id> <release-file>
+  local home=$1 id=$2 release=$3
+  FM_HOME="$home" perl - "$release" "$ROOT/bin/fm-procevent.sh" _start "$id" \
+    >"$home/unreaped-start.log" 2>&1 <<'PL' &
+my $release = shift @ARGV;
+defined(my $pid = fork) or exit 125;
+if ($pid == 0) {
+  setpgrp(0, 0) or exit 125;
+  $ENV{FM_PROCEVENT_RUNNER_GROUP} = $$;
+  exec @ARGV;
+  exit 125;
+}
+my $deadline = time + ($ENV{FM_TEST_STUB_MAX_BLOCK_SECONDS} // 120);
+while (!-e $release && time < $deadline) { select undef, undef, undef, 0.05; }
+waitpid($pid, 0) == $pid or exit 125;
+PL
+  printf '%s\n' "$!"
+}
+
+wait_for_zombie() {  # <pid> <label>
+  local pid=$1 label=$2 deadline
+  deadline=$((SECONDS + 20))
+  while :; do
+    case "$(ps -o stat= -p "$pid" 2>/dev/null | tr -d '[:space:]')" in
+      Z*) return 0 ;;
+    esac
+    [ "$SECONDS" -lt "$deadline" ] || fail "$label never became a zombie"
+    sleep 0.05
+  done
+}
+
+zombie_group_child() {  # <leader-pid> <command-needle>
+  ps -A -o pid= -o pgid= -o stat= -o args= 2>/dev/null \
+    | awk -v g="$1" -v needle="$2" '
+        $2 == g && $1 != g && $3 !~ /^[ZX]/ && index($0, needle) { print $1; exit }
+      '
+}
+
+HZ="$TMP_ROOT/zombie-oneshot"; new_home "$HZ"
+ZOMBIE_RELEASE="$HZ/reap"
+ZOMBIE_PID=
+ZOMBIE_PARENT=
+ZOMBIE_INNOCENT=
+zombie_fixture_cleanup() {
+  [ -z "${ZOMBIE_RELEASE:-}" ] || touch "$ZOMBIE_RELEASE"
+  [ -z "${ZOMBIE_PID:-}" ] || kill -KILL -"$ZOMBIE_PID" 2>/dev/null || true
+  [ -z "${ZOMBIE_PARENT:-}" ] || wait "$ZOMBIE_PARENT" 2>/dev/null || true
+  [ -z "${ZOMBIE_INNOCENT:-}" ] || {
+    kill "$ZOMBIE_INNOCENT" 2>/dev/null || true
+    wait "$ZOMBIE_INNOCENT" 2>/dev/null || true
+  }
+  fm_test_cleanup
+}
+trap zombie_fixture_cleanup EXIT
+ZO_TRIGGER="$TMP_ROOT/zombie-oneshot-trigger"
+pe_register "$HZ" lavish zombie-oneshot -- "$BLOCKER" "$ZO_TRIGGER" "held" >/dev/null
+ZOMBIE_PARENT=$(start_unreaped_runner "$HZ" zombie-oneshot "$ZOMBIE_RELEASE")
+wait_for "$FM_PROCEVENT_CLAIM_ROOT/zombie-oneshot.claim" \
+  || fail "the one-shot zombie fixture did not claim its source"
+ZOMBIE_PID=$(sed -n '2p' "$FM_PROCEVENT_CLAIM_ROOT/zombie-oneshot.claim")
+zo_deadline=$((SECONDS + 20))
+until [ -n "$(zombie_group_child "$ZOMBIE_PID" "$BLOCKER")" ]; do
+  [ "$SECONDS" -lt "$zo_deadline" ] || fail "the one-shot zombie fixture never started its source"
+  sleep 0.05
+done
+kill -KILL -"$ZOMBIE_PID" 2>/dev/null || fail "the one-shot zombie fixture could not stop its group"
+wait_for_zombie "$ZOMBIE_PID" "the one-shot runner"
+zo_deadline=$((SECONDS + 20))
+while [ -n "$(zombie_group_child "$ZOMBIE_PID" "$BLOCKER")" ]; do
+  [ "$SECONDS" -lt "$zo_deadline" ] || fail "the one-shot zombie fixture kept a live group member"
+  sleep 0.05
+done
+assert_present "$FM_PROCEVENT_CLAIM_ROOT/zombie-oneshot.claim" \
+  "the exited runner left its claim for retirement to judge"
+sleep 30 &
+ZOMBIE_INNOCENT=$!
+zombie_status=0
+zombie_out=$(pe "$HZ" retire zombie-oneshot 2>&1) || zombie_status=$?
+[ "$zombie_status" -eq 0 ] || fail "retirement refused a zombie-only runner: $zombie_out"
+kill -0 "$ZOMBIE_INNOCENT" 2>/dev/null \
+  || fail "retirement signaled an unrelated process while releasing a zombie-only runner"
+kill "$ZOMBIE_INNOCENT" 2>/dev/null || true
+wait "$ZOMBIE_INNOCENT" 2>/dev/null || true
+ZOMBIE_INNOCENT=
+assert_absent "$HZ/state/procevent/zombie-oneshot.source" \
+  "zombie-only retirement removes the registration"
+assert_absent "$FM_PROCEVENT_CLAIM_ROOT/zombie-oneshot.claim" \
+  "zombie-only retirement releases the claim"
+touch "$ZOMBIE_RELEASE"
+wait "$ZOMBIE_PARENT" 2>/dev/null || true
+ZOMBIE_PARENT=
+ZOMBIE_PID=
+pass "an unreaped one-shot runner is retired without a live identity"
+
+# Other processes on a busy host exit between a scan listing /proc and reading
+# each entry. Those vanished entries say nothing about the runner's group, so a
+# zombie-only group must still be judged gone while they churn.
+CHURN_ROOT="$TMP_ROOT/zombie-churn-proc"; mkdir -p "$CHURN_ROOT"
+CHURN_RELEASE="$TMP_ROOT/zombie-churn-reap"
+CHURN_PIDFILE="$TMP_ROOT/zombie-churn.pid"
+perl - "$CHURN_RELEASE" "$CHURN_PIDFILE" <<'PL' &
+my ($release, $pidfile) = @ARGV;
+defined(my $pid = fork) or exit 125;
+if ($pid == 0) { setpgrp(0, 0) or exit 125; exit 0; }
+open(my $fh, '>', $pidfile) or exit 125; print $fh "$pid\n"; close $fh;
+my $deadline = time + ($ENV{FM_TEST_STUB_MAX_BLOCK_SECONDS} // 120);
+while (!-e $release && time < $deadline) { select undef, undef, undef, 0.05; }
+waitpid($pid, 0) == $pid or exit 125;
+PL
+CHURN_PARENT=$!
+wait_for "$CHURN_PIDFILE" || fail "the churn fixture never forked its zombie leader"
+CHURN_PID=$(cat "$CHURN_PIDFILE")
+wait_for_zombie "$CHURN_PID" "the churn fixture leader"
+mkdir -p "$CHURN_ROOT/$CHURN_PID" "$CHURN_ROOT/1" "$CHURN_ROOT/4194301" "$CHURN_ROOT/4194302"
+cp "/proc/$CHURN_PID/stat" "$CHURN_ROOT/$CHURN_PID/stat" 2>/dev/null \
+  || printf '%s (sh) Z 1 %s %s 0\n' "$CHURN_PID" "$CHURN_PID" "$CHURN_PID" >"$CHURN_ROOT/$CHURN_PID/stat"
+printf '1 (init) S 0 1 1 0\n' >"$CHURN_ROOT/1/stat"
+churn_status=0
+FM_PROC_ROOT_OVERRIDE="$CHURN_ROOT" bash -c \
+  '. "$1/bin/fm-procevent-lib.sh"; fm_procevent_group_has_live_member "$2"' \
+  _ "$ROOT" "$CHURN_PID" || churn_status=$?
+[ "$churn_status" -eq 1 ] \
+  || fail "entries that vanished mid-scan kept a zombie-only group live (status $churn_status)"
+printf '4194301 (sh) S 1 %s %s 0\n' "$CHURN_PID" "$CHURN_PID" >"$CHURN_ROOT/4194301/stat"
+churn_status=0
+FM_PROC_ROOT_OVERRIDE="$CHURN_ROOT" bash -c \
+  '. "$1/bin/fm-procevent-lib.sh"; fm_procevent_group_has_live_member "$2"' \
+  _ "$ROOT" "$CHURN_PID" || churn_status=$?
+[ "$churn_status" -eq 0 ] || fail "a live member listed beside churn was not seen (status $churn_status)"
+touch "$CHURN_RELEASE"
+wait "$CHURN_PARENT" 2>/dev/null || true
+pass "unrelated processes exiting mid-scan do not keep a zombie-only group live"
+
+HCZ="$TMP_ROOT/zombie-child"; new_home "$HCZ"
+ZOMBIE_RELEASE="$HCZ/reap"
+CZ_TRIGGER="$TMP_ROOT/zombie-child-trigger"
+pe_register "$HCZ" lavish zombie-child -- "$BLOCKER" "$CZ_TRIGGER" "held" >/dev/null
+ZOMBIE_PARENT=$(start_unreaped_runner "$HCZ" zombie-child "$ZOMBIE_RELEASE")
+wait_for "$FM_PROCEVENT_CLAIM_ROOT/zombie-child.claim" \
+  || fail "the zombie-child fixture did not claim its source"
+ZOMBIE_PID=$(sed -n '2p' "$FM_PROCEVENT_CLAIM_ROOT/zombie-child.claim")
+cz_deadline=$((SECONDS + 20))
+cz_child=
+while [ -z "$cz_child" ]; do
+  cz_child=$(zombie_group_child "$ZOMBIE_PID" "$BLOCKER")
+  [ -n "$cz_child" ] && break
+  [ "$SECONDS" -lt "$cz_deadline" ] || fail "the zombie-child fixture never started a live group member"
+  sleep 0.05
+done
+kill -KILL "$ZOMBIE_PID" 2>/dev/null || fail "the zombie-child fixture could not stop only its leader"
+wait_for_zombie "$ZOMBIE_PID" "the child fixture's leader"
+sleep 0.3
+kill -0 "$cz_child" 2>/dev/null \
+  || fail "the leader's owner guard stopped the surviving child before retirement"
+zombie_status=0
+zombie_out=$(pe "$HCZ" retire zombie-child 2>&1) || zombie_status=$?
+[ "$zombie_status" -ne 0 ] \
+  || fail "retirement succeeded against a zombie leader with a live child: $zombie_out"
+assert_contains "$zombie_out" "cannot confirm runner identity" \
+  "a zombie leader with a live child is refused with the unproved-group diagnostic"
+kill -0 "$cz_child" 2>/dev/null \
+  || fail "retirement signaled the child behind a zombie leader"
+assert_present "$HCZ/state/procevent/zombie-child.source" \
+  "a refused zombie-leader retirement preserves registration"
+assert_present "$FM_PROCEVENT_CLAIM_ROOT/zombie-child.claim" \
+  "a refused zombie-leader retirement preserves the claim"
+kill -KILL -"$ZOMBIE_PID" 2>/dev/null || true
+touch "$ZOMBIE_RELEASE"
+wait "$ZOMBIE_PARENT" 2>/dev/null || true
+ZOMBIE_PARENT=
+ZOMBIE_PID=
+ZOMBIE_RELEASE=
+trap fm_test_cleanup EXIT
+pass "a zombie leader with a live child is still refused, not signalled"
+
 HM="$TMP_ROOT/hm"; new_home "$HM"
 SWEEP_TRIGGER_ONE="$TMP_ROOT/sweep-trigger-one"
 SWEEP_TRIGGER_TWO="$TMP_ROOT/sweep-trigger-two"

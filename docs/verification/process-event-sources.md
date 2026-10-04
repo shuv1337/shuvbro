@@ -123,6 +123,7 @@ Exercised by `tests/fm-procevent.test.sh` against a fake blocking source whose c
 | coherent ownership reads | a claim replacement held inside the source boundary blocks `list` until one complete generation is visible |
 | retire-start exclusion | a queued start revalidates registration after the serialized retirement boundary and executes no child |
 | uncertain identity before the first signal | a live owner whose identity probe transiently fails is not signaled or released, and its registration remains for retry |
+| unreaped zombie leader | a finished runner that is still a zombie, with no non-zombie process left in its group, is stale: retirement releases that generation without signalling; a zombie leader that still has a live group member stays refused like any other crashed leader; a runner that passes its identity check and is reaped before its process-group read is likewise released once no live group member remains |
 | bounded home sweep | a non-mutating full-tree preflight precedes teardown, then registrations and claim-only owned sources retire through the ordinary safe path at each home-removal boundary |
 | sweep refusal | uncertain identity preserves the runner, claim, registration, home, lease, and parent retirement evidence for retry |
 | foreign ownership | sweeping one home removes its registration without signaling or releasing another home's live claim |
@@ -193,7 +194,7 @@ The regression pins that phase rather than sampling it, because a sampled phase 
 A guard that acted on a single failed read instead reached the same reaping in 9.9 seconds, so the UNSAFE variant is the faster one.
 That is why the bound and the debounce are pinned by separate cases: a change trading one away for the other would otherwise register only as an improvement.
 
-[`tests/fm-procevent.test.sh`](../../tests/fm-procevent.test.sh) exercises these reproductions through the executable interface: a TERM-surviving child under both `retire` and the guard, escalation with an absent or zombie leader or probes configured to become unreadable after TERM, and refusal of mismatched live identities or nonleaders before the first signal.
+[`tests/fm-procevent.test.sh`](../../tests/fm-procevent.test.sh) exercises these reproductions through the executable interface: a TERM-surviving child under both `retire` and the guard, escalation with an absent or zombie leader or probes configured to become unreadable after TERM, refusal of mismatched live identities or nonleaders before the first signal, and retirement of a finished zombie-only runner beside refusal while that zombie leader still has a live member.
 The healthy-runner case requires the attached `start` to return status 143 (TERM); the printed retirement duration and sampled stop windows are supplementary evidence, not a timing-based pass condition.
 Two cases pin the guard's own numbers rather than only its outcome: one reaps an orphaned listener within the lease term plus a single check interval, with the lease expiry deliberately placed late in that interval, and one fails exactly one lease read against a home that is still alive and requires the runner to survive it.
 They fail for opposite reasons, which is the point of keeping them apart.

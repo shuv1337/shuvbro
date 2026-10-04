@@ -1315,10 +1315,22 @@ runner_group_signal() {  # <signal> <pid> <identity> [proved]
     state=$?
     case "$state" in
       0) ;;
-      1) fm_procevent_group_alive "$pid" && return 2; return 1 ;;
+      # State 1 is a stale leader. A zombie keeps the numeric group signalable
+      # without being a live member, so only a non-zombie member still refuses
+      # the stop. A zombie-only group is the finished generation.
+      1) fm_procevent_group_has_live_member "$pid" && return 2; return 1 ;;
       *) return 2 ;;
     esac
-    pgid=$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d '[:space:]') || return 2
+    pgid=$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d '[:space:]')
+    if [ -z "$pgid" ]; then
+      # A one-shot runner can finish and be reaped between its identity match
+      # and this read. Judge it again: only a now-stale leader whose group has
+      # no live member is the finished generation; anything else still refuses.
+      fm_procevent_pid_state "$pid" "$identity"
+      [ "$?" -eq 1 ] || return 2
+      fm_procevent_group_has_live_member "$pid" && return 2
+      return 1
+    fi
     [ "$pgid" = "$pid" ] || return 2
   fi
   # KNOWN LIMIT: portable shell cannot make this verification and signal atomic,

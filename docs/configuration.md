@@ -899,7 +899,9 @@ A live identity-matched owner is never displaced, and release removes only the e
 Every stop proves ownership before its first signal: the live runner's recorded process identity must match and it must still lead its process group.
 Once that stop has proved ownership and sent TERM, its own escalation to KILL checks only whether the proved group still has members; it does not re-read the leader's identity or group membership, which can change or become unreadable as TERM ends the leader.
 This proof belongs only to that stop's own escalation and cannot authorize another caller that encounters an unproved group.
-A claim counts as reclaimable only when its owner is stale and an independent process-group check finds no members; a crashed leader or reused pid whose process group still has members cannot relax ownership cleanup, so reconcile preserves the claim without signalling the ambiguous group or starting a replacement.
+A claim counts as reclaimable only when its owner is stale and an independent process-group check finds no live members.
+An unreaped zombie leader is already dead, so it is not a live member and does not by itself keep that group alive.
+A crashed leader or reused pid whose process group still has a non-zombie member cannot relax ownership cleanup, so reconcile preserves the claim without signalling the ambiguous group or starting a replacement.
 If the leader dies to anything other than the stop's own signal, `retire`, `reconcile`, `sweep-home`, and the guard all refuse its surviving group permanently, and the source silently stops listening.
 Whether that group may ever be signalled remains an open decision; the repaired guard does not close this gap.
 Reclaiming a generation that IS gone is not gated on tidying its capture-reservation records.
@@ -907,6 +909,7 @@ Those records are keyed by claim token and every replacement claims a fresh one,
 Ordinary release and reclamation still attempt reservation cleanup and require it unless both owner staleness and whole-group absence prove the generation gone.
 The narrow live-owner terminal-self-retirement path also attempts cleanup but tolerates its own still-in-flight reservation, which the runner removes on the normal end-of-capture path; exact home, PID, and claim-token ownership remains mandatory before the claim is released.
 If identity cannot be established before the first signal, or a surviving owned group cannot be proved stopped, the operation preserves the registration and claim for safe retry rather than adding a second owner.
+An unreaped zombie is not that unreadable live probe: the leader is already dead, and the generation is stale once no non-zombie group member remains.
 A live PID whose identity no longer matches is refused before the first signal.
 Identity and process-group verification cannot be made atomic with signalling in portable shell: the reaper signals only a target it has verified as the recorded generation, but PID and group reuse remain possible in the narrow interval between verification and the signal.
 Launch pacing is the primary host-wedge protection; watchdog cleanup is a backstop.
