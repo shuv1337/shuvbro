@@ -1,0 +1,14 @@
+=== new tests vs TARGET runner (ambient C locale CI-like: LC_ALL=C)
+ok - changed-file selection stays conservative (never silent full suite)
+ok - a task marker refuses execution in the primary checkout and leaves worktrees and inspection alone
+ok - exact suite coverage: --all lists every tests/*.test.sh once
+ok - portable shard union, disjointness, and coverage guard hold
+FOCUSED_TESTS_PASSED
+exit=0
+=== new tests vs BASE runner (should fail - regression catch, under LC_ALL=C)
+ok - changed-file selection stays conservative (never silent full suite)
+ok - a task marker refuses execution in the primary checkout and leaves worktrees and inspection alone
+ok - exact suite coverage: --all lists every tests/*.test.sh once
+not ok - coverage guard must succeed under en_US.utf8: comm: file 2 is not in sorted order
+comm: input is not in sorted order
+exit=1

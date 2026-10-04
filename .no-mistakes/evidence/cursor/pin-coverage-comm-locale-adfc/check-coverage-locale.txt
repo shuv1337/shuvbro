@@ -1,0 +1,13 @@
+=== BASE 9d0932e: LC_ALL=en_US.UTF-8 bin/fm-test-run.sh --check-coverage
+comm: file 2 is not in sorted order
+comm: input is not in sorted order
+exit=1
+=== BASE 9d0932e: LC_ALL=C bin/fm-test-run.sh --check-coverage
+FM_TEST_COVERAGE ok total=218 parallel=24 serial=181 serial_shards=5 serial_unhinted=12 herdr=13
+exit=0
+=== TARGET bd69156: LC_ALL=en_US.UTF-8 bin/fm-test-run.sh --check-coverage
+FM_TEST_COVERAGE ok total=218 parallel=24 serial=181 serial_shards=5 serial_unhinted=12 herdr=13
+exit=0
+=== TARGET bd69156: LC_ALL=C bin/fm-test-run.sh --check-coverage
+FM_TEST_COVERAGE ok total=218 parallel=24 serial=181 serial_shards=5 serial_unhinted=12 herdr=13
+exit=0

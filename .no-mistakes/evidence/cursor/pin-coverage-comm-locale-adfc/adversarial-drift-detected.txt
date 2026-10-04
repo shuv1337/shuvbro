@@ -1,0 +1,5 @@
+=== TARGET with proven-isolated tests/fm-arm-pretool-check.test.sh removed: LC_ALL=en_US.UTF-8 --check-coverage
+fm-test-run: coverage guard: union of portable shards + portable serial + Herdr must equal tests/*.test.sh
+fm-test-run: extra beyond inventory:
+tests/fm-arm-pretool-check.test.sh
+exit=1
