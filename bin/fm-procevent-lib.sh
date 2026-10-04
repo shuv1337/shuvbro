@@ -656,43 +656,73 @@ fm_procevent_pid_is_zombie() {
   return 1
 }
 
-# fm_procevent_group_has_live_member <pgid>
-# True when a non-zombie process still belongs to this numeric process group.
-# A zombie leader keeps kill -0 on the group succeeding; that is not a live
-# member. A signalable group this scan cannot identify stays live, so a missed
-# read cannot prove the generation gone.
-fm_procevent_group_has_live_member() {
-  local pgid=$1 pid_dir stat_line rest state pgrp saw_group_member=0
-  local line_pgid line_stat
-  case "$pgid" in ''|*[!0-9]*) return 1 ;; esac
-  kill -0 -"$pgid" 2>/dev/null || return 1
-  if [ -d /proc ]; then
-    for pid_dir in /proc/[0-9]*; do
-      [ -r "$pid_dir/stat" ] || continue
-      { IFS= read -r stat_line <"$pid_dir/stat"; } 2>/dev/null || continue
+# fm_procevent_group_scan <pgid>
+# One pass over the process table: 0 a non-zombie member, 1 only zombie members,
+# 2 no member seen, 3 inconclusive because a listed /proc entry vanished or
+# could not be read, so a member may have been missed.
+fm_procevent_group_scan() {
+  local pgid=$1 proc_root stats stat_line rest state pgrp
+  local saw_group_member=0 skipped=0 line_pgid line_stat
+  proc_root=${FM_PROC_ROOT_OVERRIDE:-/proc}
+  if [ -d "$proc_root" ]; then
+    set -- "$proc_root"/[0-9]*
+    [ "$1" != "$proc_root/[0-9]*" ] || return 2
+    stats=$(cat -- "${@/%//stat}" 2>/dev/null) || skipped=1
+    while IFS= read -r stat_line; do
       rest=${stat_line##*)}
-      read -r state _ pgrp _ <<< "$rest" || continue
+      if ! read -r state _ pgrp _ <<< "$rest"; then
+        skipped=1
+        continue
+      fi
       [ "$pgrp" = "$pgid" ] || continue
       saw_group_member=1
       case "$state" in
         Z|X) ;;
         *) return 0 ;;
       esac
-    done
-    [ "$saw_group_member" -eq 1 ] && return 1
-    kill -0 -"$pgid" 2>/dev/null || return 1
-    return 0
+    done <<< "$stats"
+  else
+    while read -r _ line_pgid line_stat _; do
+      [ "$line_pgid" = "$pgid" ] || continue
+      saw_group_member=1
+      case "$line_stat" in
+        Z*|X*) ;;
+        *) return 0 ;;
+      esac
+    done < <(LC_ALL=C ps -A -o pid= -o pgid= -o stat= 2>/dev/null)
   fi
-  while read -r _ line_pgid line_stat _; do
-    [ "$line_pgid" = "$pgid" ] || continue
-    saw_group_member=1
-    case "$line_stat" in
-      Z*|X*) ;;
-      *) return 0 ;;
-    esac
-  done < <(LC_ALL=C ps -A -o pid= -o pgid= -o stat= 2>/dev/null)
+  [ "$skipped" -eq 0 ] || return 3
   [ "$saw_group_member" -eq 1 ] && return 1
+  return 2
+}
+
+# fm_procevent_group_has_live_member <pgid>
+# True when a non-zombie process still belongs to this numeric process group.
+# A zombie leader keeps kill -0 on the group succeeding; that is not a live
+# member. A signalable group this scan cannot identify stays live, so a missed
+# read cannot prove the generation gone. A zombie-only result counts only when
+# a later complete scan of a fresh listing confirms it, because a member can
+# fork and then exit between listing the table and reading its entry. Scans
+# that stay inconclusive keep the group live.
+fm_procevent_group_has_live_member() {
+  local pgid=$1 scan zombie_only=0
+  case "$pgid" in ''|*[!0-9]*) return 1 ;; esac
   kill -0 -"$pgid" 2>/dev/null || return 1
+  for _ in 1 2 3 4 5 6; do
+    scan=0
+    fm_procevent_group_scan "$pgid" || scan=$?
+    case "$scan" in
+      0) return 0 ;;
+      1)
+        zombie_only=$((zombie_only + 1))
+        [ "$zombie_only" -lt 2 ] || return 1
+        ;;
+      2)
+        kill -0 -"$pgid" 2>/dev/null || return 1
+        return 0
+        ;;
+    esac
+  done
   return 0
 }
 
