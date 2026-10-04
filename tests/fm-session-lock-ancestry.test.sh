@@ -369,6 +369,69 @@ SH
   assert_not_contains "$out" "cannot locate harness process" "the refusal still reports a process-detection failure"
   [ ! -e "$dir/state/.lock" ] || fail "the refused unactivated lead wrote .lock"
 
+  # Paste both printed commands into Bash against argument-capturing launchers.
+  # Keep redirection targets present so unsafe placeholders cannot hide behind
+  # a missing-input error, and include spaces/metacharacters in executable paths.
+  local fixture="$dir/paste fixture" script case_name expected_session expected_binary command kind
+  mkdir -p "$fixture/bin" "$fixture/state"
+  for script in fm-lock.sh fm-session-lock-lib.sh fm-cursor-lib.sh fm-shuvcode-lib.sh fm-opencode-v2-owner.mjs; do
+    cp "$ROOT/bin/$script" "$fixture/bin/$script"
+  done
+  cat > "$fixture/bin/fm-opencode-v2-lead.sh" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$@" > "$FM_TEST_RELAUNCH_ARGS"
+SH
+  cp "$fixture/bin/fm-opencode-v2-lead.sh" "$fixture/bin/fm-opencode-v2-primary.sh"
+  chmod +x "$fixture/bin/"*.sh
+  printf 'keep input\n' > "$fixture/session-id"
+  printf 'keep output\n' > "$fixture/--native-binary"
+  for case_name in invalid-session spaced-binary missing-binary; do
+    session='bad; touch injected'
+    expected_session=ses_INVALID
+    native="$dir/native/shuvcode"
+    case "$case_name" in
+      spaced-binary)
+        session=ses_valid_paste
+        expected_session=$session
+        native="$fixture/native path; touch injected"
+        cp "$(type -P true)" "$native"
+        ;;
+      missing-binary) native="$fixture/not-installed" ;;
+    esac
+    if [ "$case_name" = missing-binary ]; then
+      expected_binary=installed-native-shuvcode-executable
+    else
+      expected_binary=$(readlink -f "$native")
+    fi
+    out=$(PATH="$fakebin:$PATH" OPENCODE_SESSION_ID="$session" FM_OPENCODE_V2_BIN="$native" \
+      FM_STATE_OVERRIDE="$fixture/state" "$fixture/bin/fm-lock.sh" 2>&1) && rc=0 || rc=$?
+    expect_code 1 "$rc" "$case_name: the unactivated lead must still be refused"
+    assert_contains "$out" 'relaunch with ' "$case_name: the refusal must provide a relaunch command"
+    assert_not_contains "$out" 'bad; touch injected' "$case_name: the raw invalid session id must not be echoed"
+    for kind in lead primary; do
+      if [ "$kind" = lead ]; then
+        command=${out##*relaunch with }
+        command=${command%% \(equivalent:*}
+        printf '%s\n' --session "$expected_session" > "$fixture/expected-args"
+      else
+        command=${out##*equivalent: }
+        command=${command%)}
+        printf '%s\n' --session "$expected_session" --native-binary "$expected_binary" > "$fixture/expected-args"
+      fi
+      (cd "$fixture" && FM_TEST_RELAUNCH_ARGS="$fixture/args" bash -c "$command") \
+        || fail "$case_name: the printed $kind command could not be pasted"
+      cmp -s "$fixture/expected-args" "$fixture/args" \
+        || fail "$case_name: the pasted $kind command changed argument boundaries"
+      [ "$(cat "$fixture/--native-binary")" = 'keep output' ] \
+        || fail "$case_name: the pasted $kind command truncated a redirection target"
+      [ "$(cat "$fixture/session-id")" = 'keep input' ] || fail "the pasted command changed the input sentinel"
+      [ ! -e "$fixture/injected" ] || fail "$case_name: the pasted command executed injected shell text"
+    done
+    [ ! -e "$fixture/state/.lock" ] || fail "$case_name: the refused lead wrote .lock"
+  done
+  session=ses_unactivated_lock_probe
+  native="$dir/native/shuvcode"
+
   out=$(PATH="$fakebin:$PATH" FM_STATE_OVERRIDE="$dir/state" "$ROOT/bin/fm-lock.sh" 2>&1) && rc=0 || rc=$?
   expect_code 1 "$rc" "a service shell with no session id must not acquire the lock"
   assert_contains "$out" "cannot locate harness process in ancestry" "without a session id the generic ancestry error must remain"
