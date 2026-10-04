@@ -17,8 +17,9 @@
 # serve    Run the board for the active FM_HOME in the foreground, bound to
 #          127.0.0.1 only, through bin/fm-board.mjs (node; no npm dependency).
 #          The page rebuilds its data every FM_BOARD_INTERVAL seconds (default
-#          10, 2..300) from `model`. While it runs it keeps one private record,
+#          10, 2..300) from `model`. While it runs it keeps a private serve record,
 #          state/board/serve.json (pid, port, instance), removed on exit.
+#          bin/fm-board.mjs owns the persistent answer-confirmation records.
 # status   Exit 0 and print the local URL when this home's board answers its
 #          health check; exit 1 and say why otherwise. Reads only.
 # model    Print the board's fm-board.v1 view as JSON, built only from
@@ -63,9 +64,9 @@
 #
 # answer prints exactly one JSON line, {"ok":true,"outcome":...,"message":...}
 # or {"ok":false,"code":...,"message":...}, and exits 0 when recorded (a Later
-# whose deferral fails after its answer was recorded records it again, so the
-# answer stays newer than the rewritten hold-set stamp, reports outcome
-# not_deferred, and still wakes the lead), 2 for an
+# whose deferral fails after its answer was recorded verifies a repair intake
+# write before reporting not_deferred and waking the lead; a failed repair
+# returns repair_failed instead of success), 2 for an
 # invalid request, 3 when the item is no longer the one the captain saw, and 1
 # when recording failed. Free text is at most 500 characters and becomes one
 # line; dates must be after today (UTC) and at most 366 days out.
@@ -572,8 +573,14 @@ EOF
       outcome=deferred
     else
       outcome=not_deferred
-      feed_intake >/dev/null || true
       defer_error=$(printf '%s' "$out" | tail -1 | sed 's/^fm-captain-hold: //' | cut -c1-300)
+      # Record the failed date gate as new provenance, not an idempotent replay
+      # of the original Later. Its recovery write must actually land.
+      source="$source, date could not be set"
+      out=$(feed_intake) || true
+      if ! printf '%s\n' "$out" | grep -Fxq "recorded: $id"; then
+        answer_result 1 repair_failed "Later could not be confirmed after the date failed. The work stays held. Refresh or ask $lead before answering again."
+      fi
     fi
   fi
 

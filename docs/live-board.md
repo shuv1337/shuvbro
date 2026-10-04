@@ -38,12 +38,16 @@ Held work goes ahead only on Yes or one of its declared choices; No or a typed r
 Until then it leaves Waiting on you for an "Answered - with" list that shows your answer and when you gave it, without buttons; if the lead asks you again, it returns to Waiting on you.
 Later asks for a date, records it, and moves the item off the list until that day; it closes nothing.
 If that date cannot be set, the card says so and the item waits with the lead under "Answered - with" instead.
-Every recorded answer also leaves the lead a captain inbox note, so it acts on your answer at its next turn.
+If confirming that answer also fails, the request reports a failure rather than success; the work stays held and the already recorded Later does not regain answer buttons.
+Every confirmed answer also leaves the lead a captain inbox note, so it acts on your answer at its next turn.
 
 A click is your recorded words and nothing more.
 It never merges, starts, steers, or stops work by itself: the lead acts on it under the same approval rules as an answer you give in chat.
 The card shows whether your answer is being recorded, was recorded, or was refused and why.
 If the question changed after the page loaded, the click is refused and the card shows the new question.
+If the response is lost, the page refreshes and checks the original click again: a saved confirmation reports the committed result without recording another answer or notifying the lead twice.
+If confirmation is still unavailable, it says the answer may have been recorded and offers Refresh, never claims that nothing was recorded.
+Confirmations survive a board restart; retrying an old click reports its original result and does not answer a newly asked question.
 
 Items the lead noted for you, and questions held in a second mate's home, appear without buttons; answer those in chat.
 Questions you have left unanswered for two weeks move into a collapsed "Older questions still open" list, where they can still be answered.
@@ -63,4 +67,4 @@ Without `config/board-logins`, everyone your tailnet shares this machine with ca
 
 ## Verification
 
-`tests/fm-board.test.sh` covers the rendered view, every request guard above, each answer kind landing through the intake with its wake, and a home that never starts the board staying untouched.
+`tests/fm-board.test.sh` covers the rendered view, every request guard above, each answer kind landing through the intake with its wake, failed Later recovery, the page handling a lost committed response, restart-safe retries, and a home that never starts the board staying untouched.

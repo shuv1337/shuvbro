@@ -641,6 +641,174 @@ EOF
   pass "a Later whose deferral fails is still recorded, reported as not deferred, and wakes the lead"
 }
 
+test_failed_later_repair_is_not_success_or_answerable() {
+  local home real out until
+  home=$(make_home later-repair-fails)
+  hold "$home" sample-ship --reason "Merge PR 5 now? Recommend yes"
+  real=$(command -v tasks-axi)
+  cat > "$home/fakebin/tasks-axi" <<EOF
+#!/usr/bin/env bash
+if [ "\${1:-}" = update ] && [ "\${2:-}" = sample-ship ]; then
+  count=0
+  [ ! -f "$home/update-count" ] || count=\$(cat "$home/update-count")
+  count=\$((count + 1))
+  echo "\$count" > "$home/update-count"
+  [ "\$count" != 2 ] || { echo "tasks-axi: repair write unavailable" >&2; exit 1; }
+fi
+if [ "\${1:-}" = hold ]; then
+  for arg in "\$@"; do
+    [ "\$arg" != --until ] || { echo "tasks-axi: date gate unavailable" >&2; exit 1; }
+  done
+fi
+exec "$real" "\$@"
+EOF
+  chmod +x "$home/fakebin/tasks-axi"
+  start_board "$home"
+  until=$(utc_day 7)
+  out=$(post_answer "$(answer_body sample-ship later "$(jq -cn --arg d "$until" '{until: $d}')")")
+  expect_refusal "$out" 500 repair_failed "a failed Later repair reported success"
+  [ "$(cat "$home/update-count")" = 2 ] || fail "the second update was not exercised"
+  board_data | jq -e 'any(.with_lead[]; .id == "sample-ship")
+    and all(.waiting_on_you[]; .id != "sample-ship")' >/dev/null \
+    || fail "a failed Later repair offered Yes/No again: $(board_data)"
+  [ "$(inbox_notes "$home")" = 0 ] || fail "a failed repair announced success to the lead"
+  local_merge_refused "$home" sample-ship
+  pass "a failed Later repair reports failure without restoring answer buttons or releasing work"
+}
+
+test_page_recovers_a_lost_committed_response() {
+  local home
+  home=$(make_home lost-response)
+  hold "$home" sample-ship --reason "Merge PR 5 now? Recommend yes"
+  hold "$home" lost-call --title "Close the question?" --reason "Close it?"
+  start_board "$home"
+  node - "$BOARD_PORT" <<'JS' || fail "the page did not recover the committed answer"
+const assert = require('node:assert/strict');
+const vm = require('node:vm');
+const port = process.argv[2];
+const origin = `http://127.0.0.1:${port}`;
+(async () => {
+  const page = await (await fetch(origin)).text();
+  const nodes = new Map();
+  const node = (id) => {
+    if (!nodes.has(id)) nodes.set(id, { innerHTML: '', textContent: '', dataset: {} });
+    return nodes.get(id);
+  };
+  let posts = 0, committedBody;
+  let loseEveryResponse = false;
+  const context = vm.createContext({
+    console, Date, Map, Set, CSS: { escape: (s) => s }, setInterval: () => {},
+    location: { reload() { throw new Error('unexpected reload'); } },
+    document: {
+      getElementById: node, addEventListener() {}, activeElement: null,
+      querySelector(selector) {
+        const name = /meta\[name="([^"]+)"\]/.exec(selector)?.[1];
+        if (!name) return null;
+        return { content: new RegExp(`name="${name}" content="([^"]+)"`).exec(page)[1] };
+      },
+    },
+    fetch: async (path, options = {}) => {
+      const headers = { ...options.headers, Origin: origin };
+      const response = await fetch(new URL(path, origin), { ...options, headers });
+      if (options.method === 'POST') {
+        posts++;
+        if (posts === 1 || loseEveryResponse) {
+          committedBody = options.body;
+          assert.equal(response.status, 200);
+          assert.equal((await response.json()).outcome, loseEveryResponse ? 'closed' : 'released');
+          // The real answer committed; discard its response on the phone side.
+          throw new TypeError('connection lost after commit');
+        }
+        assert.equal(options.body, committedBody, 'recovery changed the original click');
+      }
+      return response;
+    },
+  });
+  vm.runInContext(/<script[^>]*>([\s\S]*?)<\/script>/.exec(page)[1], context);
+  await vm.runInContext('refresh()', context);
+  await vm.runInContext('answer("sample-ship", "yes")', context);
+  await vm.runInContext('refresh()', context);
+  assert.equal(posts, 2, 'a lost response was not checked with the same request');
+  assert.match(node('answered').innerHTML, /Recorded/);
+  assert.doesNotMatch(node('answered').innerHTML + node('you').innerHTML, /Nothing was recorded|Not recorded:/);
+  loseEveryResponse = true;
+  await vm.runInContext('answer("lost-call", "yes")', context);
+  await vm.runInContext('refresh()', context);
+  assert.equal(posts, 4);
+  assert.match(node('banner').innerHTML, /may have been recorded/);
+  assert.match(node('banner').innerHTML, /data-act="refresh"/);
+  assert.doesNotMatch(node('banner').innerHTML, /Nothing was recorded|Not recorded:/);
+  // A known not_waiting response is not evidence that this click was unwritten.
+  await vm.runInContext('render({instance: INSTANCE, waiting_on_you: [{id: "old", title: "Old question", answerable: true, card: "a".repeat(64), choices: []}]})', context);
+  context.fetch = async () => ({ ok: true, json: async () => ({ ok: false, code: 'not_waiting', message: 'This is no longer waiting on you.' }) });
+  await vm.runInContext('answer("old", "yes")', context);
+  assert.match(node('banner').innerHTML, /no longer waiting/);
+  assert.doesNotMatch(node('banner').innerHTML, /Not recorded:/);
+})().catch((error) => { console.error(error); process.exitCode = 1; });
+JS
+  task_show "$home" sample-ship | grep -F 'held: no' >/dev/null || fail "the committed answer did not release work"
+  [ "$(inbox_notes "$home")" = 2 ] || fail "a lost response recovery duplicated the inbox note"
+  pass "the actual page recovers a response lost after a committed release without duplicating the answer"
+}
+
+test_answer_replay_survives_restart_without_reapplying() {
+  local home body out card before i=0
+  home=$(make_home replay)
+  hold "$home" sample-ship --reason "Ship now?"
+  start_board "$home"
+  body=$(answer_body sample-ship yes)
+  card=$(printf '%s' "$body" | jq -r .card)
+  out=$(post_answer "$body")
+  [ "$(body_of "$out" | jq -r .outcome)" = released ] || fail "initial answer did not land: $out"
+  stop_boards
+  # Wait for the old server to release its home record before restarting it.
+  while [ -e "$home/state/board/serve.json" ]; do
+    i=$((i + 1))
+    [ "$i" -le 100 ] || fail "the server did not stop before replay"
+    sleep 0.1
+  done
+  hold "$home" sample-ship --reason "Ship after docs?"
+  start_board "$home"
+  before=$(cat "$home/data/backlog.md")
+  body=$(printf '%s' "$body" | jq -c --arg t "$BOARD_TOKEN" '.token = $t')
+  out=$(post_answer "$body")
+  [ "$(status_of "$out")" = 200 ] && [ "$(body_of "$out" | jq -r .outcome)" = released ] \
+    || fail "an exact retry lost its committed result after restart: $out"
+  expect_refusal "$(post_answer "$(printf '%s' "$body" | jq -c '.choice = "no"')")" 409 answer_conflict \
+    "the same card accepted a different answer"
+  [ "$(cat "$home/data/backlog.md")" = "$before" ] || fail "a replay applied the old answer to a new hold"
+  [ "$(inbox_notes "$home")" = 1 ] || fail "a replay duplicated the notification"
+  [ "$(card_of sample-ship)" != "$card" ] || fail "a new hold reused the old card"
+  pass "a committed result survives server restart and retries never release a re-asked question"
+}
+
+test_confirmation_storage_failure_reports_unknown() {
+  local home body out real
+  home=$(make_home receipt-fails)
+  hold "$home" sample-ship --reason "Ship now?"
+  real=$(command -v tasks-axi)
+  cat > "$home/fakebin/tasks-axi" <<EOF
+#!/usr/bin/env bash
+"$real" "\$@" || exit \$?
+if [ "\${1:-}" = unhold ] && [ "\${2:-}" = sample-ship ]; then
+  printf 'unavailable\n' > "$home/state/board/answers"
+fi
+EOF
+  chmod +x "$home/fakebin/tasks-axi"
+  start_board "$home"
+  # After unhold commits, the wrapper prevents creating the confirmation dir.
+  body=$(answer_body sample-ship yes)
+  out=$(post_answer "$body")
+  expect_refusal "$out" 500 outcome_unknown "a failed confirmation claimed the answer was not recorded"
+  body_of "$out" | jq -e '.message | startswith("Your answer was recorded")' >/dev/null \
+    || fail "a confirmation storage failure misreported the committed answer: $out"
+  task_show "$home" sample-ship | grep -F 'held: no' >/dev/null || fail "the storage failure test did not commit"
+  out=$(post_answer "$body")
+  expect_refusal "$out" 500 outcome_unknown "an unreadable confirmation retried the mutation"
+  [ "$(inbox_notes "$home")" = 1 ] || fail "a failed confirmation duplicated the answer notification"
+  pass "a committed answer with unavailable confirmation storage reports uncertainty and does not reapply"
+}
+
 test_a_home_that_never_opts_in_is_untouched() {
   local home stamp changed
   home=$(make_home opt-out)
@@ -674,4 +842,8 @@ test_answers_land_through_the_intake
 test_same_second_answer_still_moves_to_answered
 test_reasking_an_answered_call_never_offers_the_old_question
 test_later_that_cannot_defer_is_still_recorded
+test_failed_later_repair_is_not_success_or_answerable
+test_page_recovers_a_lost_committed_response
+test_answer_replay_survives_restart_without_reapplying
+test_confirmation_storage_failure_reports_unknown
 test_a_home_that_never_opts_in_is_untouched

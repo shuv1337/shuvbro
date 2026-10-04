@@ -264,23 +264,38 @@ async function answer(id, choice, extra) {
   panels.delete(id);
   lastWaitingSignature = "";
   renderWaiting(last);
+  const request = {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token: TOKEN, task: id, card: item.card, choice, ...extra }),
+  };
+  const submit = async () => {
+    const response = await fetch("answer", request);
+    return response.json();
+  };
   let result;
   try {
-    const r = await fetch("answer", {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token: TOKEN, task: id, card: item.card, choice, ...extra }),
-    });
-    result = await r.json().catch(() => ({ ok: false, message: `The board answered ${r.status}.` }));
+    result = await submit();
   } catch (e) {
-    result = { ok: false, message: "The board could not be reached. Nothing was recorded." };
+    // A missing response is not a missing write. Re-read the board, then ask
+    // for the same click's receipt, never for an answer to a newly loaded card.
+    await refresh();
+    try {
+      result = await submit();
+    } catch {
+      result = { ok: false, code: "outcome_unknown", message: "Your answer may have been recorded. Refresh to check before answering again." };
+    }
   }
   if (result.ok) {
     cardState.set(id, { state: "recorded", message: result.message || "Recorded.", title: item.title });
     drafts.delete(id);
   } else {
-    cardState.set(id, { state: "failed", message: `Not recorded: ${result.message || "unknown error"}`, title: item.title });
+    const message = result.message || "The answer could not be confirmed.";
+    cardState.set(id, { state: "failed", message, title: item.title });
+    if (result.code === "outcome_unknown" || result.code === "not_waiting" || result.code === "repair_failed") {
+      $("banner").innerHTML = `<div class="banner">${esc(message)} <button data-act="refresh">Refresh</button></div>`;
+    }
     if (result.code === "bad_token") {
       $("banner").innerHTML = `<div class="banner">This page is out of date. <button data-act="reload">Reload</button> and answer again.</div>`;
     }
@@ -318,6 +333,7 @@ document.addEventListener("click", (event) => {
       break;
     }
     case "reload": location.reload(); break;
+    case "refresh": refresh(); break;
   }
 });
 
