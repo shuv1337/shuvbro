@@ -1,0 +1,9 @@
+$ fm-spawn.sh v2live-z1 <project> --mode no-mistakes --yolo off   (harness=opencode-v2, real tmux, real launch helper)
+exit=1
+--- spawn stderr/stdout ---
+warning: /home/shuv/.cache/agent-ws/v2live/run.qCdKfW/home/data/v2live-z1/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+error: shuvcode did not show its pre-filled launch brief in window firstmate:fm-v2live-z1; inspect window firstmate:fm-v2live-z1
+--- state/v2live-z1.status ---
+failed: shuvcode did not show its pre-filled launch brief in window firstmate:fm-v2live-z1
+--- tmux windows after spawn ---
+bash

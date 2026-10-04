@@ -1,0 +1,30 @@
+treehouse get
+bash-5.3$ treehouse get
+bash-5.3$ export GOTMPDIR=/tmp/fm-v2live-z1/gotmp
+bash-5.3$ export FM_TASK_ID=v2live-z1
+bash-5.3$ env -u FM_V2_ACTIVATION '/home/shuv/.no-mistakes/worktrees/8a7692f99431/01M43QTAZFKYCSB1ENJNMP473J/bin/fm-open
+code-v2-launch.sh' --session-record '/home/shuv/.cache/agent-ws/v2live/run.pE0uye/home/state/v2live-z1.opencode-v2-sessi
+on.json' --prompt "$('/home/shuv/.no-mistakes/worktrees/8a7692f99431/01M43QTAZFKYCSB1ENJNMP473J/bin/fm-operational-input
+.sh' encode launch-brief < '/home/shuv/.cache/agent-ws/v2live/run.pE0uye/home/data/v2live-z1/launch-brief.md')"
+error: unregistered native service endpoint; start/register the intended local shared service first
+bash-5.3$
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
