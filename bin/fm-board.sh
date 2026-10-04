@@ -23,7 +23,10 @@
 #          health check; exit 1 and say why otherwise. Reads only.
 # model    Print the board's fm-board.v1 view as JSON, built only from
 #          bin/fm-fleet-snapshot.sh --json (or --snapshot-file, for fixtures)
-#          plus the curated notes file data/board-notes.json. Recently done
+#          plus the curated notes file data/board-notes.json. A held item
+#          whose snapshot hold_answer shows the captain already answered it
+#          without releasing it is listed under with_lead, without buttons,
+#          until the lead re-holds it. Recently done
 #          is selected by the shared landed rule in bin/fm-landed-lib.sh. It never reads
 #          backlog, status, or metadata files itself. Read-only.
 # answer   Record one captain answer the board received. The server calls this
@@ -236,7 +239,9 @@ project_model() {  # <snapshot-file> <notes-json> <errors-json>
     | [ ($snap.backlog.records // [])[] | select(.structured == true) ] as $records
     | (reduce $records[] as $r ({}; .[$r.id] = $r)) as $by_id
     | [ $records[]
-        | select(.hold_kind == "captain" and (.hold_bucket == "live" or .hold_bucket == "aged"))
+        | select(.hold_kind == "captain" and (.hold_bucket == "live" or .hold_bucket == "aged")) ] as $open_holds
+    | [ $open_holds[]
+        | select(.hold_answer == null)
         | {id,
            source: "backlog",
            answerable: true,
@@ -269,6 +274,15 @@ project_model() {  # <snapshot-file> <notes-json> <errors-json>
         lead: $lead,
         home_label: ($home_label | text_or_null),
         waiting_on_you: ([ $held[] | select(.aged | not) ] + $you_notes + $mate_holds + [ $held[] | select(.aged) ]),
+        with_lead: [ $open_holds[]
+          | select(.hold_answer != null)
+          | {id,
+             title: ((.title // .id) | trunc(300)),
+             reason: (.hold_reason | text_or_null),
+             repo: (.repo | text_or_null),
+             links: [ (.links // [])[] | select(web_link) ],
+             answer: (.hold_answer.answer | text_or_null | trunc(500)),
+             answered_at: .hold_answer.at} ],
         in_flight: [ ($snap.tasks // [])[]
           | . as $t
           | ($by_id[$t.id] // {}) as $row

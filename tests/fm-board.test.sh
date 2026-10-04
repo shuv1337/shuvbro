@@ -428,7 +428,7 @@ test_tailscale_login_allowlist() {
 }
 
 test_answers_land_through_the_intake() {
-  local home out show until notes rows data id text
+  local home out show until notes rows data id text i
   home=$(make_home answers)
   hold "$home" call-yes --title "Close the duplicate PR?" --reason "Close duplicate PR 13? Recommend yes"
   hold "$home" sample-ship --reason "Merge PR 5 now? Recommend yes"
@@ -466,6 +466,25 @@ test_answers_land_through_the_intake() {
   printf '%s\n' "$show" | grep -F "held: yes" >/dev/null || fail "a typed reply released held work: $show"
   printf '%s\n' "$show" | grep -F "Answer: Not yet, wait for the docs" >/dev/null || fail "the typed reply on held work is missing: $show"
   local_merge_refused "$home" sample-plain
+
+  data=$(board_data)
+  printf '%s' "$data" | jq -e '
+    ([.waiting_on_you[] | select(.answerable) | .id] | index("sample-ship") == null and index("sample-plain") == null)
+    and ([.with_lead[] | {id, answer}] == [{id: "sample-ship", answer: "no"}, {id: "sample-plain", answer: "Not yet, wait for the docs"}])
+    and all(.with_lead[]; (.answered_at | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T")) and (has("card") | not))
+  ' >/dev/null || fail "a no and a reply on held work did not move it from Waiting on you to Answered: $data"
+  out=$(post_answer "$(jq -cn --arg t "$BOARD_TOKEN" '{token: $t, task: "sample-ship", card: ("c" * 64), choice: "yes"}')")
+  expect_refusal "$out" 409 not_waiting "an answered held item could still be answered from the board"
+
+  hold "$home" sample-ship --reason "Merge PR 5 after the docs land? Recommend yes"
+  i=0
+  until [ -n "$(card_of sample-ship)" ]; do
+    i=$((i + 1))
+    [ "$i" -le 100 ] || fail "a re-hold did not return answered work to Waiting on you: $(board_data)"
+    sleep 0.1
+  done
+  board_data | jq -e 'all(.with_lead[]; .id != "sample-ship")' >/dev/null \
+    || fail "re-held work is still listed as answered: $(board_data)"
 
   out=$(post_answer "$(answer_body sample-ship yes)")
   [ "$(body_of "$out" | jq -r '.outcome')" = released ] || fail "a yes on held work was not released: $out"
@@ -505,9 +524,10 @@ test_answers_land_through_the_intake() {
 
   data=$(board_data)
   printf '%s' "$data" | jq -e --arg d "$until" '
-    [.waiting_on_you[] | select(.answerable) | .id] == ["sample-plain"]
+    [.waiting_on_you[] | select(.answerable) | .id] == []
+    and [.with_lead[].id] == ["sample-plain"]
     and any(.queued[]; .id == "call-later" and .note == "back to you on \($d)")
-  ' >/dev/null || fail "only the still-held work should stay in Waiting on you after the refresh: $data"
+  ' >/dev/null || fail "answered items did not leave Waiting on you after the refresh: $data"
   printf '%s' "$data" | jq -e '[.done[].id] | all(. != "call-yes" and . != "call-reply" and . != "call-option")' >/dev/null \
     || fail "an answered captain question is shown as Recently done: $data"
   out=$(post_answer "$(jq -cn --arg t "$BOARD_TOKEN" '{token: $t, task: "call-yes", card: ("b" * 64), choice: "yes"}')")

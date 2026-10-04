@@ -42,7 +42,10 @@
 # default repo from that origin's metadata). Prefer holding the work item the
 # question gates over minting a new row. The command records a UTC `Captain
 # hold set:` timestamp in the task body: repeating an active hold preserves the
-# existing timestamp, while re-holding released work starts a new lifecycle.
+# existing timestamp, while re-holding released work, or an active hold that
+# has a captain answer recorded on it (`answer --record`) since that timestamp,
+# starts a new lifecycle, so the re-asked call reads as waiting on the captain
+# again.
 # A task already closed is refused rather than reopened. `--until` records the
 # captain's own deferral date through `tasks-axi hold --until`, so a "revisit
 # later" answer is stored as a date instead of a live card.
@@ -829,7 +832,7 @@ write_hold_set_stamp() {  # <task-id> <shown-body> <timestamp> <preserve-existin
 
 command_hold() {
   local id=${1:-} title='' reason='' repo='' origin='' until='' show state existing_title body='' hold_kind hold_set occurrence
-  local existing_hold_kind='' existing_held='' preserve_hold_set=0 options='' option_count=0 seen_options='' lower_option
+  local existing_hold_kind='' existing_held='' preserve_hold_set=0 hold_answered existing_hold_set options='' option_count=0 seen_options='' lower_option
   [ "$#" -ge 1 ] || { usage >&2; exit 2; }
   shift
   while [ "$#" -gt 0 ]; do
@@ -883,6 +886,14 @@ command_hold() {
     existing_held=$(show_field_value "$show" held)
     if [ "$existing_hold_kind" = captain ] && [ "$existing_held" = yes ]; then
       preserve_hold_set=1
+      body=$(decode_shown_value "$(show_field "$show" body)") \
+        || fail "could not decode the existing body for $id"
+      hold_answered=$(printf '%s\n' "$body" | sed -n 's/^Captain answer recorded: \([0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z\)$/\1/p' | tail -1)
+      existing_hold_set=$(body_hold_set_timestamp "$body")
+      if [ -n "$hold_answered" ] && [ -n "$existing_hold_set" ] && ! [[ "$hold_answered" < "$existing_hold_set" ]]; then
+        preserve_hold_set=0
+      fi
+      body=''
     fi
     if [ -n "$title" ]; then
       existing_title=$(show_field_value "$show" title)

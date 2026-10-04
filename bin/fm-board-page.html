@@ -89,6 +89,7 @@
     <div id="you"></div>
     <details id="older" hidden><summary id="older-summary"></summary><div id="older-list"></div></details>
   </section>
+  <section id="s-lead" hidden><h2><span id="h-lead">Answered</span> <span id="c-lead" class="count">0</span></h2><div id="lead"></div></section>
   <section><h2>In flight <span id="c-flight" class="count">0</span></h2><div id="flight"></div></section>
   <section id="s-fyi" hidden><h2>Heads-up</h2><div id="fyi"></div></section>
   <section id="s-queued" hidden><h2>Queued <span id="c-queued" class="count">0</span></h2><div id="queued"></div></section>
@@ -206,6 +207,14 @@ function render(d) {
   $("product").innerHTML = `${esc(d.product || "shuvbro")}${d.home_label ? `<span class="home">${esc(d.home_label)}</span>` : ""}`;
   $("errors").innerHTML = (d.errors || []).map((e) => `<div class="card">${esc(e)}</div>`).join("");
   renderWaiting(d);
+  const withLead = d.with_lead || [];
+  $("s-lead").hidden = withLead.length === 0;
+  $("h-lead").textContent = `Answered - with ${d.lead || "the lead"}`;
+  $("c-lead").textContent = withLead.length;
+  $("lead").innerHTML = withLead.map((w) => `<div class="card"><div class="title">${esc(w.title)}</div>
+    ${w.reason ? `<div class="reason">${esc(w.reason)}</div>` : ""}
+    <div class="meta">${[w.answer ? `You answered: ${esc(w.answer)}` : "You answered", w.answered_at ? ago(w.answered_at) : "",
+      esc(w.repo || ""), ...(w.links || []).map((u) => link(u))].filter(Boolean).join(" · ")}</div></div>`).join("");
   const flight = d.in_flight || [], queued = d.queued || [], done = d.done || [], fyi = d.fyi || [];
   $("c-flight").textContent = flight.length;
   $("flight").innerHTML = flight.length ? flight.map((t) => `

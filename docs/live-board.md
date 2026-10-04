@@ -35,6 +35,7 @@ Yes and No are the default buttons; when the lead holds a task with `bin/fm-capt
 A button or a typed reply of up to 500 characters is recorded as your answer through the same keyed-answer intake that chat answers use, with the live board named as where it came from.
 A question that only asked you something is closed with your answer.
 Held work goes ahead only on Yes or one of its declared choices; No or a typed reply is recorded and the work stays held until the lead acts on it.
+Until then it leaves Waiting on you for an "Answered - with" list that shows your answer and when you gave it, without buttons; if the lead asks you again, it returns to Waiting on you.
 Later asks for a date, records it, and moves the item off the list until that day; it closes nothing.
 Every recorded answer also leaves the lead a captain inbox note, so it acts on your answer at its next turn.
 
