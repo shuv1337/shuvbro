@@ -1,0 +1,46 @@
+# real ps + real node V2 owner probe (bin/fm-opencode-v2-owner.mjs); barrier = live ELF process with comm 'shuvcode' and argv 'shuvcode serve --service' (stand-in for the shared service); fm-lock.sh runs as its child like a model shell
+$ (model shell) parent process
+3861127 shuvcode        shuvcode serve --service -c ps -o pid=,comm=,args= -p $$; rc=$?; exit $rc
+exit=0
+
+$ OPENCODE_SESSION_ID=ses_unactivated_live bin/fm-lock.sh   (under service, no V2 owner registration)
+error: OpenCode V2 lead is not activated for session ses_unactivated_live, so it cannot own this home's fleet lock; exit this client and relaunch with /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M42SZP18R2Z67Q3MKTXE1VBW/bin/fm-opencode-v2-lead.sh --session ses_unactivated_live (equivalent: /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M42SZP18R2Z67Q3MKTXE1VBW/bin/fm-opencode-v2-primary.sh --session ses_unactivated_live --native-binary /home/shuv/.npm-global/lib/node_modules/shuvcode/node_modules/shuvcode-linux-x64/bin/shuvcode)
+exit=1
+
+lock file after: ls: cannot access '/home/shuv/.cache/agent-ws/nm-lead-live/state/.lock': No such file or directory
+
+$ bin/fm-lock.sh, no OPENCODE_SESSION_ID (under service)
+error: cannot locate harness process in ancestry
+exit=1
+
+$ OPENCODE_SESSION_ID='bad id; x' bin/fm-lock.sh  (malformed id is not echoed)
+error: OpenCode V2 lead is not activated for session <session-id>, so it cannot own this home's fleet lock; exit this client and relaunch with /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M42SZP18R2Z67Q3MKTXE1VBW/bin/fm-opencode-v2-lead.sh --session <session-id> (equivalent: /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M42SZP18R2Z67Q3MKTXE1VBW/bin/fm-opencode-v2-primary.sh --session <session-id> --native-binary /home/shuv/.npm-global/lib/node_modules/shuvcode/node_modules/shuvcode-linux-x64/bin/shuvcode)
+exit=1
+
+$ FM_OPENCODE_V2_BIN=/nonexistent OPENCODE_SESSION_ID=ses_unactivated_live bin/fm-lock.sh  (unresolvable native binary)
+error: OpenCode V2 lead is not activated for session ses_unactivated_live, so it cannot own this home's fleet lock; exit this client and relaunch with /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M42SZP18R2Z67Q3MKTXE1VBW/bin/fm-opencode-v2-lead.sh --session ses_unactivated_live (equivalent: /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M42SZP18R2Z67Q3MKTXE1VBW/bin/fm-opencode-v2-primary.sh --session ses_unactivated_live --native-binary <installed-native-shuvcode-executable>)
+exit=1
+
+# live holder process: 3862430 shuvcode        /home/shuv/.cache/agent-ws/nm-lead-live/holder/shuvcode/shuvcode 60
+$ OPENCODE_SESSION_ID=ses_unactivated_live bin/fm-lock.sh   (another live session holds lock)
+error: OpenCode V2 session ses_unactivated_live is not the activated lead, and another live firstmate session holds this home's fleet lock (pid 3862430); this client stays a read-only observer
+exit=1
+
+lock file after: 3862430
+
+$ OPENCODE_SESSION_ID=ses_unactivated_live bin/fm-lock.sh   (stale lock naming dead pid 3862430)
+error: OpenCode V2 lead is not activated for session ses_unactivated_live, so it cannot own this home's fleet lock; exit this client and relaunch with /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M42SZP18R2Z67Q3MKTXE1VBW/bin/fm-opencode-v2-lead.sh --session ses_unactivated_live (equivalent: /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M42SZP18R2Z67Q3MKTXE1VBW/bin/fm-opencode-v2-primary.sh --session ses_unactivated_live --native-binary /home/shuv/.npm-global/lib/node_modules/shuvcode/node_modules/shuvcode-linux-x64/bin/shuvcode)
+exit=1
+
+lock file after: 3862430
+
+# outside any service barrier (setsid, inherited session id) -> generic error expected unless a real harness is an ancestor
+$ OPENCODE_SESSION_ID=ses_unactivated_live setsid bin/fm-lock.sh
+lock acquired: harness pid 3510253
+exit=0
+
+# BASELINE pre-change commit 5bbc669, same barrier setup:
+$ [5bbc669] OPENCODE_SESSION_ID=ses_unactivated_live bin/fm-lock.sh
+error: cannot locate harness process in ancestry
+exit=1
+

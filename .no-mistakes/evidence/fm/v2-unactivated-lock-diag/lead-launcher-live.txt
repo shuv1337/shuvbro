@@ -1,0 +1,22 @@
+$ FM_ROOT_OVERRIDE=/home/shuv/repos/shuvbro bin/fm-opencode-v2-lead.sh   # default --continue, real shuvcode on PATH, real shared service
+resuming lead session ses_efad9e0e8ffeHxH7bU55LSxhs4
+primary exec args: --session ses_efad9e0e8ffeHxH7bU55LSxhs4 --native-binary /home/shuv/.npm-global/lib/node_modules/shuvcode/node_modules/shuvcode-linux-x64/bin/shuvcode
+exit=0
+
+# expected newest top-level session at exactly /home/shuv/repos/shuvbro (from real `shuvcode session list`):
+ses_efad9e0e8ffeHxH7bU55LSxhs4
+
+$ bin/fm-opencode-v2-lead.sh --session ses_explicit_probe
+primary exec args: --session ses_explicit_probe --native-binary /home/shuv/.npm-global/lib/node_modules/shuvcode/node_modules/shuvcode-linux-x64/bin/shuvcode
+exit=0
+
+$ FM_OPENCODE_V2_BIN=/home/shuv/.local/bin/shuvcode bin/fm-opencode-v2-lead.sh   # npm wrapper refused
+error: cannot resolve the installed native shuvcode executable; pass --native-binary PATH or set FM_OPENCODE_V2_BIN
+exit=2
+
+$ bin/fm-opencode-v2-lead.sh --bogus
+error: unknown argument: --bogus (see --help)
+exit=2
+
+$ file of resolved native binary
+/home/shuv/.npm-global/lib/node_modules/shuvcode/node_modules/shuvcode-linux-x64/bin/shuvcode: ELF 64-bit LSB executable

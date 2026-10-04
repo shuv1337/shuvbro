@@ -1,0 +1,28 @@
+# disposable home = git archive of target commit at /home/shuv/.cache/agent-ws/nm-lead-live/home; fm-session-start.sh run as a model shell under the 'shuvcode serve --service' barrier with an unactivated OPENCODE_SESSION_ID
+$ OPENCODE_SESSION_ID=ses_unactivated_live bin/fm-session-start.sh
+exit=0
+8:error: OpenCode V2 lead is not activated for session ses_unactivated_live, so it cannot own this home's fleet lock; exit this client and relaunch with /home/shuv/.cache/agent-ws/nm-lead-live/home/bin/fm-opencode-v2-lead.sh --session ses_unactivated_live (equivalent: /home/shuv/.cache/agent-ws/nm-lead-live/home/bin/fm-opencode-v2-primary.sh --session ses_unactivated_live --native-binary /home/shuv/.npm-global/lib/node_modules/shuvcode/node_modules/shuvcode-linux-x64/bin/shuvcode)
+9-●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+10:●  READ-ONLY SESSION - FLEET LOCK OWNERSHIP WAS NOT VERIFIED
+11:●  error: OpenCode V2 lead is not activated for session ses_unactivated_live, so it cannot own this home's fleet lock; exit this client and relaunch with /home/shuv/.cache/agent-ws/nm-lead-live/home/bin/fm-opencode-v2-lead.sh --session ses_unactivated_live (equivalent: /home/shuv/.cache/agent-ws/nm-lead-live/home/bin/fm-opencode-v2-primary.sh --session ses_unactivated_live --native-binary /home/shuv/.npm-global/lib/node_modules/shuvcode/node_modules/shuvcode-linux-x64/bin/shuvcode)
+12-●  Skipping every mutating step: stale Herdr child cleanup,
+13-●  secondmate convergence, secondmate liveness, pending remote handoff retry,
+14-●  X-mode artifacts, fleet sync, and wake-queue drain. Detect-only bootstrap
+15-●  diagnostics and the rest of this read-only-safe digest still ran below.
+16-●  Operate read-only until this resolves - do not spawn, steer, merge, or
+17-●  otherwise mutate fleet state from this session.
+--
+131:They need the fleet lock, and this session must not spawn, steer, or merge, so it
+132-has no action they would gate. The session holding the lock runs them.
+133-
+134-================================================================================
+135-CONTEXT
+136-================================================================================
+137-
+--
+161:This session did not acquire the fleet lock. Stay read-only: do not arm,
+162-drain, spawn, steer, merge, or repair fleet state from here. Only a session
+163-with verified fleet-lock ownership may perform mutable follow-up.
+164-
+165-The digest above is complete for this session start. The READ-ONCE CONTRACT
+166-section near the top of it governs what may still be read from disk.
