@@ -206,7 +206,7 @@ That suite drives its Lavish session through a protocol-shaped stub, and `tests/
 [`verification/process-event-sources.md`](verification/process-event-sources.md) owns the process-event ownership and reclamation evidence exercised by `tests/fm-procevent.test.sh`.
 
 The live board channel is pinned in `tests/fm-board.test.sh`: yes, no, declared options, and typed replies close or release through this intake with board provenance, Later re-holds with its date and declared options, every recorded answer queues exactly one captain inbox wake, and refused requests change nothing.
-The declared-options head of the task body is pinned in this suite's `test_declared_options_travel_with_the_hold`, and its snapshot projection in `tests/fm-fleet-snapshot-view.test.sh`.
+The declared-options head of the task body is pinned by `test_declared_options_travel_with_the_hold` in `tests/fm-captain-hold-lifecycle.test.sh`, and its snapshot projection in `tests/fm-fleet-snapshot-view.test.sh`.
 
 `tests/fm-classify-decision-key.test.sh` pins `status_key_closing_verb` itself: it separates a resolution from the durable-transfer close and from a still-open key, reports the last real transition across re-openings and both key positions, and treats a prose mention as no transition.
 

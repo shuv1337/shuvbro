@@ -140,7 +140,7 @@ function choicesHtml(w) {
   }
   if (open === "reply" && !busy) {
     const draft = drafts.get(w.id) || "";
-    html += `<div class="panel"><textarea maxlength="500" data-draft="${esc(w.id)}" placeholder="Your answer, in your words. It is recorded as your reply to this question.">${esc(draft)}</textarea>
+    html += `<div class="panel"><textarea maxlength="500" data-draft="${esc(w.id)}" placeholder="Recorded as your answer to this question">${esc(draft)}</textarea>
       <div class="actions"><button class="primary" data-act="reply" data-id="${esc(w.id)}">Send</button>
       <span class="small" data-counter="${esc(w.id)}">${draft.length}/500</span></div></div>`;
   }
