@@ -228,3 +228,142 @@ $pids
 EOF
   return 1
 }
+
+# True when $1 is an executable ELF whose basename is shuvcode.
+# bin/fm-opencode-v2-primary.sh accepts only that file. A node launcher or npm
+# wrapper forks a different PID and cannot own the lead.
+fm_path_is_shuvcode_elf() {  # <path>
+  local path=$1 magic
+  [ -n "$path" ] && [ -f "$path" ] && [ -x "$path" ] || return 1
+  [ "$(basename -- "$path")" = shuvcode ] || return 1
+  magic=$(head -c 4 -- "$path" 2>/dev/null) || return 1
+  [ "$magic" = $'\177ELF' ]
+}
+
+# Linux package names in the order shuvcode's npm launcher selects them:
+# musl and non-AVX2 hosts try their variant first, then the generic host
+# package. Other platforms are absent; activation is Linux-only.
+fm_opencode_v2_platform_package_names() {
+  local arch='' musl=0 baseline=0 base
+  case "$(uname -s)" in
+    Linux) ;;
+    *) return 1 ;;
+  esac
+  case "$(uname -m)" in
+    x86_64|amd64) arch=x64 ;;
+    aarch64|arm64) arch=arm64 ;;
+    armv7*|armv6*) arch=arm ;;
+    *) return 1 ;;
+  esac
+  if [ -e /etc/alpine-release ] || ldd --version 2>&1 | grep -qi musl; then
+    musl=1
+  fi
+  if [ "$arch" = x64 ] && [ -r /proc/cpuinfo ] \
+    && ! grep -E -q '(^|[[:space:]])avx2([[:space:]]|$)' /proc/cpuinfo; then
+    baseline=1
+  fi
+  base="shuvcode-linux-${arch}"
+  if [ "$musl" -eq 1 ]; then
+    if [ "$arch" = x64 ] && [ "$baseline" -eq 1 ]; then
+      printf '%s\n' "${base}-baseline-musl" "${base}-musl" "${base}-baseline" "$base"
+    elif [ "$arch" = x64 ]; then
+      printf '%s\n' "${base}-musl" "${base}-baseline-musl" "$base" "${base}-baseline"
+    else
+      printf '%s\n' "${base}-musl" "$base"
+    fi
+  elif [ "$arch" = x64 ] && [ "$baseline" -eq 1 ]; then
+    printf '%s\n' "${base}-baseline" "$base" "${base}-baseline-musl" "${base}-musl"
+  elif [ "$arch" = x64 ]; then
+    printf '%s\n' "$base" "${base}-baseline" "${base}-musl" "${base}-baseline-musl"
+  else
+    printf '%s\n' "$base" "${base}-musl"
+  fi
+}
+
+# The installed native ELF, never the npm wrapper.
+# The running `shuvcode serve --service` process is authoritative when its
+# executable is that ELF. Otherwise follow the launcher the same way the
+# live suites do: the platform package nested beside it, then the launcher
+# itself when it is already the ELF.
+fm_opencode_v2_native_binary() {  # [service-pid]
+  local pid=${1:-} exe launcher dir name candidate
+  if [ -n "$pid" ]; then
+    exe=$(readlink -f -- "/proc/$pid/exe" 2>/dev/null || true)
+    if fm_path_is_shuvcode_elf "$exe"; then
+      printf '%s\n' "$exe"
+      return 0
+    fi
+  fi
+  launcher=$(command -v shuvcode 2>/dev/null) || return 1
+  launcher=$(readlink -f -- "$launcher" 2>/dev/null) || return 1
+  if fm_path_is_shuvcode_elf "$launcher"; then
+    printf '%s\n' "$launcher"
+    return 0
+  fi
+  dir=$(dirname -- "$launcher")
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    for candidate in \
+      "$dir/../node_modules/$name/bin/shuvcode" \
+      "$dir/../../node_modules/$name/bin/shuvcode" \
+      "$dir/../../$name/bin/shuvcode"
+    do
+      [ -e "$candidate" ] || continue
+      candidate=$(readlink -f -- "$candidate" 2>/dev/null) || continue
+      if fm_path_is_shuvcode_elf "$candidate"; then
+        printf '%s\n' "$candidate"
+        return 0
+      fi
+    done
+  done < <(fm_opencode_v2_platform_package_names)
+  return 1
+}
+
+# Closest ancestor that is the shared shuvcode service. That process is an
+# ancestry barrier, so it can never be the session-lock pid.
+fm_opencode_v2_service_ancestor_pid() {
+  local pid=$$ comm args _
+  for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16; do
+    comm=$(ps -o comm= -p "$pid" 2>/dev/null) || break
+    args=$(ps -o args= -p "$pid" 2>/dev/null || true)
+    case " $args " in
+      *' --service '*)
+        if fm_shuvcode_runtime_matches "$comm" "$args"; then
+          printf '%s\n' "$pid"
+          return 0
+        fi
+        ;;
+    esac
+    pid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
+    [ -n "$pid" ] && [ "$pid" -gt 1 ] || break
+  done
+  return 1
+}
+
+# Report why fm_harness_ancestry_pid failed.
+# An OpenCode V2 model shell with no owner registration (probe exit 3) sits
+# under `shuvcode serve --service`, so the ancestry walk stops and the generic
+# "cannot locate harness" line names the barrier instead of the missing
+# activation. Only that cause is replaced. Every other failure keeps the
+# ancestry error, including a set OPENCODE_SESSION_ID whose probe did not
+# exit 3 or whose tree has no shared-service barrier.
+fm_lock_missing_harness_error() {
+  local session=${OPENCODE_SESSION_ID:-} bin_dir v2_lib probe=0 service_pid native primary
+  bin_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+  if [ -n "$session" ] && [ -f "$bin_dir/fm-opencode-v2-owner.mjs" ]; then
+    v2_lib=$bin_dir/fm-opencode-v2-owner.mjs
+    node "$v2_lib" probe "$session" >/dev/null 2>&1 || probe=$?
+    if [ "$probe" -eq 3 ] && service_pid=$(fm_opencode_v2_service_ancestor_pid); then
+      primary=$bin_dir/fm-opencode-v2-primary.sh
+      if native=$(fm_opencode_v2_native_binary "$service_pid"); then
+        printf 'error: OpenCode V2 lead not activated; run %q --session %q --native-binary %q\n' \
+          "$primary" "$session" "$native" >&2
+      else
+        printf 'error: OpenCode V2 lead not activated; the native shuvcode executable could not be resolved. Run %q --session %q --native-binary with the installed Linux ELF, not the npm wrapper.\n' \
+          "$primary" "$session" >&2
+      fi
+      return 0
+    fi
+  fi
+  echo "error: cannot locate harness process in ancestry" >&2
+}

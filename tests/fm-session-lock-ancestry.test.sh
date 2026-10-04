@@ -460,6 +460,209 @@ SH
   pass "session-lock: an unrelated node process is never claimed as the harness"
 }
 
+# An unactivated OpenCode V2 lead is parented by `shuvcode serve --service`.
+# That barrier makes the ancestry walk fail. The lock must name the missing
+# activation and the native ELF, not the ancestry error. A set session id
+# alone is not that cause.
+write_barrier_ps() {  # <path>
+  cat > "$1" <<'SH'
+#!/usr/bin/env bash
+field= pid=
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -o) field=$2; shift 2 ;;
+    -p) pid=$2; shift 2 ;;
+    *) shift ;;
+  esac
+done
+case "$pid:$field" in
+  2147483001:comm=) printf '%s\n' shuvcode ;;
+  2147483001:args=) printf '%s\n' 'shuvcode serve --service' ;;
+  2147483001:ppid=) printf '%s\n' 1 ;;
+  *:comm=) printf '%s\n' bash ;;
+  *:args=) printf '%s\n' bash ;;
+  *:ppid=) printf '%s\n' 2147483001 ;;
+esac
+SH
+  chmod +x "$1"
+}
+
+write_plain_ps() {  # <path>
+  cat > "$1" <<'SH'
+#!/usr/bin/env bash
+field= pid=
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -o) field=$2; shift 2 ;;
+    -p) pid=$2; shift 2 ;;
+    *) shift ;;
+  esac
+done
+case "$field" in
+  comm=) printf '%s\n' bash ;;
+  args=) printf '%s\n' bash ;;
+  ppid=) printf '%s\n' 1 ;;
+esac
+SH
+  chmod +x "$1"
+}
+
+run_fm_lock() {  # <stdout> <stderr> [env assignments already in the caller]
+  LOCK_RC=0
+  "$ROOT/bin/fm-lock.sh" >"$1" 2>"$2" || LOCK_RC=$?
+}
+
+assert_ancestry_error() {  # <stderr> <why>
+  grep -q 'cannot locate harness process in ancestry' "$1" \
+    || fail "$2: expected the ancestry error, got: $(cat "$1")"
+  if grep -q 'OpenCode V2 lead not activated' "$1"; then
+    fail "$2: activation hint fired without the unactivated-lead cause: $(cat "$1")"
+  fi
+}
+
+test_unactivated_v2_lead_names_the_service_executable() {
+  local dir parent decoy err
+  [ "$(uname -s)" = Linux ] || fail "the native activation path is Linux-only"
+  dir="$TMP_ROOT/v2-service-exe"
+  mkdir -p "$dir/decoy" "$dir/state"
+  parent=$dir/shuvcode
+  decoy=$dir/decoy/shuvcode
+  cp -L /bin/bash "$parent"
+  chmod +x "$parent"
+  printf '\177ELF' > "$decoy"
+  chmod +x "$decoy"
+  err=$dir/err
+  OPENCODE_SESSION_ID=ses_lock_unactivated \
+    FM_HOME=$dir \
+    FM_STATE_OVERRIDE=$dir/state \
+    PATH="$(dirname "$decoy"):$PATH" \
+    "$parent" -c 'bash "$1" >"$2" 2>"$3"; printf "rc=%s\n" "$?" >>"$3"' _ \
+    "$ROOT/bin/fm-lock.sh" "$dir/out" "$err" --service \
+    || fail "the service-shaped parent did not run: $(cat "$err" 2>/dev/null)"
+  grep -q 'OpenCode V2 lead not activated' "$err" \
+    || fail "activation refusal missing: $(cat "$err")"
+  if grep -q 'cannot locate harness process in ancestry' "$err"; then
+    fail "the ancestry error replaced the activation cause: $(cat "$err")"
+  fi
+  grep -F -q -- "--native-binary $parent" "$err" \
+    || fail "the service executable was not the native path: $(cat "$err")"
+  if grep -F -q -- "$decoy" "$err"; then
+    fail "a PATH decoy was used instead of the service executable: $(cat "$err")"
+  fi
+  grep -q 'rc=1' "$err" || fail "the lock did not refuse: $(cat "$err")"
+  [ ! -e "$dir/state/.lock" ] || fail "an unactivated lead wrote a session lock"
+  pass "session-lock: an unactivated V2 lead is told to activate with the service executable"
+}
+
+test_unactivated_v2_lead_resolves_the_host_platform_binary() {
+  local dir fakebin arch pkg darwin err
+  [ "$(uname -s)" = Linux ] || fail "the native activation path is Linux-only"
+  case "$(uname -m)" in
+    x86_64|amd64) arch=x64 ;;
+    aarch64|arm64) arch=arm64 ;;
+    *) fail "no linux shuvcode package mapping for $(uname -m)" ;;
+  esac
+  dir="$TMP_ROOT/v2-platform-bin"
+  fakebin=$(fm_fakebin "$dir")
+  write_barrier_ps "$fakebin/ps"
+  mkdir -p "$dir/bin" "$dir/state" \
+    "$dir/node_modules/shuvcode-linux-$arch/bin" \
+    "$dir/node_modules/shuvcode-darwin-arm64/bin"
+  printf '#!/bin/sh\nexit 0\n' > "$dir/bin/shuvcode"
+  chmod +x "$dir/bin/shuvcode"
+  pkg=$dir/node_modules/shuvcode-linux-$arch/bin/shuvcode
+  darwin=$dir/node_modules/shuvcode-darwin-arm64/bin/shuvcode
+  printf '\177ELF' > "$pkg"
+  printf '\177ELF' > "$darwin"
+  chmod +x "$pkg" "$darwin"
+  err=$dir/err
+  OPENCODE_SESSION_ID=ses_lock_unactivated \
+    FM_HOME=$dir \
+    FM_STATE_OVERRIDE=$dir/state \
+    PATH="$dir/bin:$fakebin:$PATH" \
+    run_fm_lock "$dir/out" "$err"
+  [ "$LOCK_RC" -eq 1 ] || fail "the lock did not refuse (rc=$LOCK_RC): $(cat "$err")"
+  grep -q 'OpenCode V2 lead not activated' "$err" \
+    || fail "activation refusal missing: $(cat "$err")"
+  if grep -q 'cannot locate harness process in ancestry' "$err"; then
+    fail "the ancestry error replaced the activation cause: $(cat "$err")"
+  fi
+  grep -F -q -- "--native-binary $pkg" "$err" \
+    || fail "the host platform ELF was not the native path: $(cat "$err")"
+  if grep -F -q -- "$darwin" "$err"; then
+    fail "a non-host ELF was suggested: $(cat "$err")"
+  fi
+  [ ! -e "$dir/state/.lock" ] || fail "an unactivated lead wrote a session lock"
+  pass "session-lock: an unactivated V2 lead resolves the host platform ELF, not a wrapper or another platform"
+}
+
+test_unactivated_v2_lead_without_a_native_binary_does_not_invent_one() {
+  local dir fakebin err
+  dir="$TMP_ROOT/v2-unresolved-bin"
+  fakebin=$(fm_fakebin "$dir")
+  write_barrier_ps "$fakebin/ps"
+  # An executable npm-style wrapper with no platform package beside it.
+  printf '#!/bin/sh\nexit 0\n' > "$fakebin/shuvcode"
+  chmod +x "$fakebin/shuvcode"
+  mkdir -p "$dir/state"
+  err=$dir/err
+  OPENCODE_SESSION_ID=ses_lock_unactivated \
+    FM_HOME=$dir \
+    FM_STATE_OVERRIDE=$dir/state \
+    PATH="$fakebin:$(dirname "$(command -v node)"):/usr/bin:/bin" \
+    run_fm_lock "$dir/out" "$err"
+  [ "$LOCK_RC" -eq 1 ] || fail "the lock did not refuse (rc=$LOCK_RC): $(cat "$err")"
+  grep -q 'could not be resolved' "$err" \
+    || fail "an unresolved native binary was not reported: $(cat "$err")"
+  if grep -q 'cannot locate harness process in ancestry' "$err"; then
+    fail "the ancestry error replaced the activation cause: $(cat "$err")"
+  fi
+  if grep -q '<native' "$err"; then
+    fail "the refusal left a placeholder path: $(cat "$err")"
+  fi
+  [ ! -e "$dir/state/.lock" ] || fail "an unactivated lead wrote a session lock"
+  pass "session-lock: an unactivated V2 lead with no resolvable ELF does not invent a native path"
+}
+
+test_session_id_without_the_service_barrier_keeps_the_ancestry_error() {
+  local dir fakebin err
+  dir="$TMP_ROOT/v2-no-barrier"
+  fakebin=$(fm_fakebin "$dir")
+  write_plain_ps "$fakebin/ps"
+  mkdir -p "$dir/state"
+  err=$dir/err
+  OPENCODE_SESSION_ID=ses_lock_unactivated \
+    FM_HOME=$dir \
+    FM_STATE_OVERRIDE=$dir/state \
+    PATH="$fakebin:$PATH" \
+    run_fm_lock "$dir/out" "$err"
+  [ "$LOCK_RC" -eq 1 ] || fail "the lock did not refuse (rc=$LOCK_RC): $(cat "$err")"
+  assert_ancestry_error "$err" "session id without a service barrier"
+  pass "session-lock: OPENCODE_SESSION_ID without the shared-service barrier keeps the ancestry error"
+}
+
+test_service_barrier_with_a_present_registration_keeps_the_ancestry_error() {
+  local dir fakebin err
+  dir="$TMP_ROOT/v2-probe-not-3"
+  fakebin=$(fm_fakebin "$dir")
+  write_barrier_ps "$fakebin/ps"
+  cat > "$fakebin/node" <<'SH'
+#!/bin/sh
+exit 1
+SH
+  chmod +x "$fakebin/node"
+  mkdir -p "$dir/state"
+  err=$dir/err
+  OPENCODE_SESSION_ID=ses_lock_unactivated \
+    FM_HOME=$dir \
+    FM_STATE_OVERRIDE=$dir/state \
+    PATH="$fakebin:$PATH" \
+    run_fm_lock "$dir/out" "$err"
+  [ "$LOCK_RC" -eq 1 ] || fail "the lock did not refuse (rc=$LOCK_RC): $(cat "$err")"
+  assert_ancestry_error "$err" "probe exit other than 3"
+  pass "session-lock: a shared-service shell whose owner probe is not exit 3 keeps the ancestry error"
+}
+
 # --- end-to-end layer: the real Stop auto-arm in real process trees ----------
 
 install_autoarm_scripts() {
@@ -607,6 +810,11 @@ test_shared_service_is_an_ancestry_barrier
 test_shuvcode_launcher_chain_is_found
 test_v1_opencode_still_matches_for_lock
 test_similar_named_node_process_is_never_claimed
+test_unactivated_v2_lead_names_the_service_executable
+test_unactivated_v2_lead_resolves_the_host_platform_binary
+test_unactivated_v2_lead_without_a_native_binary_does_not_invent_one
+test_session_id_without_the_service_barrier_keeps_the_ancestry_error
+test_service_barrier_with_a_present_registration_keeps_the_ancestry_error
 test_e2e_version_named_session_claims_the_home
 test_e2e_daemon_parented_session_claims_the_home
 test_e2e_daemon_parented_version_named_session_keeps_its_lock
