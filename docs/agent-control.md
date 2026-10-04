@@ -36,6 +36,11 @@ A recorded `harness=` is not always an exact adapter name: a task launched from 
 
 An exit that delivers lifecycle input but cannot prove the agent stopped fails with `exit=unconfirmed`, reports the observed agent state and any interrupt cancellation claim, and never claims that nothing changed.
 Interrupt never rewrites busy state as proof of its own success.
+
+opencode-v2 executes on a shared service, so its pane and its execution are separate facts.
+Its interrupt cancels the exact recorded native session rather than sending a key, and its exit does that before typing `/exit`.
+Its exit is confirmed, and reported with `native-session=idle`, only when the endpoint no longer runs a shuvcode process and that session has no active execution; an unprovable session refuses before anything is typed.
+On Herdr its endpoint state comes from the pane's foreground processes, because the shuvcode hook registration outlives the TUI.
 Claude exposes no lifecycle acknowledgement for a manual interrupt, so delivery succeeds with `cancel=unconfirmed` and its adapter-owned busy state remains as observed.
 muse's session log records `terminal=cancelled` for the interrupted run, so the control plane reports `cancel=confirmed` only after observing that exact acknowledgement.
 
@@ -50,6 +55,7 @@ Removing a worktree, closing an endpoint, or discarding work stays with [`bin/fm
 **`resume` is not a verb.**
 It is not deterministic across the verified adapters: codex, grok, and gemini resume only from a session id printed at exit, opencode continues the most recent session for the cwd, and claude, pi, pi-signed, omp, and kimi have no verified pane-resume contract.
 `relaunch` covers the same need on every adapter, because the brief on disk - not a harness-private session - is the durable instruction.
+opencode-v2 is the one adapter whose relaunch also keeps the conversation: its session is durable shared-service state with an exact recorded binding, so an opencode-v2 replacement of an opencode-v2 agent resumes it when it is idle and still bound to this service incarnation, and still receives the re-rendered brief. A relaunch onto opencode-v2 from any other harness starts a fresh session and replaces the stale binding.
 
 ## Transactional relaunch
 
@@ -66,10 +72,11 @@ It is not deterministic across the verified adapters: codex, grok, and gemini re
    For a `kind=secondmate` task, the home's identity marker must match and its child records must be readable, so a relaunch can never strand child work behind an unreadable home.
    A secondmate's own crewmates run in their own endpoints and outlive its relaunch; the relaunched secondmate reconciles them from its home's durable records at startup.
 3. **Record the note.**
-   A ship or scout relaunch requires `--note`, because the replacement inherits the local copy but none of the conversation; the note is appended to the instructions it reads.
+   A ship or scout relaunch requires `--note`, because the replacement inherits the local copy but, unless it resumes an opencode-v2 session, none of the conversation; the note is appended to the instructions it reads.
    A secondmate relaunch does not require one and never rewrites its standing charter.
 4. **Stop the old agent** through the `exit` verb, with its postcondition.
 5. **Launch the replacement** through its single owner, `bin/fm-spawn.sh --relaunch`, which adopts the recorded endpoint and worktree instead of creating either, clears the previous harness's per-task wiring, and arms a fresh busy generation.
+   An opencode-v2 replacement of an opencode-v2 agent goes through `bin/fm-opencode-v2-launch.sh --resume`, which owns resuming the recorded session, switching its model when one is named, admitting the brief and note as a queued prompt, and falling back to a fresh session that it records.
 
 Switching harness is therefore one ordinary relaunch rather than a separate mechanism.
 
@@ -100,6 +107,7 @@ Switching harness is therefore one ordinary relaunch rather than a separate mech
 - An ambiguous or unreadable endpoint state refuses.
   Only a positively classified state acts.
 - `fm-spawn --relaunch` independently refuses unless the recorded endpoint is positively agent-free and its shell is sitting in the recorded worktree, so a replacement can never join a live agent or start outside the copy holding the work.
+  For opencode-v2, agent-free also requires the recorded native session to be proven idle, so an exited TUI over an executing or unproven session refuses and the at-least-once replay boundary in [`supervision-protocols/opencode-v2.md`](supervision-protocols/opencode-v2.md) still holds.
 
 ## Capability matrix
 
@@ -118,6 +126,7 @@ The empirical basis for each adapter's value is the `harness-adapters` skill's v
 
 ## Verification
 
-- `tests/fm-control.test.sh` - the adapter contract for every verified harness, the backend capability matrix, exact-id scoping, the closed verb list, the busy, idle, dead, and idempotent lifecycle cases, and marker non-regression, all against a stubbed session provider.
-- `tests/fm-control-relaunch.test.sh` - the relaunch transaction: identity preservation, harness switching, the progress note, checkpoint refusals, and rollback after a failed launch.
+- `tests/fm-control.test.sh` - the adapter contract for every verified harness, the backend capability matrix, exact-id scoping, the closed verb list, the busy, idle, dead, and idempotent lifecycle cases, opencode-v2's two-fact exit against a stand-in native service on tmux and on a Herdr pane with a stale registration, and marker non-regression, all against a stubbed session provider.
+- `tests/fm-control-relaunch.test.sh` - the relaunch transaction: identity preservation, harness switching, the progress note, checkpoint refusals, rollback after a failed launch, and opencode-v2's same-session relaunch and agent-free gate.
 - `tests/fm-control-herdr-smoke.test.sh` - the second state-verified backend against the real herdr binary, on an isolated throwaway lab session.
+- `tests/fm-opencode-v2-worker-live-e2e.test.sh` - opt-in: a real shuvcode worker on an isolated shared service is exited and relaunched into its recorded session.

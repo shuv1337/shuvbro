@@ -14,7 +14,10 @@
 #   4. Verb allowlist: no arbitrary text, no raw keys, no resume.
 #   5. Lifecycle states: busy interrupts first, idle does not, already-stopped
 #      is idempotent success, and an agent that does not stop fails closed.
-#   6. Marker non-regression: a control command to a kind=secondmate task
+#   6. opencode-v2: the exact native session is cancelled before anything is
+#      typed, and exit is confirmed only when the TUI has left the pane AND the
+#      session is idle - on Herdr despite a registration that outlives the TUI.
+#   7. Marker non-regression: a control command to a kind=secondmate task
 #      carries NO from-firstmate marker and opens no pending-reply expectation,
 #      while fm-send's marking of the same task is untouched.
 set -u
@@ -274,7 +277,7 @@ test_interrupt_sends_each_harness_verified_key() {
 test_harness_family_resolution() {
   local pair recorded want got
   for pair in claude:claude claude-latest:claude codex:codex codex-cli:codex \
-      opencode:opencode grok:grok grok-2:grok kimi:kimi cursor:cursor \
+      opencode:opencode opencode-v2:opencode-v2 grok:grok grok-2:grok kimi:kimi cursor:cursor \
       cursor-agent:cursor muse:muse muse-bin-0.1.0:muse pi:pi \
       pi-signed:pi-signed omp:omp; do
     recorded=${pair%%:*}
@@ -841,7 +844,219 @@ test_grok_idle_footer_does_not_confirm_cancellation() {
   pass "fm-control interrupt: grok's idle footer does not confirm cancellation"
 }
 
-# --- 6. marker non-regression -----------------------------------------------
+# --- 6. opencode-v2: the native session is half of every stop proof ---------
+#
+# A shuvcode worker executes on the shared service, so its pane and its
+# execution are separate facts. These cases run the production session owner
+# (bin/fm-opencode-v2-session.mjs) against the acceptance stand-in service, with
+# the task's exact recorded session bound to it, and drive the two facts apart.
+
+# make_v2_herdr_stub <case-dir>: a stateful Herdr CLI for one opencode-v2 pane.
+# `agent get` ALWAYS answers with a registered shuvcode agent - the hook
+# registration Herdr kept after the TUI exited in the 2026-10-04 incident - so
+# only the pane's foreground processes (`pane process-info`) can say whether the
+# TUI is still there. The process shapes are the ones a live shuvcode worker
+# pane reported (owner attach, node launcher, compiled binary). Typing /exit and
+# then Enter returns the pane to its shell unless FM_FAKE_NEVER_DIES is set.
+make_v2_herdr_stub() {  # <case-dir>
+  cat > "$1/fakebin/herdr" <<'SH'
+#!/usr/bin/env bash
+set -u
+D=$FM_FAKE_DIR
+printf '%s\n' "$*" >> "$D/herdr.log"
+case "${1:-} ${2:-}" in
+  'status --json')
+    printf '{"client":{"version":"0.9.1","protocol":22},"server":{"running":true}}\n' ;;
+  'pane get')
+    printf '{"result":{"pane":{"pane_id":"%s"}}}\n' "$3" ;;
+  'agent get')
+    printf '{"result":{"agent":{"agent":"shuvcode","agent_status":"idle","pane_id":"%s"}}}\n' "$3" ;;
+  'pane process-info')
+    if [ "$(cat "$D/command")" = shuvcode ]; then
+      pgid=4101
+      fg='[{"pid":4101,"name":"node-MainThread","argv":["/usr/bin/node","/opt/fm/bin/fm-opencode-v2-owner.mjs","attach","ses_t1","{}"]},{"pid":4102,"name":"node-MainThread","argv":["/usr/bin/node","/home/u/.local/bin/shuvcode","--server","http://127.0.0.1:1","--auto","--session","ses_t1"]},{"pid":4103,"name":"shuvcode","argv":["/home/u/.npm-global/lib/node_modules/shuvcode/node_modules/shuvcode-linux-x64/bin/shuvcode","--server","http://127.0.0.1:1","--auto","--session","ses_t1"]}]'
+    else
+      pgid=4000
+      fg='[{"pid":4000,"name":"zsh","argv":["-zsh"]}]'
+    fi
+    printf '{"result":{"type":"pane_process_info","process_info":{"pane_id":"%s","shell_pid":4000,"foreground_process_group_id":%s,"foreground_processes":%s}}}\n' "$4" "$pgid" "$fg" ;;
+  'pane send-text')
+    printf '%s\n' "$4" >> "$D/literal" ;;
+  'pane send-keys')
+    printf '%s\n' "$4" >> "$D/keys"
+    if [ "$4" = enter ] && [ -z "${FM_FAKE_NEVER_DIES:-}" ] && [ "$(tail -n 1 "$D/literal")" = /exit ]; then
+      printf 'zsh' > "$D/command"
+    fi ;;
+esac
+exit 0
+SH
+  chmod +x "$1/fakebin/herdr"
+  # The idle-shell proof cross-checks the pane's shell pid against ps: the
+  # stub's shell 4000 is a lone, sleeping process with no children.
+  cat > "$1/fakebin/herdr-ps" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  '-axo pid=,ppid=') printf '%s\n' '4000 1' ;;
+  '-p 4000 -o stat=') printf '%s\n' 'Ss' ;;
+  *) exit 1 ;;
+esac
+SH
+  chmod +x "$1/fakebin/herdr-ps"
+}
+
+# v2_control_case <name> [backend]: sets V2C_DIR to a case whose task t1 runs
+# opencode-v2 with a live TUI and an idle exactly recorded session ses_t1 on a
+# running stand-in service at $V2C_DIR/v2. Not a command substitution, because
+# the stand-in's identity must stay in this shell.
+v2_control_case() {  # <name> [backend]
+  local backend=${2:-tmux}
+  V2C_DIR=$(new_case "$1")
+  if [ "$backend" = herdr ]; then
+    add_task "$V2C_DIR" t1 opencode-v2 ship herdr "fmses:w1:p2"
+    printf '%s\n' herdr_session=fmses herdr_workspace_id=w1 herdr_tab_id=w1:t2 herdr_pane_id=w1:p2 \
+      >> "$V2C_DIR/home/state/t1.meta"
+    make_v2_herdr_stub "$V2C_DIR"
+  else
+    add_task "$V2C_DIR" t1 opencode-v2
+  fi
+  v2_start_service "$V2C_DIR/v2"
+  v2_worker_binding "$V2C_DIR/v2" "$V2C_DIR/home/state/t1.opencode-v2-session.json" ses_t1 "$V2C_DIR/wt-t1"
+  : > "$V2C_DIR/v2/api.log"
+  alive_as "$V2C_DIR" shuvcode
+}
+
+# run_v2_control <case-dir> <args...>: run_control with the stand-in's own
+# `shuvcode` CLI ahead of any installed one.
+run_v2_control() {
+  local dir=$1; shift
+  env PATH="$dir/fakebin:$V2_NATIVE_BIN:$PATH" FM_HOME="$dir/home" FM_FAKE_DIR="$dir/fake" \
+    FM_CONTROL_POLL=0.01 FM_CONTROL_SETTLE_WAIT=0.05 \
+    FM_CONTROL_EXIT_WAIT="${FM_CONTROL_EXIT_WAIT:-0.5}" FM_CONTROL_LAUNCH_WAIT=0.05 \
+    FM_BACKEND_HERDR_SUBMIT_MIN_SLEEP=0 FM_BACKEND_HERDR_SUBMIT_POLLS=1 \
+    FM_FAKE_NEVER_DIES="${FM_FAKE_NEVER_DIES:-}" FM_HERDR_PS_BIN="$dir/fakebin/herdr-ps" \
+    "$CONTROL" "$@" 2>&1
+}
+
+v2_exact_interrupts() {  # <case-dir> -> count of exact resume=false cancellations of ses_t1
+  grep -c " session.interrupt .*sessionID=ses_t1.*resume=false" "$1/v2/api.log" || true
+}
+
+test_opencode_v2_adapter_contract() {
+  [ "$(fm_control_harness_family opencode-v2)" = opencode-v2 ] \
+    || fail "opencode-v2 must resolve to its own adapter, never V1 opencode's key mechanics"
+  [ "$(fm_control_harness_family opencode)" = opencode ] \
+    || fail "V1 opencode must keep its own adapter"
+  fm_control_harness_supported opencode-v2 || fail "opencode-v2 must be a verified control adapter"
+  fm_control_harness_supports_kind opencode-v2 ship || fail "opencode-v2 must run a ship task"
+  fm_control_harness_supports_kind opencode-v2 scout || fail "opencode-v2 must run a scout task"
+  fm_control_harness_supports_kind opencode-v2 secondmate \
+    && fail "opencode-v2 secondmates are not qualified and must be refused before any stop"
+  [ "$(fm_control_interrupt_ack_source opencode-v2)" = native-session ] \
+    || fail "opencode-v2 must confirm interrupts from its exact native session"
+  [ -z "$(fm_control_interrupt_key opencode-v2)" ] && [ "$(fm_control_interrupt_repeat opencode-v2)" = 0 ] \
+    || fail "opencode-v2 must send no pane key: its execution is not in the pane"
+  [ "$(fm_control_exit_command opencode-v2)" = /exit ] || fail "shuvcode's TUI exits on /exit"
+  pass "fm-control-lib: opencode-v2 is its own verified adapter with a native-session interrupt and /exit"
+}
+
+test_opencode_v2_exit_confirms_tui_gone_and_session_idle() {
+  local out rc
+  v2_control_case v2-exit
+  out=$(run_v2_control "$V2C_DIR" t1 exit); rc=$?
+  expect_code 0 "$rc" "exit on an idle shuvcode worker should be confirmed"$'\n'"$out"
+  assert_contains "$out" "stopped t1 harness=opencode-v2 backend=tmux" "exit should report the confirmed stop"
+  assert_contains "$out" "native-session=idle" "exit should name the native half of its proof"
+  [ "$(literals "$V2C_DIR")" = /exit ] || fail "exit should type exactly /exit, got: $(literals "$V2C_DIR")"
+  [ -z "$(keys_sent "$V2C_DIR")" ] || fail "opencode-v2 must receive no interrupt key, got: $(keys_sent "$V2C_DIR")"
+  [ "$(v2_exact_interrupts "$V2C_DIR")" -ge 1 ] \
+    || fail "exit must cancel the exact recorded session with resume=false before typing anything"
+  [ -f "$V2C_DIR/home/state/t1.opencode-v2-session.json" ] \
+    || fail "exit must keep the session binding a relaunch resumes"
+  pass "fm-control exit: an idle shuvcode worker is stopped only when its TUI is gone and its session is idle"
+}
+
+test_opencode_v2_exit_cancels_executing_session_first() {
+  local out rc
+  v2_control_case v2-exit-busy
+  jq -nc '{ses_t1: true}' > "$V2C_DIR/v2/execution.json"
+  out=$(run_v2_control "$V2C_DIR" t1 exit); rc=$?
+  expect_code 0 "$rc" "exit on an executing shuvcode worker should cancel and stop it"$'\n'"$out"
+  jq -e 'has("ses_t1") | not' "$V2C_DIR/v2/execution.json" >/dev/null \
+    || fail "the executing turn must be cancelled on the service, not merely detached from the pane"
+  [ "$(v2_exact_interrupts "$V2C_DIR")" -ge 1 ] || fail "cancellation must target the exact session"
+  assert_contains "$out" "native-session=idle" "exit should report the idle session it proved"
+  pass "fm-control exit: an executing shuvcode turn is cancelled on the service before its TUI exits"
+}
+
+test_opencode_v2_exit_refuses_execution_it_cannot_cancel() {
+  local out rc
+  v2_control_case v2-exit-stuck
+  # Every native execution sample keeps reporting the turn, so cancellation is
+  # never proven no matter what the pane does.
+  for _ in $(seq 1 60); do printf 'running ses_t1\n'; done > "$V2C_DIR/v2/active-samples"
+  out=$(run_v2_control "$V2C_DIR" t1 exit); rc=$?
+  expect_code 1 "$rc" "an uncancellable native turn must not be reported stopped"$'\n'"$out"
+  assert_contains "$out" "still executing" "the refusal should name the live execution"
+  [ -z "$(literals "$V2C_DIR")" ] || fail "nothing may be typed while the session still executes"
+  pass "fm-control exit: a native turn that will not cancel refuses before the TUI is touched"
+}
+
+test_opencode_v2_exit_refuses_an_unverifiable_service() {
+  local out rc
+  v2_control_case v2-exit-gone
+  kill "$V2_SERVICE_PID" 2>/dev/null
+  for _ in $(seq 1 50); do kill -0 "$V2_SERVICE_PID" 2>/dev/null || break; sleep 0.1; done
+  out=$(run_v2_control "$V2C_DIR" t1 exit); rc=$?
+  expect_code 1 "$rc" "a gone service with no successor cannot prove the session stopped"$'\n'"$out"
+  assert_contains "$out" "native service unavailable" "the refusal should name the possible resume"
+  [ -z "$(literals "$V2C_DIR")" ] || fail "nothing may be typed when native execution is unverifiable"
+  pass "fm-control exit: an unverifiable native service refuses instead of trusting a dead pane"
+}
+
+test_opencode_v2_already_exited_tui_is_idempotent() {
+  local out rc
+  v2_control_case v2-exit-done
+  alive_as "$V2C_DIR" zsh
+  out=$(run_v2_control "$V2C_DIR" t1 exit); rc=$?
+  expect_code 0 "$rc" "an exited TUI over an idle session is already stopped"$'\n'"$out"
+  assert_contains "$out" "already-stopped t1 harness=opencode-v2" "the outcome should be idempotent"
+  assert_contains "$out" "native-session=idle" "the idempotent outcome still proves the session idle"
+  [ -z "$(literals "$V2C_DIR")" ] || fail "an exited TUI must not be sent /exit"
+  pass "fm-control exit: an exited shuvcode TUI over an idle session is idempotent success"
+}
+
+test_opencode_v2_tui_that_ignores_exit_is_unconfirmed() {
+  local out rc
+  v2_control_case v2-exit-stubborn
+  out=$(FM_FAKE_NEVER_DIES=1 FM_CONTROL_EXIT_WAIT=0.05 run_v2_control "$V2C_DIR" t1 exit); rc=$?
+  expect_code 1 "$rc" "a TUI that stays up must not be reported stopped"$'\n'"$out"
+  assert_contains "$out" "exit=unconfirmed" "the failure should keep the unconfirmed exit"
+  pass "fm-control exit: a shuvcode TUI that ignores /exit fails closed even with an idle session"
+}
+
+# The incident: Herdr's registration stays alive after /exit, so the old read
+# could neither confirm the exit nor admit a relaunch. The divergence between
+# the registration and the pane's processes is asserted, so the case cannot go
+# quietly vacuous.
+test_opencode_v2_herdr_exit_ignores_the_stale_registration() {
+  local out rc
+  v2_control_case v2-exit-herdr herdr
+  out=$(run_v2_control "$V2C_DIR" t1 exit); rc=$?
+  expect_code 0 "$rc" "exit on a Herdr shuvcode worker should be confirmed"$'\n'"$out"
+  assert_contains "$out" "stopped t1 harness=opencode-v2 backend=herdr" "exit should be confirmed on Herdr"
+  assert_contains "$out" "native-session=idle" "the Herdr exit should still prove the session idle"
+  [ "$(cat "$V2C_DIR/fake/command")" = zsh ] || fail "fixture: /exit should have returned the pane to its shell"
+  [ "$(PATH="$V2C_DIR/fakebin:$PATH" FM_FAKE_DIR="$V2C_DIR/fake" FM_HOME="$V2C_DIR/home" \
+       bash -c '. "$1/bin/fm-backend.sh"; fm_backend_agent_state herdr fmses:w1:p2' _ "$ROOT")" = alive ] \
+    || fail "fixture: the Herdr registration must still claim a live agent, or this case proves nothing"
+  [ "$(PATH="$V2C_DIR/fakebin:$PATH" FM_FAKE_DIR="$V2C_DIR/fake" FM_HOME="$V2C_DIR/home" \
+       FM_HERDR_PS_BIN="$V2C_DIR/fakebin/herdr-ps" \
+       bash -c '. "$1/bin/fm-backend.sh"; fm_backend_agent_state herdr fmses:w1:p2 opencode-v2' _ "$ROOT")" = dead ] \
+    || fail "an opencode-v2 pane back at its shell must read agent-free whatever the registration says"
+  pass "fm-control exit: a Herdr shuvcode exit is confirmed from the pane's processes, not its stale registration"
+}
+
+# --- 7. marker non-regression -----------------------------------------------
 
 test_secondmate_control_command_carries_no_marker() {
   local dir out rc typed home
@@ -920,5 +1135,13 @@ test_exit_accepts_agent_stopped_by_busy_interrupt
 test_agent_that_does_not_stop_fails_closed
 test_grok_interrupt_without_acknowledgement_reports_unconfirmed
 test_grok_idle_footer_does_not_confirm_cancellation
+test_opencode_v2_adapter_contract
+test_opencode_v2_exit_confirms_tui_gone_and_session_idle
+test_opencode_v2_exit_cancels_executing_session_first
+test_opencode_v2_exit_refuses_execution_it_cannot_cancel
+test_opencode_v2_exit_refuses_an_unverifiable_service
+test_opencode_v2_already_exited_tui_is_idempotent
+test_opencode_v2_tui_that_ignores_exit_is_unconfirmed
+test_opencode_v2_herdr_exit_ignores_the_stale_registration
 test_secondmate_control_command_carries_no_marker
 test_fm_send_still_marks_the_same_secondmate_task

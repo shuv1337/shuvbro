@@ -54,7 +54,8 @@ export function nativeAPI(record, operation, parameters = []) {
     env: { ...process.env, OPENCODE_PASSWORD: service.password }, encoding: "utf8", timeout: 10000, maxBuffer: 1024 * 1024,
   });
   if (result.status !== 0 || result.signal) throw new Error("cannot verify native service operation " + operation);
-  if (operation === "session.environment" && !result.stdout.trim()) return null;
+  // These operations answer success with an empty (No Content) body.
+  if (["session.environment", "session.switchModel"].includes(operation) && !result.stdout.trim()) return null;
   return JSON.parse(result.stdout);
 }
 

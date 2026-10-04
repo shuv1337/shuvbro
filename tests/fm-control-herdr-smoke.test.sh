@@ -7,7 +7,9 @@
 # agent-state classifier the control plane is allowed to trust, so its
 # behavior is pinned here against the REAL binary rather than a stub: whether
 # an agent is running, and therefore whether a lifecycle verb may act at all,
-# comes from herdr's own agent registry.
+# comes from herdr's own agent registry - except for opencode-v2, whose pane is
+# classified from its foreground processes because its registration outlives
+# the TUI.
 #
 # No real agent is launched. herdr's `pane report-agent` is the same registry
 # the adapter reads, so registering and not registering an agent on a plain
@@ -121,6 +123,20 @@ herdr pane report-agent "$PANE_ID" --source fm-control-smoke --agent fm-control-
 
 STATE=$(fm_backend_agent_state herdr "$SESSION:$PANE_ID")
 [ "$STATE" = alive ] || fail "herdr should classify a registered agent as alive, got '$STATE'"
+
+# That registration is not process evidence: the pane still hosts only its
+# shell. An opencode-v2 pane is classified from its foreground processes
+# instead (bin/backends/herdr.sh), because the shuvcode hook registration
+# outlives an exited TUI, so the very same pane reads agent-free for that
+# adapter. The retry absorbs a prompt helper the shell may briefly run.
+for _ in $(seq 1 50); do
+  STATE=$(fm_backend_agent_state herdr "$SESSION:$PANE_ID" opencode-v2)
+  [ "$STATE" = dead ] && break
+  sleep 0.1
+done
+[ "$STATE" = dead ] \
+  || fail "an opencode-v2 pane hosting only its shell should read dead despite a registered agent, got '$STATE'"
+pass "real herdr: an opencode-v2 pane follows its foreground processes, not a registration over a plain shell"
 
 OUT=$(run_control hsmoke interrupt) || fail "interrupt against a registered agent should succeed: $OUT"
 case "$OUT" in

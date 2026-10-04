@@ -366,6 +366,147 @@ test_agent_state_bypasses_a_stale_client_shadowing_a_compatible_one() {
   pass "herdr client selection: a live pane behind a stale shadowing client reads alive"
 }
 
+# --- opencode-v2 agent state: the pane's processes, not its registration ----
+#
+# Herdr kept the shuvcode hook registration after the worker TUI exited, so for
+# an opencode-v2 pane the adapter reads `pane process-info` instead. The live
+# shapes below are the three foreground processes a real shuvcode worker pane
+# reported (owner attach wrapper, node launcher, compiled binary).
+
+v2_process_info_fixture() {  # <pane> <shell-pid> <pgid> <foreground-json>
+  printf '{"id":"cli:pane:process_info","result":{"type":"pane_process_info","process_info":{"pane_id":"%s","shell_pid":%s,"foreground_process_group_id":%s,"foreground_processes":%s}}}\n' \
+    "$1" "$2" "$3" "$4"
+}
+
+V2_LIVE_FOREGROUND='[{"pid":40069,"name":"node-MainThread","argv":["/usr/bin/node","/home/u/shuvbro/bin/fm-opencode-v2-owner.mjs","attach","ses_x","{}"],"cmdline":"/usr/bin/node /home/u/shuvbro/bin/fm-opencode-v2-owner.mjs attach ses_x {}"},{"pid":47453,"name":"node-MainThread","argv":["/usr/bin/node","/home/u/.local/bin/shuvcode","--server","http://127.0.0.1:4096","--auto","--session","ses_x"],"cmdline":"/usr/bin/node /home/u/.local/bin/shuvcode --server http://127.0.0.1:4096 --auto --session ses_x"},{"pid":47478,"name":"shuvcode","argv":["/home/u/.npm-global/lib/node_modules/shuvcode/node_modules/shuvcode-linux-x64/bin/shuvcode","--server","http://127.0.0.1:4096","--auto","--session","ses_x"]}]'
+
+# run_v2_state <case> <harness>: one fm_backend_herdr_agent_state read against
+# the canned responses already written to <case>/responses.
+# The pane shell 22712 is a lone sleeping process in the fake process table, so
+# an agent-free verdict rests on the backend's own idle-shell proof.
+run_v2_state() {  # <dir> <harness>
+  local dir=$1 fb
+  fb=$(make_herdr_fakebin "$dir")
+  PATH="$fb:$PATH" FM_HERDR_LOG="$dir/log" FM_HERDR_RESPONSES="$dir/responses" \
+    FM_HERDR_PS_BIN="$dir/ps" FM_BACKEND_HERDR_IDLE_SHELL_PROOF_POLLS=3 \
+    bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_agent_state default:w1:p2 "$1"' "$ROOT" "$2"
+}
+
+v2_state_case() {  # <name> -> echoes a fresh case dir
+  local dir="$TMP_ROOT/v2-state-$1"
+  mkdir -p "$dir/responses"
+  : > "$dir/log"
+  cat > "$dir/ps" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  "-axo pid=,ppid=") printf '1 0\n22712 1\n' ;;
+  "-p 22712 -o stat=") printf 'Ss\n' ;;
+  *) exit 1 ;;
+esac
+SH
+  chmod +x "$dir/ps"
+  printf '%s\n' "$dir"
+}
+
+test_opencode_v2_agent_state_reads_foreground_processes() {
+  local dir out
+  dir=$(v2_state_case live)
+  printf '{"result":{"pane":{"pane_id":"w1:p2"}}}\n' > "$dir/responses/1.out"
+  v2_process_info_fixture w1:p2 22712 40069 "$V2_LIVE_FOREGROUND" > "$dir/responses/2.out"
+  out=$(run_v2_state "$dir" opencode-v2)
+  [ "$out" = alive ] || fail "a pane running the shuvcode worker TUI should read alive, got '$out'"
+  assert_contains "$(cat "$dir/log")" $'pane\x1fprocess-info\x1f--pane\x1fw1:p2' "the verdict must come from the pane's processes"
+  assert_not_contains "$(cat "$dir/log")" $'agent\x1fget' "the shuvcode registration must not decide an opencode-v2 verdict"
+
+  # The incident shape: the TUI exited, the registration did not. Without the
+  # adapter the registration still answers alive; with it the shell decides.
+  dir=$(v2_state_case exited)
+  printf '{"result":{"pane":{"pane_id":"w1:p2"}}}\n' > "$dir/responses/1.out"
+  printf '{"result":{"agent":{"agent":"shuvcode","agent_status":"idle"}}}\n' > "$dir/responses/2.out"
+  printf '{"result":{"pane":{"pane_id":"w1:p2"}}}\n' > "$dir/responses/3.out"
+  v2_process_info_fixture w1:p2 22712 22712 '[{"pid":22712,"name":"zsh","argv":["-zsh"]}]' > "$dir/responses/4.out"
+  cp "$dir/responses/4.out" "$dir/responses/5.out"
+  out=$(run_v2_state "$dir" '')
+  [ "$out" = alive ] || fail "fixture: the stale registration must still read alive without the adapter, got '$out'"
+  out=$(run_v2_state "$dir" opencode-v2)
+  [ "$out" = dead ] || fail "an opencode-v2 pane back at its shell must read agent-free, got '$out'"
+  pass "fm_backend_herdr_agent_state: an opencode-v2 pane is classified from its foreground processes, not its stale registration"
+}
+
+test_opencode_v2_agent_state_settles_a_prompt_helper() {
+  local dir out
+  # zsh redrawing its prompt briefly runs starship in the foreground group;
+  # the idle-shell proof's settle retry must see the clean shell after it.
+  dir=$(v2_state_case prompt-helper)
+  printf '{"result":{"pane":{"pane_id":"w1:p2"}}}\n' > "$dir/responses/1.out"
+  v2_process_info_fixture w1:p2 22712 22712 \
+    '[{"pid":22712,"name":"zsh","argv":["-zsh"]},{"pid":22790,"name":"starship","argv":["starship","prompt"]}]' \
+    > "$dir/responses/2.out"
+  cp "$dir/responses/2.out" "$dir/responses/3.out"
+  v2_process_info_fixture w1:p2 22712 22712 '[{"pid":22712,"name":"zsh","argv":["-zsh"]}]' > "$dir/responses/4.out"
+  out=$(run_v2_state "$dir" opencode-v2)
+  [ "$out" = dead ] || fail "a transient prompt helper must not keep an exited opencode-v2 pane from reading agent-free, got '$out'"
+
+  # A pane that never settles back to its lone shell still refuses.
+  dir=$(v2_state_case busy-shell)
+  printf '{"result":{"pane":{"pane_id":"w1:p2"}}}\n' > "$dir/responses/1.out"
+  for n in 2 3 4 5; do
+    v2_process_info_fixture w1:p2 22712 22712 \
+      '[{"pid":22712,"name":"zsh","argv":["-zsh"]},{"pid":22790,"name":"make","argv":["make"]}]' \
+      > "$dir/responses/$n.out"
+  done
+  out=$(run_v2_state "$dir" opencode-v2)
+  [ "$out" = ambiguous ] || fail "a pane busy with another foreground process must read ambiguous, got '$out'"
+  pass "fm_backend_herdr_agent_state: an opencode-v2 pane settles past a prompt helper but never past a busy foreground"
+}
+
+test_opencode_v2_agent_state_never_guesses_agent_free() {
+  local dir out
+  # The owner wrapper alone (its TUI not yet up, or already gone) is not a
+  # shuvcode process and not a shell.
+  dir=$(v2_state_case wrapper)
+  printf '{"result":{"pane":{"pane_id":"w1:p2"}}}\n' > "$dir/responses/1.out"
+  v2_process_info_fixture w1:p2 22712 40069 \
+    '[{"pid":40069,"name":"node-MainThread","argv":["/usr/bin/node","/home/u/shuvbro/bin/fm-opencode-v2-owner.mjs","attach","ses_x","{}"]}]' \
+    > "$dir/responses/2.out"
+  out=$(run_v2_state "$dir" opencode-v2)
+  [ "$out" = ambiguous ] || fail "a wrapper without its TUI must read ambiguous, got '$out'"
+
+  # A script that merely lives under a directory named shuvcode is not the
+  # launcher (bin/fm-shuvcode-lib.sh's structural rule).
+  dir=$(v2_state_case decoy)
+  printf '{"result":{"pane":{"pane_id":"w1:p2"}}}\n' > "$dir/responses/1.out"
+  v2_process_info_fixture w1:p2 22712 51000 \
+    '[{"pid":51000,"name":"node-MainThread","argv":["/usr/bin/node","/tmp/shuvcode/lab/run.mjs"]}]' > "$dir/responses/2.out"
+  out=$(run_v2_state "$dir" opencode-v2)
+  [ "$out" = ambiguous ] || fail "an unrelated node script must not read as the shuvcode launcher, got '$out'"
+
+  # A shell that is not the pane's own foreground group is not an idle prompt.
+  dir=$(v2_state_case subshell)
+  printf '{"result":{"pane":{"pane_id":"w1:p2"}}}\n' > "$dir/responses/1.out"
+  v2_process_info_fixture w1:p2 22712 30000 '[{"pid":30000,"name":"bash","argv":["bash"]}]' > "$dir/responses/2.out"
+  out=$(run_v2_state "$dir" opencode-v2)
+  [ "$out" = ambiguous ] || fail "a foreground group other than the pane shell must read ambiguous, got '$out'"
+
+  dir=$(v2_state_case unreadable)
+  printf '{"result":{"pane":{"pane_id":"w1:p2"}}}\n' > "$dir/responses/1.out"
+  printf '1\n' > "$dir/responses/2.exit"
+  out=$(run_v2_state "$dir" opencode-v2)
+  [ "$out" = unreadable ] || fail "a failed process read must read unreadable, got '$out'"
+
+  dir=$(v2_state_case foreign-pane)
+  printf '{"result":{"pane":{"pane_id":"w1:p2"}}}\n' > "$dir/responses/1.out"
+  v2_process_info_fixture w9:p9 22712 22712 '[{"pid":22712,"name":"zsh","argv":["-zsh"]}]' > "$dir/responses/2.out"
+  out=$(run_v2_state "$dir" opencode-v2)
+  [ "$out" = unreadable ] || fail "a process read for another pane must read unreadable, got '$out'"
+
+  dir=$(v2_state_case gone)
+  printf '{"error":{"code":"pane_not_found","message":"pane w1:p2 not found"}}\n' > "$dir/responses/1.out"
+  out=$(run_v2_state "$dir" opencode-v2)
+  [ "$out" = missing ] || fail "a gone opencode-v2 pane must read missing, got '$out'"
+  pass "fm_backend_herdr_agent_state: an opencode-v2 pane reads agent-free only from a lone foreground shell"
+}
+
 # shellcheck disable=SC2016
 test_cli_caches_the_selected_client_within_a_process() {
   local dir out
@@ -4667,6 +4808,9 @@ test_workspace_label_empty_marker_falls_back_to_primary
 test_workspace_label_different_secondmates_get_different_labels
 test_cli_helper_sets_env_and_appends_trailing_session_flag
 test_agent_state_bypasses_a_stale_client_shadowing_a_compatible_one
+test_opencode_v2_agent_state_reads_foreground_processes
+test_opencode_v2_agent_state_never_guesses_agent_free
+test_opencode_v2_agent_state_settles_a_prompt_helper
 test_cli_caches_the_selected_client_within_a_process
 test_cli_scopes_the_selected_client_to_its_session
 test_cli_unrelated_failure_never_triggers_reselection
