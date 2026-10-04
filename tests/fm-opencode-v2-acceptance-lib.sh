@@ -266,12 +266,14 @@ v2_session() {  # <dir> <id> <directory> [parent] [marker-session] [marker-claim
 }
 
 # Publish a real exact registration through a live owner stand-in; sets
-# V2_OWNER_PID and V2_CLAIM. The owner retires on SIGUSR1.
+# V2_OWNER_PID and V2_CLAIM. The owner retires on SIGUSR1. It runs through the
+# `shuvcode` link like the real activated lead, so lock-holder liveness sees a
+# shuvcode harness even where Node renames its main thread to MainThread.
 v2_register() {  # <dir> <session> <root> <home>
   local dir=$1 out
   v2_assert_test_namespace
   out="$dir/owner-$2.out"
-  "$V2_NODE_BIN" "$V2_HARNESS" owner "$V2_CODE_ROOT" "$V2_SOCKET" "$2" "$3" "$4" "$4/state" "$4/config" > "$out" 2>&1 &
+  "$V2_SERVICE_EXEC" "$V2_HARNESS" owner "$V2_CODE_ROOT" "$V2_SOCKET" "$2" "$3" "$4" "$4/state" "$4/config" > "$out" 2>&1 &
   V2_OWNER_PID=$!
   v2_track "$V2_OWNER_PID"
   for _ in $(seq 1 100); do
