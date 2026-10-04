@@ -282,6 +282,9 @@ The generic Herdr agent-liveness probe reuses the same classifier.
 A structurally gone pane becomes `missing`, a restored agent-less shell becomes `dead`, a registered agent becomes `alive`, and an unexpected read becomes `unreadable`.
 Unlike tmux process-name inspection, native registration can classify Pi without guessing from a generic interpreter name.
 opencode-v2 is the exception: its shuvcode hook registration outlives the TUI, so a caller that names that harness gets a pane classified from its foreground processes instead, `alive` for a shuvcode process and `dead` only through the idle-shell proof; [agent control](agent-control.md) owns how that endpoint fact combines with the native session.
+The idle-shell proof here also accepts a lone interactive login shell in its own foreground process group under exactly one `treehouse` wrapper below the pane shell, the shape a Treehouse-launched worker leaves after exit; any other intermediate or depth stays ambiguous, and pane-death cleanup still requires the bare pane shell.
+A caller that names any other harness while the pane still carries a shuvcode registration gets the same process classification for that harness's own identity, so a stale registration never proves a replacement up; until Herdr registers the new adapter, only its foreground process reads `alive`.
+Watch, doorbell, crew-state, legacy teardown, and the restart-husk check pass the task's recorded harness so an exited opencode-v2 pane reads as agent-free there too.
 
 The session-start sweep uses this probe.
 Mid-session secondmate agent-process liveness is not implemented because idle secondmates are deliberately exempt from stale-pane escalation and need a separate periodic identity signal.

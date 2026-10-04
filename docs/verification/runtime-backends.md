@@ -1624,7 +1624,7 @@ ok - shuvcode v2.0.22-shuv.1: real Herdr/Treehouse nested-shell exit, in-place r
 
 After exit, the sole foreground process was `zsh -l`, with a foreground process-group ID different from the pane shell PID; the recorded native session was idle and relaunch completed in the same pane and Treehouse worktree.
 This opt-in guard uses the named-session helper's default-session tripwire, isolated XDG service and worker registry settings, and lab-only `MISE_YES=1`, never global mise trust changes.
-The stale-registration harness-switch refusal and recorded-harness consumers have portable regressions in `tests/fm-control-relaunch.test.sh`, `tests/fm-backend-herdr.test.sh`, `tests/fm-crew-state.test.sh`, and `tests/fm-task-inbox.test.sh`.
+The stale-registration harness switch (refused without, and confirmed only by, the target adapter's own foreground process) and recorded-harness consumers have portable regressions in `tests/fm-control-relaunch.test.sh`, `tests/fm-backend-herdr.test.sh`, `tests/fm-crew-state.test.sh`, and `tests/fm-task-inbox.test.sh`.
 The same day, a read-only `fm_backend_agent_state herdr <session>:<pane> opencode-v2` against a running shuvcode worker pane on Herdr 0.9.1-shuv.5 printed `alive` from its three foreground processes (owner attach wrapper, node launcher, compiled `shuvcode` binary).
 
 The installed root TUI rejects `--model`; its `mini --model` path did not honor
