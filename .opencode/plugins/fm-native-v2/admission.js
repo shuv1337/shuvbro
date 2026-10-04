@@ -6,9 +6,12 @@ import { readPrivate, writePrivate } from "../../../bin/fm-opencode-v2-owner.mjs
 // Admission journal is adapter transport, not wake-row ownership. Only the
 // canonical drain/ack owner consumes queue rows. IDs/text survive replacement
 // successors, owner reload and unknown native prompt acknowledgement.
+// One queued wake doorbell at a time: a later wake stays journaled while an
+// earlier admitted wake still names rows in the canonical queue.
 export function createAdmissionJournal(paths, sessionID, admit, report = console.error, options = {}) {
   const dir = join(paths.state, ".opencode-v2-admissions", createHash("sha256").update(sessionID).digest("hex"));
   const inflight = new Map(), retries = new Map();
+  let wakeSlot = "";
   const allowed = () => !options.signal?.aborted && (!options.valid || options.valid());
   function validate(value) {
     if (value.version !== 1 || value.sessionID !== sessionID || !/^msg_[a-f0-9]{64}$/.test(value.id) || typeof value.kind !== "string" || typeof value.text !== "string" || value.text.length > 12000 || !Array.isArray(value.rows) || value.rows.some(row => typeof row !== "string" || !/^[0-9]+\t[0-9]+$/.test(row)) || !["prepared", "confirmed", "admitted", "acknowledged"].includes(value.phase)) throw new Error("invalid V2 admission record");
@@ -62,30 +65,48 @@ export function createAdmissionJournal(paths, sessionID, admit, report = console
     if (value.phase !== "acknowledged") save({ ...value, phase: "acknowledged" });
     return true;
   }
+  function outstandingRowDoorbell(exceptId) {
+    if (!existsSync(dir)) return false;
+    for (const name of readdirSync(dir).filter(name => /^msg_[a-f0-9]{64}\.json$/.test(name))) {
+      const value = validate(readPrivate(join(dir, name)));
+      if (value.id === exceptId || value.kind !== "wake" || value.phase !== "admitted" || !value.rows.length) continue;
+      if (!acknowledged(value)) return true;
+    }
+    return false;
+  }
+  function parkedBehindDoorbell(value) {
+    return value.kind === "wake" && !["admitted", "acknowledged"].includes(value.phase) && ((wakeSlot && wakeSlot !== value.id) || outstandingRowDoorbell(value.id));
+  }
   async function attemptDelivery(value) {
     validate(value);
     if (["admitted", "acknowledged"].includes(value.phase) || acknowledged(value)) return true;
     if (value.kind === "wake" && value.phase !== "confirmed") throw new Error("V2 wake admission requires successor confirmation first");
+    if (parkedBehindDoorbell(value)) return false;
     const retry = retries.get(value.id);
     if (retry && Date.now() < retry.after) return false;
-    for (let attempt = 0; attempt < 5; attempt++) {
-      if (acknowledged(value)) { retries.delete(value.id); return true; }
-      try {
-        if (!allowed()) throw new Error("V2 admission cancelled after ownership loss or retirement");
-        const result = await admit({ sessionID, id: value.id, text: value.text, delivery: "queue" });
-        if (result?.id !== value.id) throw new Error("native admission did not acknowledge the exact message ID");
-        save({ ...value, phase: "admitted" });
-        retries.delete(value.id);
-        return true;
-      } catch (error) {
-        if (attempt === 4) {
-          const failures = (retry?.failures || 0) + 1;
-          retries.set(value.id, { failures, after: Date.now() + Math.min(30000, 2000 * 2 ** Math.min(failures, 4)) });
-          if (failures === 1) report("V2 queued admission remains pending: " + error.message);
-          throw error;
+    if (value.kind === "wake") wakeSlot = value.id;
+    try {
+      for (let attempt = 0; attempt < 5; attempt++) {
+        if (acknowledged(value)) { retries.delete(value.id); return true; }
+        try {
+          if (!allowed()) throw new Error("V2 admission cancelled after ownership loss or retirement");
+          const result = await admit({ sessionID, id: value.id, text: value.text, delivery: "queue" });
+          if (result?.id !== value.id) throw new Error("native admission did not acknowledge the exact message ID");
+          save({ ...value, phase: "admitted" });
+          retries.delete(value.id);
+          return true;
+        } catch (error) {
+          if (attempt === 4) {
+            const failures = (retry?.failures || 0) + 1;
+            retries.set(value.id, { failures, after: Date.now() + Math.min(30000, 2000 * 2 ** Math.min(failures, 4)) });
+            if (failures === 1) report("V2 queued admission remains pending: " + error.message);
+            throw error;
+          }
+          await new Promise(resolve => setTimeout(resolve, 100 * 2 ** attempt));
         }
-        await new Promise(resolve => setTimeout(resolve, 100 * 2 ** attempt));
       }
+    } finally {
+      if (wakeSlot === value.id) wakeSlot = "";
     }
   }
   function deliver(value) {
@@ -113,6 +134,7 @@ export function createAdmissionJournal(paths, sessionID, admit, report = console
   }
   return {
     prepare,
+    parked: parkedBehindDoorbell,
     confirm: (value, recovery) => {
       const phase = ["admitted", "acknowledged"].includes(value.phase) ? value.phase : "confirmed";
       if (value.phase === phase && JSON.stringify(value.context?.confirmedRecovery) === JSON.stringify(recovery || null)) return value;

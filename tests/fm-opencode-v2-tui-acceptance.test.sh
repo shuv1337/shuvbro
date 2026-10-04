@@ -99,6 +99,9 @@ notice_count() { jq '[.admitted[] | select(.text | contains("WATCHER FAILURE"))]
 test_notice_episodes() {
   tui_case notice-episodes 1
   local out="$CASE/out.json" steps
+  # Each recovered stall is its own episode. Retire the previous doorbell's
+  # rows the way the lead's drain would; a later wake stays journaled behind
+  # an undrained doorbell and is not admitted again.
   steps=$(jq -nc --argjson a "$(owned_and_armed "$(lock_step)")" --arg s "$HOME_DIR/state" '
     $a + [range(1;11) as $i |
       {do:"outage",ms:600000},
@@ -109,7 +112,8 @@ test_notice_episodes() {
       {do:"wait",until:"admitted",match:"WATCHER FAILURE",count:$i,timeoutMs:10000},
       {do:"outage",ms:0},
       {do:"wait",until:"admitted",match:"WATCHER FIRED",count:$i,timeoutMs:20000},
-      {do:"sleep",ms:3000}]')
+      {do:"sleep",ms:3000},
+      {do:"shell",command:(": > " + $s + "/.wake-queue")}]')
   v2_tui "$CASE" "$(spec "$(jq -nc --argjson s "$steps" '{manualNoticeClock:true,faultMatch:"WATCHER FIRED",steps:$s}')")" "$out"
   jq -e 'all(.steps[] | select(.step=="wait"); .ok)' "$out" >/dev/null || fail "notice episode positive control failed: $(jq -c '.steps' "$out")"
   [ "$(notice_count "$out")" = 10 ] || fail "ten recovered stalls must produce ten notices, not lifetime suppression"

@@ -262,7 +262,7 @@ export default { id: "firstmate.native.v2", async setup(ctx) {
       if (current.lifecycle !== "active") publish("claim", { ...current, lifecycle: "active" });
       const armStatus = await coordinator.ensureArmed(record.sessionID);
       await coordinator.resumePending(record.sessionID);
-      const pending = journal.pending().filter(value => value.kind === "wake" || value.kind === "startup:" + record.claimID);
+      const pending = journal.pending().filter(value => (value.kind === "wake" || value.kind === "startup:" + record.claimID) && !journal.parked(value));
       if (pending.length) failure("V2 retained admission remains undelivered; automatic recovery is continuing");
        else if (!coordinator.hasUnpreparedWake() && ["armed", "existing", "not-needed"].includes(armStatus)) notices.recovered();
     })();

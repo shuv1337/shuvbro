@@ -23,6 +23,8 @@ When this session owns supervision and away mode is not active:
    The session-lock library's supplemental owner implementation is `bin/fm-opencode-v2-owner.mjs`.
 5. After a genuine actionable close, the coordinator durably saves the logical admission ID/text, verifies its singleton successor and confirms the handoff before native queued admission; `docs/watcher-continuity.md` owns that handoff ordering.
    Rejected or unknown acknowledgements retry the same ID/text; admission never acknowledges wake rows.
+   While an admitted wake still names rows in the canonical queue, a later wake is journaled and not admitted, so one queued doorbell covers every row that drain will present.
+   A later wake is admitted only after that doorbell is acknowledged and its own rows remain; rows the drain already removed retire that later wake without another prompt.
    An exhausted admission remains pending and produces a bounded diagnostic, not an unguarded recovery-marker reopen.
    Subsequent attempts continue with capped backoff while ownership remains valid; confirmed canonical queue acknowledgement retires the obsolete transport obligation without reporting it as admitted.
 6. Ordinary wake: do not ask the model to re-arm because continuity is plugin-owned.
