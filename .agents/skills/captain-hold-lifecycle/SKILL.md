@@ -20,6 +20,7 @@ Every unresolved question that belongs to the captain and is discovered while pr
 Prefer holding the work item the question gates over minting a new row; create a new task only when no work item exists to hold.
 Put the question and its options in the hold reason, and keep one held task per genuine gate: a multi-question review is one held task pointing at its report, not a row per question. Represent that task with exactly one board card that consolidates its questions and options; never fan one task id into duplicate same-key cards.
 When the answer is not a plain yes or no, also declare its short choices with `hold --option`, so the live board offers them as buttons instead of Yes and No.
+On a held work item every declared option releases the work, so declare only ways for it to go ahead and leave stopping it to a reply or Later.
 Register or re-hold through `bin/fm-captain-hold.sh hold`, which is idempotent per task id.
 After inventorying the whole report and review surface, run `bin/fm-captain-hold.sh complete` with every captain-held task id, or with `--none` only when the reviewed surface leaves nothing waiting on the captain.
 A completed investigation and an ended visual review use this same owner and completion command; a visual tool, including Lavish, never owns a parallel completion policy.
@@ -49,10 +50,10 @@ A captain-held task closed outside this owner leaves no durable answer, so the c
 Resolved findings, recommendations that need no captain choice, and prose that merely sounds decision-like do not create held tasks.
 Bearings reads the resulting structured state and must never compensate by scraping historical reports, visual-review artifacts, terminal output, chat, or other prose.
 
-A captain inbox note that begins `Live board answer for <task>` carries an answer the live board already recorded through `answers`, or a Later the board already deferred with `hold --until`, so never run `answer` for it again.
+A captain inbox note that begins `Live board answer for <task>` carries an answer the live board already recorded through `answers`, or a Later the board already recorded and deferred with `hold --until`, so never run `answer` for it again.
 Treat it as the captain's word on exactly the question the card showed, under every `AGENTS.md` authority rule: a Yes on a card whose question named one concrete merge or other boundary-crossing action is the captain's explicit word for that action only, and anything broader still needs the captain in chat.
-A typed reply that asks something back or changes the ask is recorded but not settled: re-hold released work with the follow-up, or hold a new task when the question row closed, and relay it in chat.
-A board answer releases a held work item whatever the answer, so when it does not approve that work going ahead - a No, or a reply that defers or changes it - re-hold or retire the work before the queue is next re-evaluated.
+On held work only Yes or a declared option releases it; a No, a typed reply, or a Later is recorded with `answers` mode `record` and the work stays held, so act on it: re-hold with the follow-up as the new reason, retire the work, or relay it in chat, and never release it without the captain's word.
+A typed reply on a question row closes it but may still ask something back or change the ask: hold a new task for the follow-up and relay it in chat.
 A Later needs nothing beyond the date it already carries.
 Acknowledge the note with `bin/fm-inbox.sh drain --ack <id>` once it is handled.
 

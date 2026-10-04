@@ -17,6 +17,8 @@ A hold may declare the answer choices a captain surface offers with repeatable `
 `bin/fm-fleet-snapshot.sh` exposes that set as `hold_options`, read only from that position, so body prose that merely looks like an options line declares nothing.
 
 The `answer` subcommand records the captain's exact words and resolves the call in the same act: it closes a question-shaped call, while `answer --release` frees a captain-gated work item to proceed without completing it.
+`answer --record` is the one path that records the captain's words without resolving the call: it appends a dated `Captain answer recorded:` note carrying the answer digest below the body and leaves the hold, hold-set stamp, declared options, lifecycle identity, and parent decision untouched, so an answer that does not let held work go ahead - a no, a deferral, or a reply the lead still has to act on - keeps the merge entrypoints refusing the task.
+It refuses a task that is not an open captain call, and an exact retry is a no-op.
 It requires a non-empty captain decision file of at most 8192 bytes, durably writes a resolution block carrying the decision digest and a `Resolution mode:` while retaining the leading hold-set stamp until the selected `tasks-axi done` or `tasks-axi unhold` transition succeeds, then restores the successful record's resolution-first body ordering (the previous body remains preserved below the block and archived through tasks-axi `--archive-body`).
 If the close is interrupted, the still-held task therefore keeps its original age basis.
 A matching retry also completes any resolution-first normalization left unfinished after the close itself succeeded.
@@ -51,7 +53,7 @@ A pending-close record that fails validation outright is a different case and st
 
 "A keyed answer resolves its matching captain-held task" is one capability with one owner.
 `answers` is its channel-agnostic entry point: it reads `<task-id>\t<answer>\t<label>[\t<mode>]` lines and resolves each named task through the same `answer` path, so every guard applies identically no matter which channel the answer arrived on.
-The optional mode column carries a card-declared close: `done` (default) completes the task and `release` lifts the hold so held work resumes; any other value is skipped.
+The optional mode column carries a card-declared close: `done` (default) completes the task, `release` lifts the hold so held work resumes, and `record` records the answer through `answer --record` and keeps the hold, reported as `recorded:`; any other value is skipped.
 A key that names no task, names a task that is not captain-held, or names a task already closed is reported as `skipped:` and feeds nothing; a replay whose answer and requested close mode match the newest record is an idempotent `closed:`, while a mode mismatch is skipped; and the command exits nonzero when any key was skipped.
 `--source` is provenance text recorded in the durable decision, never a behavior switch, and the command carries no per-channel branch.
 
@@ -62,8 +64,9 @@ Three channels feed that one intake today, and each is an ordinary caller rather
 `bin/fm-procevent.sh` is the captured-result channel: after capture, a bound built-in source has its result passed to `bin/fm-procevent-<adapter>.sh answers <result-file>` and whatever that prints is piped into the intake, so any built-in adapter with an `answers` command works and the runner names no adapter, parses no result, and carries no decision rule.
 Trusted external process-event adapters intentionally expose no answer operation and cannot feed this authority-bearing intake; [`extension-bindings.md`](extension-bindings.md#trust-boundary) owns that boundary.
 `bin/fm-procevent-lavish.sh answers` is one such adapter command; it reads only rows tagged `choice`, relays a card's declared close mode, and can never let freeform captain prose forge a task id or a mode.
-`bin/fm-board.sh answer` is the [live board](live-board.md) channel: it feeds one keyed line with `--source "live board..."`, declares the close mode on every card it renders - a question row closes and other held work is released - and pins the answer to a digest of the exact question shown, so a re-asked question refuses the old click.
-Its Later button is a deferral rather than an answer and re-holds through `hold --until`, keeping the reason and declared options; every recorded board answer then wakes the lead through `bin/fm-inbox.sh note`.
+`bin/fm-board.sh answer` is the [live board](live-board.md) channel: it feeds one keyed line with `--source "live board..."`, declares the close mode on every card it renders - a question row closes, and other held work is released only by Yes or a declared option while No and a typed reply use `record` and keep it held - and pins the answer to a digest of the exact question shown, so a re-asked question refuses the old click.
+A declared option on held work is therefore a way for that work to go ahead; a choice that should stop it belongs in a reply or Later, never in `--option`.
+Its Later button records the deferral through `record` and then re-holds through `hold --until`, keeping the reason and declared options; every recorded board answer then wakes the lead through `bin/fm-inbox.sh note`.
 
 ## Reconcile: re-check reality, never a blind close
 
@@ -205,7 +208,7 @@ The board's half is pinned in `tests/fm-bearings-board.test.sh`: every published
 That suite drives its Lavish session through a protocol-shaped stub, and `tests/fm-bearings-board-lavish-live-e2e.test.sh` is the default-on capability guard for the installed provider; [`verification/process-event-sources.md`](verification/process-event-sources.md) owns the version-scoped evidence.
 [`verification/process-event-sources.md`](verification/process-event-sources.md) owns the process-event ownership and reclamation evidence exercised by `tests/fm-procevent.test.sh`.
 
-The live board channel is pinned in `tests/fm-board.test.sh`: yes, no, declared options, and typed replies close or release through this intake with board provenance, Later re-holds with its date and declared options, every recorded answer queues exactly one captain inbox wake, and refused requests change nothing.
+The live board channel is pinned in `tests/fm-board.test.sh`: yes, no, declared options, and typed replies close a question through this intake with board provenance, Yes releases held work while No and a typed reply record the answer and leave it held so `bin/fm-merge-local.sh` still refuses it, Later records and re-holds with its date and declared options, an answered question stays out of Recently done, every recorded answer queues exactly one captain inbox wake, and refused requests change nothing.
 The declared-options head of the task body is pinned by `test_declared_options_travel_with_the_hold` in `tests/fm-captain-hold-lifecycle.test.sh`, and its snapshot projection in `tests/fm-fleet-snapshot-view.test.sh`.
 
 `tests/fm-classify-decision-key.test.sh` pins `status_key_closing_verb` itself: it separates a resolution from the durable-transfer close and from a still-open key, reports the last real transition across re-openings and both key positions, and treats a prose mention as no transition.

@@ -69,6 +69,28 @@ task_show() {  # <home> <task-id>
   (cd "$1" && tasks-axi show "$2" --full)
 }
 
+# local_merge_refused <home> <task-id>: a local-only delivery for the task is
+# staged and bin/fm-merge-local.sh must refuse it without moving main.
+local_merge_refused() {
+  local home=$1 id=$2 repo wt before rc=0
+  repo="$home/projects/$id-repo"
+  wt="$home/projects/$id"
+  if [ ! -d "$wt" ]; then
+    fm_git_worktree "$repo" "$wt" "fm/$id"
+    printf 'held delivery\n' > "$wt/local.txt"
+    git -C "$wt" add local.txt
+    git -C "$wt" -c user.name='Firstmate Tests' -c user.email='tests@example.invalid' commit -qm 'held delivery'
+    fm_write_meta "$home/state/$id.meta" "window=firstmate:fm-$id" "endpoint_task_id=$id" "worktree=$wt" \
+      "project=$repo" "harness=codex" "kind=ship" "mode=local-only" "spawn_gen=fixture-$id"
+  fi
+  before=$(git -C "$repo" rev-parse main)
+  in_home "$home" "$ROOT/bin/fm-merge-local.sh" "$id" > "$home/$id-merge.out" 2> "$home/$id-merge.err" || rc=$?
+  [ "$rc" -ne 0 ] || fail "the local merge entrypoint accepted $id after a board answer that keeps it held"
+  [ "$(git -C "$repo" rev-parse main)" = "$before" ] || fail "the local merge entrypoint moved main for held $id"
+  grep -F "$id is still held for the captain" "$home/$id-merge.err" >/dev/null \
+    || fail "the local merge refusal did not name held $id: $(cat "$home/$id-merge.err")"
+}
+
 utc_day() {  # <offset-days>
   node -e 'console.log(new Date(Date.now() + Number(process.argv[1]) * 86400000).toISOString().slice(0, 10))' "$1"
 }
@@ -410,6 +432,7 @@ test_answers_land_through_the_intake() {
   home=$(make_home answers)
   hold "$home" call-yes --title "Close the duplicate PR?" --reason "Close duplicate PR 13? Recommend yes"
   hold "$home" sample-ship --reason "Merge PR 5 now? Recommend yes"
+  hold "$home" sample-plain --reason "Land the plain work now? Recommend yes"
   hold "$home" call-later --title "Rename it?" --reason "Rename foo to bar? Recommend no" \
     --option "Rename" --option "Keep foo"
   hold "$home" call-reply --title "Pick a database" --reason "Postgres or SQLite? Recommend SQLite"
@@ -429,11 +452,26 @@ test_answers_land_through_the_intake() {
   done
 
   out=$(post_answer "$(answer_body sample-ship no)")
-  [ "$(body_of "$out" | jq -r '.outcome')" = released ] || fail "a no on held work was not released: $out"
+  [ "$(body_of "$out" | jq -r '.outcome')" = recorded ] || fail "a no on held work was not recorded: $out"
   show=$(task_show "$home" sample-ship)
   printf '%s\n' "$show" | grep -F "state: queued" >/dev/null || fail "an answer marked held work complete: $show"
-  printf '%s\n' "$show" | grep -F "held: no" >/dev/null || fail "an answer left held work held: $show"
+  printf '%s\n' "$show" | grep -F "held: yes" >/dev/null || fail "a no released held work: $show"
   printf '%s\n' "$show" | grep -F "Answer: no" >/dev/null || fail "the recorded no is missing: $show"
+  printf '%s\n' "$show" | grep -F "Captain answer recorded:" >/dev/null || fail "the no was not recorded on the task: $show"
+  local_merge_refused "$home" sample-ship
+
+  out=$(post_answer "$(answer_body sample-plain reply '{"text": "Not yet, wait for the docs"}')")
+  [ "$(body_of "$out" | jq -r '.outcome')" = recorded ] || fail "a typed reply on held work was not recorded: $out"
+  show=$(task_show "$home" sample-plain)
+  printf '%s\n' "$show" | grep -F "held: yes" >/dev/null || fail "a typed reply released held work: $show"
+  printf '%s\n' "$show" | grep -F "Answer: Not yet, wait for the docs" >/dev/null || fail "the typed reply on held work is missing: $show"
+  local_merge_refused "$home" sample-plain
+
+  out=$(post_answer "$(answer_body sample-ship yes)")
+  [ "$(body_of "$out" | jq -r '.outcome')" = released ] || fail "a yes on held work was not released: $out"
+  show=$(task_show "$home" sample-ship)
+  printf '%s\n' "$show" | grep -F "state: queued" >/dev/null || fail "a yes marked held work complete: $show"
+  printf '%s\n' "$show" | grep -F "held: no" >/dev/null || fail "a yes left held work held: $show"
 
   out=$(post_answer "$(answer_body call-later later "$(jq -cn --arg d "$until" '{until: $d}')")")
   [ "$(body_of "$out" | jq -r '.outcome')" = deferred ] || fail "later was not recorded as a deferral: $out"
@@ -442,6 +480,7 @@ test_answers_land_through_the_intake() {
   printf '%s\n' "$show" | grep -F "held: yes" >/dev/null || fail "later closed or released the question: $show"
   printf '%s\n' "$show" | grep -F "Captain hold options: Rename | Keep foo" >/dev/null || fail "later dropped the declared options: $show"
   printf '%s\n' "$show" | grep -F "Resolution recorded" >/dev/null && fail "later recorded a resolution: $show"
+  printf '%s\n' "$show" | grep -F "Answer: later, until $until" >/dev/null || fail "later was not recorded on the task: $show"
 
   out=$(post_answer "$(answer_body call-reply reply '{"text": "SQLite for now,\n\tmove later"}')")
   [ "$(body_of "$out" | jq -r '.outcome')" = closed ] || fail "a typed reply was not recorded: $out"
@@ -455,24 +494,26 @@ test_answers_land_through_the_intake() {
   task_show "$home" call-option | grep -F "Answer: All at once" >/dev/null || fail "the declared option label was not recorded"
 
   notes=$(inbox_notes "$home")
-  [ "$notes" = 5 ] || fail "expected one captain inbox note per answer, found $notes"
-  for id in call-yes sample-ship call-later call-reply call-option; do
+  [ "$notes" = 7 ] || fail "expected one captain inbox note per answer, found $notes"
+  for id in call-yes sample-ship sample-plain call-later call-reply call-option; do
     grep -l -F "Live board answer for $id:" "$home"/state/inbox/*.note >/dev/null \
       || fail "no inbox note announced the answer for $id"
   done
   grep -h -F "deferred until $until" "$home"/state/inbox/*.note >/dev/null || fail "the deferral note lacks its date"
   rows=$(awk -F '\t' '$3 == "check" && $4 ~ /^inbox:/' "$home/state/.wake-queue" | wc -l | tr -d ' ')
-  [ "$rows" = 5 ] || fail "expected five check wakes for the lead, found $rows: $(cat "$home/state/.wake-queue")"
+  [ "$rows" = 7 ] || fail "expected seven check wakes for the lead, found $rows: $(cat "$home/state/.wake-queue")"
 
   data=$(board_data)
   printf '%s' "$data" | jq -e --arg d "$until" '
-    ([.waiting_on_you[] | select(.answerable)] | length) == 0
+    [.waiting_on_you[] | select(.answerable) | .id] == ["sample-plain"]
     and any(.queued[]; .id == "call-later" and .note == "back to you on \($d)")
-  ' >/dev/null || fail "answered items did not leave Waiting on you after the refresh: $data"
+  ' >/dev/null || fail "only the still-held work should stay in Waiting on you after the refresh: $data"
+  printf '%s' "$data" | jq -e '[.done[].id] | all(. != "call-yes" and . != "call-reply" and . != "call-option")' >/dev/null \
+    || fail "an answered captain question is shown as Recently done: $data"
   out=$(post_answer "$(jq -cn --arg t "$BOARD_TOKEN" '{token: $t, task: "call-yes", card: ("b" * 64), choice: "yes"}')")
   expect_refusal "$out" 409 not_waiting "an already answered question was answered again"
-  [ "$(inbox_notes "$home")" = 5 ] || fail "a refused repeat answer woke the lead"
-  pass "yes, no, later, typed replies, and declared options land through the intake with board provenance and one wake each"
+  [ "$(inbox_notes "$home")" = 7 ] || fail "a refused repeat answer woke the lead"
+  pass "yes, no, later, typed replies, and declared options land through the intake with board provenance and one wake each, and only yes releases held work"
 }
 
 test_a_home_that_never_opts_in_is_untouched() {

@@ -23,7 +23,8 @@
 #          health check; exit 1 and say why otherwise. Reads only.
 # model    Print the board's fm-board.v1 view as JSON, built only from
 #          bin/fm-fleet-snapshot.sh --json (or --snapshot-file, for fixtures)
-#          plus the curated notes file data/board-notes.json. It never reads
+#          plus the curated notes file data/board-notes.json. Recently done
+#          is selected by the shared landed rule in bin/fm-landed-lib.sh. It never reads
 #          backlog, status, or metadata files itself. Read-only.
 # answer   Record one captain answer the board received. The server calls this
 #          after its own request checks; it is not an operator command, and
@@ -34,9 +35,10 @@
 # WHAT A BOARD ANSWER IS. The captain's recorded words and nothing more. A
 # Yes, No, declared option, or typed reply is fed to the one keyed-answer
 # intake (`bin/fm-captain-hold.sh answers --source "live board..."`), so it is
-# recorded and resolved exactly like every other channel. Later re-holds the
-# task with `hold --until <date>`, keeping its reason and declared options, so
-# it leaves the live list and comes back on that date; it closes nothing.
+# recorded exactly like every other channel. Later is recorded the same way and
+# then re-holds the task with `hold --until <date>`, keeping its reason and
+# declared options, so it leaves the live list and comes back on that date; it
+# closes nothing.
 # Every recorded answer then queues one captain inbox note through
 # `bin/fm-inbox.sh note`, which appends the ordinary `check` wake, so the lead
 # acts on it at its next turn. Nothing here merges, spawns, steers, tears
@@ -46,7 +48,11 @@
 # The card's close mode is declared by the board for every card it renders,
 # from the structured row: a question row (kind captain) closes, and any other
 # held work item is released so it can proceed, which keeps an approval from
-# ever marking unlanded work complete. A card is pinned by a digest of the
+# ever marking unlanded work complete. Only Yes or a declared option releases
+# held work: No, a typed reply, and Later on a held work item use the intake's
+# `record` mode, which keeps the hold, so the merge entrypoints keep refusing
+# that work until the lead acts. A declared option on held work is therefore a
+# way for it to go ahead; a choice that should stop it is a reply or Later. A card is pinned by a digest of the
 # exact question shown (id, title, reason, hold-set stamp, hold-until, declared
 # options, kind); `answer` refuses a digest that no longer matches a fresh
 # snapshot, so a question re-asked while the page was open is never answered
@@ -79,6 +85,10 @@ STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 DATA="${FM_DATA_OVERRIDE:-$FM_HOME/data}"
 CONFIG="${FM_CONFIG_OVERRIDE:-$FM_HOME/config}"
 export FM_HOME
+
+# shellcheck source=bin/fm-landed-lib.sh
+# shellcheck disable=SC1091
+. "$SCRIPT_DIR/fm-landed-lib.sh"
 
 BOARD_SCHEMA=fm-board.v1
 DEFAULT_PORT=8795
@@ -195,7 +205,7 @@ load_notes() {
 project_model() {  # <snapshot-file> <notes-json> <errors-json>
   jq -c --slurpfile snap "$1" --argjson notes "$2" --argjson errors "$3" \
     --arg schema "$BOARD_SCHEMA" --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    --arg lead "$(lead_name)" --arg product shuvbro --arg home_label "$(home_label)" -n '
+    --arg lead "$(lead_name)" --arg product shuvbro --arg home_label "$(home_label)" -n "$FM_LANDED_JQ_DEFS"'
     def trunc($n): if type == "string" and length > $n then .[:$n] + "…" else . end;
     def text_or_null: if type == "string" and length > 0 then . else null end;
     def web_link: type == "string" and test("^https?://[^[:space:]\"<>]+$");
@@ -285,7 +295,7 @@ project_model() {  # <snapshot-file> <notes-json> <errors-json>
                     elif $after != "" then "after \($after)"
                     elif .hold_reason != null then "on hold: \(.hold_reason)"
                     else null end)} ],
-        done: ([ $records[] | select(.state == "done") ][:12]
+        done: ([ $records[] | select(landed_record) ][:12]
           | map({id,
                  title: ((.title // .id) | trunc(300)),
                  repo: (.repo | text_or_null),
@@ -391,7 +401,7 @@ valid_until() {  # <YYYY-MM-DD> <today>
 
 command_answer() {
   local id=${1:-} card='' choice='' until='' text_file='' login='' text='' have_text=0
-  local item lead source label answer_value mode reason title outcome rc out note_body note_out note_id
+  local item lead source label answer_value mode intake_mode reason title outcome rc out note_body note_out note_id
   local today summary
   trap model_cleanup EXIT
   [ "$#" -ge 1 ] || { usage >&2; exit 2; }
@@ -493,6 +503,43 @@ command_answer() {
   source='live board'
   [ -z "$login" ] || source="live board, signed in as $login"
 
+  case "$mode:$choice" in
+    *:later|release:no|release:reply) intake_mode=record ;;
+    *) intake_mode=$mode ;;
+  esac
+  case "$choice" in
+    later)
+      answer_value="later, until $until"
+      summary="Later, until $until"
+      label="Later, until $until - in reply to: $reason"
+      ;;
+    reply)
+      answer_value=$text
+      summary="typed reply"
+      label="Typed reply - in reply to: $reason"
+      ;;
+    *)
+      case "$choice" in
+        yes) answer_value=yes ;;
+        no) answer_value=no ;;
+        *) answer_value=$label ;;
+      esac
+      summary=$label
+      label="$label - in reply to: $reason"
+      ;;
+  esac
+  label=$(printf '%s' "$label" | tr '\t\r\n' '   ')
+  out=$(printf '%s\t%s\t%s\t%s\n' "$id" "$answer_value" "$label" "$intake_mode" \
+    | "$SCRIPT_DIR/fm-captain-hold.sh" answers --source "$source" 2>/dev/null) || true
+  if ! printf '%s\n' "$out" | grep -Fxq -e "closed: $id" -e "recorded: $id"; then
+    answer_result 1 record_failed "Not recorded: $(printf '%s\n' "$out" | grep -F "$id" | head -1 | sed 's/^[a-z]*: [^ ]* //; s/^(//; s/)$//' | cut -c1-300)"
+  fi
+  case "$intake_mode" in
+    release) outcome=released ;;
+    record) outcome=recorded ;;
+    *) outcome=closed ;;
+  esac
+
   if [ "$choice" = later ]; then
     set -- hold "$id" --reason "$reason" --until "$until"
     while IFS= read -r label; do
@@ -502,32 +549,9 @@ command_answer() {
 $(printf '%s' "$item" | jq -r 'if .choices[0].id == "yes" then empty else .choices[].label end')
 EOF
     if ! out=$("$SCRIPT_DIR/fm-captain-hold.sh" "$@" 2>&1 </dev/null); then
-      answer_result 1 record_failed "Not recorded: $(printf '%s' "$out" | tail -1 | sed 's/^fm-captain-hold: //' | cut -c1-300)"
+      answer_result 1 record_failed "Recorded, but not deferred: $(printf '%s' "$out" | tail -1 | sed 's/^fm-captain-hold: //' | cut -c1-300)"
     fi
     outcome=deferred
-    summary="Later, until $until"
-    answer_value=''
-  else
-    if [ "$choice" = reply ]; then
-      answer_value=$text
-      label="Typed reply - in reply to: $reason"
-      summary="typed reply"
-    else
-      case "$choice" in
-        yes) answer_value=yes ;;
-        no) answer_value=no ;;
-        *) answer_value=$label ;;
-      esac
-      summary=$label
-      label="$label - in reply to: $reason"
-    fi
-    label=$(printf '%s' "$label" | tr '\t\r\n' '   ')
-    out=$(printf '%s\t%s\t%s\t%s\n' "$id" "$answer_value" "$label" "$mode" \
-      | "$SCRIPT_DIR/fm-captain-hold.sh" answers --source "$source" 2>/dev/null) || true
-    if ! printf '%s\n' "$out" | grep -Fxq "closed: $id"; then
-      answer_result 1 record_failed "Not recorded: $(printf '%s\n' "$out" | grep -F "$id" | head -1 | sed 's/^[a-z]*: [^ ]* //; s/^(//; s/)$//' | cut -c1-300)"
-    fi
-    if [ "$mode" = release ]; then outcome=released; else outcome=closed; fi
   fi
 
   note_body=$(
@@ -539,6 +563,7 @@ EOF
     case "$outcome" in
       closed) printf 'Recorded through the %s: the question is closed with this answer.\n' "$source" ;;
       released) printf 'Recorded through the %s: the held work is released with this answer.\n' "$source" ;;
+      recorded) printf 'Recorded through the %s: the held work stays held until you act on this answer.\n' "$source" ;;
       deferred) printf 'Recorded through the %s: deferred until %s; it returns to the captain then.\n' "$source" "$until" ;;
     esac
   )

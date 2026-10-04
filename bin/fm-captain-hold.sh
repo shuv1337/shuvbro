@@ -22,7 +22,7 @@
 # Usage:
 #   fm-captain-hold.sh hold <task-id> --reason <reason> [--option <label>]... \
 #     [--title <title>] [--repo <repo>] [--origin <origin-id>] [--until YYYY-MM-DD]
-#   fm-captain-hold.sh answer <task-id> --decision-file <path> [--release]
+#   fm-captain-hold.sh answer <task-id> --decision-file <path> [--release | --record]
 #   fm-captain-hold.sh answers [<legacy-origin> | --any-origin] --source <provenance>   (keyed answers on stdin)
 #   fm-captain-hold.sh reconcile-requests --source-id <source-id> --source <provenance>   (task ids on stdin)
 #   fm-captain-hold.sh bind <source-id> [<legacy-origin> | --any-origin]
@@ -73,6 +73,14 @@
 # answered captain call. A hold that expired by date (`--until` in the past) is
 # still answerable: the surviving hold annotations, not tasks-axi's live
 # `held:` bit, prove the captain owned it.
+# `--record` records the captain's words on a still-open call WITHOUT resolving
+# it: one dated `Captain answer recorded:` note carrying the answer digest is
+# appended below the body, and the hold, hold-set stamp, declared options,
+# lifecycle identity, and parent decision are all left as they were. It is for
+# an answer that does not let held work go ahead - a no, a deferral, or a reply
+# the lead still has to act on - so the merge entrypoints keep refusing the
+# task. It refuses a task that is not an open captain call, and an exact retry
+# is a no-op.
 #
 # ONE KEYED-ANSWER INTAKE, FED BY EVERY CHANNEL.
 # "A keyed answer resolves its matching captain-held task" is a single
@@ -82,7 +90,8 @@
 # identically no matter which channel the answer arrived on. The key IS the
 # task id - no identity arithmetic. The optional fourth field selects the close:
 # empty or `done` completes the task, `release` lifts the hold so held work
-# resumes; anything else is skipped. A key that names no task, a task that is
+# resumes, `record` records the answer and keeps the hold (reported
+# `recorded:`); anything else is skipped. A key that names no task, a task that is
 # not held for the captain, or a task already closed is reported as `skipped:`
 # and feeds nothing. A replayed delivery whose answer digest and requested
 # close mode both match the newest record is reported `closed:` and is a no-op;
@@ -983,6 +992,32 @@ apply_pending_retained_artifact() {  # <task-id>
   esac
 }
 
+record_answer_keeping_hold() {  # <task-id> <shown-body>
+  local id=$1 body marker stamp tmp
+  body=$(decode_shown_value "$2") \
+    || fail "could not decode the existing body for $id"
+  marker="Recorded answer digest: $DECISION_DIGEST"
+  case "$body" in
+    *"$marker"*) : ;;
+    *)
+      stamp=${FM_CAPTAIN_HOLD_NOW:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
+      tmp=$(umask 077; mktemp "${TMPDIR:-/tmp}/fm-captain-hold-record.XXXXXX") \
+        || fail "cannot stage the recorded answer"
+      if ! printf '%s\n\nCaptain answer recorded: %s\n%s\n%s\n' "$body" "$stamp" "$marker" "$DECISION_TEXT" > "$tmp"; then
+        rm -f -- "$tmp"
+        fail "cannot stage the recorded answer for $id"
+      fi
+      if ! tasks_axi update "$id" --body-file "$tmp" --archive-body >/dev/null; then
+        rm -f -- "$tmp"
+        fail "could not record the captain answer on $id"
+      fi
+      rm -f -- "$tmp"
+      ;;
+  esac
+  command_open "$id" || fail "recording the answer released captain-held task $id"
+  printf 'recorded: %s\n' "$id"
+}
+
 close_answered() {  # <task-id> <release-0-or-1>
   if [ "$2" = 1 ]; then
     tasks_axi unhold "$1" >/dev/null
@@ -1015,17 +1050,19 @@ remove_interrupted_answer_stamp() {  # <task-id>
 }
 
 command_answer() {
-  local id=${1:-} decision_file='' release=0 show state hold_kind body outcome recorded_mode occurrence
+  local id=${1:-} decision_file='' release=0 record=0 show state hold_kind body outcome recorded_mode occurrence
   [ "$#" -ge 1 ] || { usage >&2; exit 2; }
   shift
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --decision-file) shift; decision_file=${1:-} ;;
       --release) release=1 ;;
+      --record) record=1 ;;
       *) usage >&2; exit 2 ;;
     esac
     shift
   done
+  [ "$release" = 0 ] || [ "$record" = 0 ] || fail "--release and --record are mutually exclusive"
   validate_slug task-id "$id"
   load_decision "$decision_file"
   acquire_task_control_lock "$id"
@@ -1034,6 +1071,12 @@ command_answer() {
   state=$(show_field "$show" state)
   hold_kind=$(show_field_value "$show" hold_kind)
   body=$(show_field "$show" body)
+  if [ "$record" = 1 ]; then
+    [ "$state" != "done" ] && [ "$hold_kind" = captain ] \
+      || fail "task $id is not an open captain call; --record only adds to a live hold"
+    record_answer_keeping_hold "$id" "$body"
+    return 0
+  fi
   if [ "$release" = 1 ]; then outcome=released; else outcome=answered; fi
   # The occurrence the parent line names: the record about to be written is
   # one past those already in the body, and a retry names the newest one.
@@ -1223,7 +1266,7 @@ sanitize_reconcile_provenance() {
 
 command_answers() {
   local origin='' source='' row rest key answer label mode id show state hold_kind body digest legacy_digest legacy_key
-  local recorded_digest recorded_mode occurrence tmp err closed=0 skipped=0 reason release_flag tab=$'\t'
+  local recorded_digest recorded_mode occurrence tmp err closed=0 recorded=0 skipped=0 reason release_flag tab=$'\t'
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --source) shift; source=${1:-} ;;
@@ -1268,6 +1311,7 @@ command_answers() {
     case "${mode:-}" in
       ''|done) : ;;
       release) release_flag=--release ;;
+      record) release_flag=--record ;;
       *)
         printf 'skipped: %s (unknown close mode %s)\n' "$key" "$(sanitize_field "$mode")"
         skipped=$((skipped + 1))
@@ -1343,8 +1387,13 @@ command_answers() {
       # A parent-channel delivery problem is reported on stderr by the answer
       # path even when the close succeeded; keep it visible.
       [ ! -s "$err" ] || cat "$err" >&2
-      printf 'closed: %s\n' "$id"
-      closed=$((closed + 1))
+      if [ "$release_flag" = --record ]; then
+        printf 'recorded: %s\n' "$id"
+        recorded=$((recorded + 1))
+      else
+        printf 'closed: %s\n' "$id"
+        closed=$((closed + 1))
+      fi
     else
       reason=$(tr -d '\n' < "$err" | sed 's/^fm-captain-hold: //')
       printf 'skipped: %s (%s)\n' "$id" "$reason"
@@ -1352,7 +1401,7 @@ command_answers() {
     fi
   done
   rm -f -- "$tmp" "$err"
-  printf 'answers: closed=%s skipped=%s\n' "$closed" "$skipped"
+  printf 'answers: closed=%s recorded=%s skipped=%s\n' "$closed" "$recorded" "$skipped"
   [ "$skipped" -eq 0 ]
 }
 

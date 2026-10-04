@@ -33,8 +33,9 @@ Never expose the board through Tailscale Funnel, which the board refuses outrigh
 Every task waiting on you shows answer buttons, Later, and Reply.
 Yes and No are the default buttons; when the lead holds a task with `bin/fm-captain-hold.sh hold --option`, its declared choices replace them.
 A button or a typed reply of up to 500 characters is recorded as your answer through the same keyed-answer intake that chat answers use, with the live board named as where it came from.
-A question that only asked you something is closed with your answer, and held work is released so it can go ahead.
-Later asks for a date and moves the item off the list until that day; it closes nothing.
+A question that only asked you something is closed with your answer.
+Held work goes ahead only on Yes or one of its declared choices; No or a typed reply is recorded and the work stays held until the lead acts on it.
+Later asks for a date, records it, and moves the item off the list until that day; it closes nothing.
 Every recorded answer also leaves the lead a captain inbox note, so it acts on your answer at its next turn.
 
 A click is your recorded words and nothing more.
