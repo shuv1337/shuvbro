@@ -78,9 +78,10 @@ FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 # shellcheck source=bin/fm-composer-lib.sh
 . "$FM_BACKEND_HERDR_ROOT/bin/fm-composer-lib.sh"
 
-# Shuvcode process identity, for the opencode-v2 process-based agent state.
-# shellcheck source=bin/fm-shuvcode-lib.sh
-. "$FM_BACKEND_HERDR_ROOT/bin/fm-shuvcode-lib.sh"
+# Verified harness process identity (including the Cursor and shuvcode
+# owners), for the process-based agent state.
+# shellcheck source=bin/fm-session-lock-lib.sh
+. "$FM_BACKEND_HERDR_ROOT/bin/fm-session-lock-lib.sh"
 
 # Shared, backend-neutral normalized-transition shape and the single-owner
 # status->action policy table (bin/fm-transition-lib.sh). This adapter's event
@@ -2113,27 +2114,40 @@ fm_backend_herdr_tab_is_husk() {  # <session> <pane_id> [recorded-harness]
 }
 
 # fm_backend_herdr_adapter_process_matches: true only when one foreground
-# process carries <harness>'s own structural identity. opencode-v2 delegates
-# to bin/fm-shuvcode-lib.sh (never the shared `--service` process); the other
-# listed adapters need their exact executable name as the command name or
-# argv[0] basename, and claude also its install path component in argv[0]
-# (its native installer names the binary by version). Any other adapter has
-# no identity here and never matches.
+# process carries <harness>'s own identity, from the verified owners:
+# opencode-v2 and cursor delegate to bin/fm-shuvcode-lib.sh and
+# bin/fm-cursor-lib.sh; every other adapter needs its exact name as the
+# command name or argv[0] basename (pi also its launcher names), or
+# fm_harness_path_name naming exactly that adapter from the command path,
+# argv[0], or a node interpreter's script path.
 fm_backend_herdr_adapter_process_matches() {  # <harness> <name> <argv0> <args>
-  local harness=$1 name=${2##*/} argv0=${3:-} names candidate
+  local harness=$1 comm=$2 argv0=${3:-} args=${4:-} base argv0_base script found=
   case "$harness" in
-    opencode-v2) fm_shuvcode_process_matches "$2" "${4:-}" "$argv0"; return ;;
-    claude|codex|opencode|grok|kimi|rovo|omp) names=$harness ;;
-    pi|pi-signed) names='pi pi-signed' ;;
-    *) return 1 ;;
+    opencode-v2) fm_shuvcode_process_matches "$comm" "$args" "$argv0"; return ;;
+    cursor) fm_cursor_process_matches "$comm" "$args" "$argv0"; return ;;
   esac
-  name=${name#-}
-  argv0=${argv0#-}
-  for candidate in $names; do
-    [ "$name" = "$candidate" ] && return 0
-    [ -n "$argv0" ] && [ "${argv0##*/}" = "$candidate" ] && return 0
-  done
-  case "$harness:/$argv0/" in claude:*/claude/*) return 0 ;; esac
+  base=${comm##*/}; base=${base#-}
+  argv0_base=${argv0##*/}; argv0_base=${argv0_base#-}
+  case "$base|$argv0_base" in
+    "$harness|"*|*"|$harness") found=$harness ;;
+    pi-launcher\|*|Pi\|*|*\|pi-launcher|*\|Pi) found=pi ;;
+    *)
+      if ! found=$(fm_harness_path_name "$comm") && ! found=$(fm_harness_path_name "$argv0"); then
+        found=
+        case "$base" in
+          node|node-*|node[0-9]*|nodejs|MainThread)
+            read -r _ script _ <<<"$args"
+            found=$(fm_harness_path_name "${script:-}") || found=
+            ;;
+        esac
+      fi
+      ;;
+  esac
+  [ -n "$found" ] || return 1
+  case "$harness" in
+    pi|pi-signed) case "$found" in pi|pi-signed) return 0 ;; esac ;;
+    *) [ "$found" = "$harness" ] && return 0 ;;
+  esac
   return 1
 }
 

@@ -471,6 +471,19 @@ test_opencode_v2_agent_state_settles_a_prompt_helper() {
   pass "fm_backend_herdr_agent_state: an opencode-v2 pane settles past a prompt helper but never past a busy foreground"
 }
 
+# sticky_switch_state <case> <harness> <foreground-json>: sets out to one
+# agent-state read for <harness> while Herdr still reports shuvcode.
+sticky_switch_state() {  # <case> <harness> <foreground>
+  local dir n
+  dir=$(v2_state_case "sticky-$1")
+  printf '{"result":{"pane":{"pane_id":"w1:p2"}}}\n' > "$dir/responses/1.out"
+  printf '{"result":{"agent":{"agent":"shuvcode","agent_status":"idle"}}}\n' > "$dir/responses/2.out"
+  for n in 3 4 5 6; do
+    v2_process_info_fixture w1:p2 22712 31000 "$3" > "$dir/responses/$n.out"
+  done
+  out=$(run_v2_state "$dir" "$2")
+}
+
 test_stale_shuvcode_registration_cannot_confirm_replacement() {
   local dir out
   dir=$(v2_state_case stale-switch)
@@ -504,6 +517,22 @@ test_stale_shuvcode_registration_cannot_confirm_replacement() {
   printf '0\n' > "$dir/responses/.count"
   out=$(run_v2_state "$dir" claude)
   [ "$out" = ambiguous ] || fail "another adapter's foreground process must not confirm the requested claude, got '$out'"
+  sticky_switch_state node-pi pi \
+    '[{"pid":31000,"name":"node-MainThread","argv":["/usr/bin/node","/home/u/.npm-global/bin/pi","--mode","rpc"]}]'
+  [ "$out" = alive ] || fail "a node-launched pi must confirm under a sticky shuvcode registration, got '$out'"
+  sticky_switch_state pi-launcher pi '[{"pid":31000,"name":"pi-launcher","argv":["pi-launcher"]}]'
+  [ "$out" = alive ] || fail "pi's launcher must confirm under a sticky shuvcode registration, got '$out'"
+  sticky_switch_state node-cursor cursor \
+    '[{"pid":31000,"name":"MainThread","argv":["/home/u/.local/share/cursor-agent/versions/2026.08.11-e8db854/node","index.js"]}]'
+  [ "$out" = alive ] || fail "a node-launched cursor must confirm under a sticky shuvcode registration, got '$out'"
+  sticky_switch_state pi-lookalike pi \
+    '[{"pid":31000,"name":"node","argv":["node","/opt/pi-tools/run.js"]}]'
+  [ "$out" = ambiguous ] || fail "a script path without an exact pi component must not confirm pi, got '$out'"
+  sticky_switch_state cursor-lookalike cursor \
+    '[{"pid":31000,"name":"node","argv":["node","/tmp/agent/index.js"]}]'
+  [ "$out" = ambiguous ] || fail "an unrelated node process must not confirm cursor, got '$out'"
+  sticky_switch_state shuvcode-for-pi pi "$V2_LIVE_FOREGROUND"
+  [ "$out" = ambiguous ] || fail "a still-running shuvcode must not confirm the requested pi, got '$out'"
   dir=$(v2_state_case fresh-switch)
   printf '{"result":{"pane":{"pane_id":"w1:p2"}}}\n' > "$dir/responses/1.out"
   printf '{"result":{"agent":{"agent":"claude","agent_status":"working"}}}\n' > "$dir/responses/2.out"
