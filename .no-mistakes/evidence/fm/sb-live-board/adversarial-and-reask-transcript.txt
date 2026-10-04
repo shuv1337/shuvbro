@@ -1,0 +1,29 @@
+== re-ask: lead re-holds sample-merge with the SAME reason ==
+sample-merge
+{"waiting":[],"with_lead":["sample-plain","sample-merge"]}
+== adversarial: cross-origin POST ==
+{"ok":false,"code":"bad_origin","message":"Answers are accepted only from the board's own page."} HTTP403
+== adversarial: missing token ==
+{"ok":false,"code":"bad_token","message":"This page is out of date. Reload it and answer again."} HTTP403
+== adversarial: stale card digest from before the question changed ==
+{"ok":false,"code":"stale_card","message":"This question changed since the page loaded. Review it again."} HTTP409
+== adversarial: answering a task that is not waiting (sample-ship, released) ==
+{"ok":false,"code":"bad_token","message":"This page is out of date. Reload it and answer again."} HTTP403
+== adversarial: foreign Host header (DNS rebinding) ==
+HTTP403
+-- sample-merge still held after refused requests:   held: yes
+== captain answers No again on the re-asked question (same reason) ==
+{"ok":false,"code":"bad_token","message":"This page is out of date. Reload it and answer again."} HTTP403
+{"waiting":["sample-merge"],"with_lead":[{"id":"sample-plain","answer":"Neither yet - wait for the load test","answered_at":"2026-10-04T16:56:48Z"}]}
+--   held: yes
+== (corrected run) board after the re-hold refreshed ==
+{"waiting":["sample-merge"],"with_lead":["sample-plain"]}
+card=7db73eeb4ebc221e...
+== adversarial: answering a task that is not waiting (sample-ship, already released) ==
+{"ok":false,"code":"not_waiting","message":"This is no longer waiting on you."} HTTP409
+== captain answers No again on the re-asked question (same reason) ==
+{"ok":true,"outcome":"recorded","task":"sample-merge","message":"Recorded. Bro will pick it up.","note":"1791133050-pLATfE"} HTTP200
+== replaying the same click (old card) after it was recorded ==
+{"ok":false,"code":"not_waiting","message":"This is no longer waiting on you."} HTTP409
+{"waiting":[],"with_lead":[{"id":"sample-plain","answer":"Neither yet - wait for the load test","answered_at":"2026-10-04T16:56:48Z"},{"id":"sample-merge","answer":"no","answered_at":"2026-10-04T16:57:30Z"}]}
+--   held: yes  recorded answers on task: 2

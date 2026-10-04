@@ -1,0 +1,70 @@
+== persisted task state after board clicks ==
+--- call-db
+  state: done
+  held: no
+  hold_until: "-"
+  body: "Resolution recorded by fm-captain-hold.\nDecision digest: 7af54ed816b33b5a9af26d512d41bd062a127070bc2d7d7788df1cda40bf88bb\nResolution mode: answered\n\nCaptain decision:\nCaptain answered this call through live board.\nTask: call-db\nAnswer: yes\nAnswer as shown to the captain: Yes - in reply to: Use Postgres for the new service? Recommend yes"
+--- sample-ship
+  state: queued
+  held: no
+  hold_until: "-"
+  body: "Resolution recorded by fm-captain-hold.\nDecision digest: fb7505af80a3bf59c8ff4887a0ee90d7e7bffd69512fb6424320fd4e74bbf52f\nResolution mode: released\n\nCaptain decision:\nCaptain answered this call through live board.\nTask: sample-ship\nAnswer: yes\nAnswer as shown to the captain: Yes - in reply to: Merge PR 5 now? Recommend yes"
+--- sample-merge
+  state: queued
+  held: yes
+  hold_reason: Merge the cache refactor PR 9? Recommend no until CI is green
+  hold_until: "-"
+  body: "Captain hold set: 2026-10-04T16:56:09Z\n\nCaptain answer recorded: 2026-10-04T16:56:45Z\nRecorded answer digest: 1c5ab7ae7c4978f785990454249b45e34d70d3ceb81f17f3c6e3b30df58ed7ff\nCaptain answered this call through live board.\nTask: sample-merge\nAnswer: no\nAnswer as shown to the captain: No - in reply to: Merge the cache refactor PR 9? Recommend no until CI is green"
+--- sample-plain
+  state: queued
+  held: yes
+  hold_until: "-"
+  body: "Captain hold set: 2026-10-04T16:56:09Z\nCaptain hold options: Staged | All at once\n\nCaptain answer recorded: 2026-10-04T16:56:48Z\nRecorded answer digest: dc81fb81a1aaa1ed41f9b749e2131e4fd8b74d2398cf49a064577b5f6a323586\nCaptain answered this call through live board.\nTask: sample-plain\nAnswer: Neither yet - wait for the load test\nAnswer as shown to the captain: Typed reply - in reply to: Which rollout? Recommend staged"
+--- call-later
+  state: queued
+  held: yes
+  hold_until: 2026-10-05
+  body: "Captain hold set: 2026-10-04T16:56:52Z\n\nCaptain answer recorded: 2026-10-04T16:56:51Z\nRecorded answer digest: 7dee1d5de208179c45f4a8e643e75198670fa4f1898f46aa327f9541943f9281\nCaptain answered this call through live board.\nTask: call-later\nAnswer: later, until 2026-10-05\nAnswer as shown to the captain: Later, until 2026-10-05 - in reply to: Rename sample to widgets? No rush"
+
+== captain inbox notes queued ==
+5
+id=1791133000-d4qKoX
+at=2026-10-04T16:56:40Z
+source=text
+--
+Live board answer for call-db: Yes
+Question: Postgres or SQLite? - Use Postgres for the new service? Recommend yes
+Recorded through the live board: the question is closed with this answer.
+
+id=1791133003-MrX2dw
+at=2026-10-04T16:56:43Z
+source=text
+--
+Live board answer for sample-ship: Yes
+Question: Ship the sample widget - Merge PR 5 now? Recommend yes
+Recorded through the live board: the held work is released with this answer.
+
+id=1791133005-ZKMV3K
+at=2026-10-04T16:56:45Z
+source=text
+--
+Live board answer for sample-merge: No
+Question: Merge the cache refactor - Merge the cache refactor PR 9? Recommend no until CI is green
+Recorded through the live board: the held work stays held until you act on this answer.
+
+id=1791133008-tE6QPC
+at=2026-10-04T16:56:48Z
+source=text
+--
+Live board answer for sample-plain: typed reply
+Question: Plain queued work - Which rollout? Recommend staged
+Reply: Neither yet - wait for the load test
+Recorded through the live board: the held work stays held until you act on this answer
+id=1791133012-gVcPGl
+at=2026-10-04T16:56:52Z
+source=text
+--
+Live board answer for call-later: Later, until 2026-10-05
+Question: Rename the repo? - Rename sample to widgets? No rush
+Recorded through the live board: deferred until 2026-10-05; it returns to the captain then.
+

@@ -4,9 +4,10 @@ ok - the answer endpoint refuses unknown, non-held, malformed, oversized, cross-
 ok - a configured login allowlist admits only the captain's Tailscale login and direct local requests
 ok - yes, no, later, typed replies, and declared options land through the intake with board provenance and one wake each, and only yes releases held work
 ok - a no recorded in the same second as the hold still moves the item to Answered
+ok - re-asking an answered call never offers the already-answered question while the re-ask is written
 ok - a Later whose deferral fails is still recorded, reported as not deferred, and wakes the lead
 ok - a home that never starts the board gains no board state, notes, wakes, or backlog changes
 
-real	0m36.715s
-user	0m12.334s
-sys	0m5.565s
+real	0m39.161s
+user	0m14.429s
+sys	0m6.600s
