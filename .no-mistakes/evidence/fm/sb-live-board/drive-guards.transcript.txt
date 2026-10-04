@@ -1,0 +1,28 @@
+LOADED {"title":"(2) shuvbro","text":"shuvbro\nupdated 5s ago\nWAITING ON YOU\n2\nShip the sample widget\nMerge PR 5 now? Recommend yes\nsample · asked today\nYes\nNo\nLater…\nReply…\nClose the duplicate PR?\nClose duplicate PR 13? Recommend yes\nfirstmate · asked today\nYes\nNo\nLater…\nReply…\nIN FLIGHT\n0\nNothing in flight.\nRECENTLY DONE\nNothing yet."}
+--- lead re-asks call-a with a new reason while the page is open (refresh interval 60s) ---
+click button[data-act="choice"][data-id="call-a"][data-choice="yes"] true
+AFTER-STALE-CLICK {"title":"(2) shuvbro","text":"shuvbro\nupdated 2s ago\nWAITING ON YOU\n2\nShip the sample widget\nMerge PR 5 now? Recommend yes\nsample · asked today\nYes\nNo\nLater…\nReply…\nClose the duplicate PR?\nClose duplicate PR 14 instead? Recommend yes\nfirstmate · asked today\nYes\nNo\nLater…\nReply…\nNot recorded: This question changed since the page loaded. Review it again.\nIN FLIGHT\n0\nNothing in flight.\nRECENTLY DONE\nNothing yet."}
+screenshot 07-stale-card-click-refused
+call-a after stale click:
+  state: queued
+  held: yes
+--- Later from the browser on held work ---
+click button[data-act="panel"][data-id="sample-ship"][data-panel="later"] true
+screenshot 08-later-panel
+click button[data-act="later"][data-id="sample-ship"] true
+AFTER-LATER {"title":"(1) shuvbro","text":"shuvbro\nupdated 3s ago\nWAITING ON YOU\n1\nClose the duplicate PR?\nClose duplicate PR 14 instead? Recommend yes\nfirstmate · asked today\nYes\nNo\nLater…\nReply…\nIN FLIGHT\n0\nNothing in flight.\nQUEUED\n1\nShip the sample widget back to you on 2026-10-05\nsample\nRECENTLY DONE\nNothing yet."}
+screenshot 09-after-later
+  state: queued
+  held: yes
+  hold_until: 2026-10-05
+  body: "Captain hold set: 2026-10-04T08:27:36Z\n\nCaptain answer recorded: 2026-10-04T08:27:35Z\nRecorded answer digest: 1640478b536e00626f7c54a06904e094797b63bfd0f911258c15a1211b2c46b6\nCaptain answered this call through live board.\nTask: sample-ship\nAnswer: later, until 2026-10-05\nAnswer as shown to the captain: Later, until 2026-10-05 - in reply to: Merge PR 5 now? Recommend yes"
+--- cross-origin POST (another site in the browser) ---
+{"ok":false,"code":"bad_origin","message":"Answers are accepted only from the board's own page."} HTTP 403
+--- DNS-rebinding style Host header ---
+{"ok":false,"code":"bad_host","message":"This board does not answer to that host name. Add it to config/board-hosts."} HTTP 403
+--- tokenless same-origin POST ---
+{"ok":false,"code":"bad_token","message":"This page is out of date. Reload it and answer again."} HTTP 403
+call-a still held after refused POSTs:
+  state: queued
+  held: yes
+inbox notes: 1

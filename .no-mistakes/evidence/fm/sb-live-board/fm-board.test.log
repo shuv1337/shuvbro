@@ -1,0 +1,8 @@
+ok - the board view renders a fixture snapshot and notes into plain-language sections and pinned cards
+ok - the page and data carry security headers, answer only known hosts, and keep one board per home
+ok - the answer endpoint refuses unknown, non-held, malformed, oversized, cross-origin, and tokenless requests untouched
+ok - a configured login allowlist admits only the captain's Tailscale login and direct local requests
+ok - yes, no, later, typed replies, and declared options land through the intake with board provenance and one wake each, and only yes releases held work
+ok - a no recorded in the same second as the hold still moves the item to Answered
+ok - a Later whose deferral fails is still recorded, reported as not deferred, and wakes the lead
+ok - a home that never starts the board gains no board state, notes, wakes, or backlog changes

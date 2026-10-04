@@ -1,0 +1,48 @@
+board on 127.0.0.1:46395  home=/home/shuv/.cache/agent-ws/board-live.IvTO
+serving: http://127.0.0.1:46395/ (pid 2003516)
+INITIAL {"title":"(4) shuvbro","you":"4","cards":["sample-ship","sample-plain","call-yes","call-option"],"feedback":[],"body":"shuvbro\nupdated 1s ago\nWAITING ON YOU\n4\nShip the sample widget\nMerge PR 5 now? Recommend yes\nsample · asked today\nYes\nNo\nLater…\nReply…\nPlain queued work\nLand the plain work now? Recommend yes\nsample · asked today\nYes\nNo\nLater…\nReply…\nClose the duplicate PR?\nClose duplicate PR 13? Recommend yes\nfirstmate · asked today\nYes\nNo\nLater…\nReply…\nPick a rollout\nStaged or all at once?\nfirstmate · asked today\nStaged\nAll at once\nLater…\nReply…\nIN FLIGHT\n0\nNothing in flight.\nRECENTLY DONE\nNothing yet."}
+screenshot 01-waiting-on-you-initial
+click button[data-act="choice"][data-id="call-yes"][data-choice="yes"] true
+AFTER-YES {"title":"(3) shuvbro","you":"3","cards":["sample-ship","sample-plain","call-option"],"feedback":[],"body":"shuvbro\nupdated 1s ago\nWAITING ON YOU\n3\n✓ Close the duplicate PR?: Recorded. Bro will pick it up.\nShip the sample widget\nMerge PR 5 now? Recommend yes\nsample · asked today\nYes\nNo\nLater…\nReply…\nPlain queued work\nLand the plain work now? Recommend yes\nsample · asked today\nYes\nNo\nLater…\nReply…\nPick a rollout\nStaged or all at once?\nfirstmate · asked today\nStaged\nAll at once\nLater…\nReply…\nIN FLIGHT\n0\nNothing in flight.\nRECENTLY DONE\nNothing yet."}
+screenshot 02-after-yes-click
+click button[data-act="choice"][data-id="sample-ship"][data-choice="no"] true
+click button[data-act="panel"][data-id="sample-plain"][data-panel="reply"] true
+screenshot 03-reply-panel-typed
+click button[data-act="reply"][data-id="sample-plain"] true
+click button[data-act="choice"][data-id="call-option"][data-choice="opt-2"] true
+screenshot 04-after-all-clicks
+AFTER-RELOAD {"title":"shuvbro","you":"0","cards":[],"feedback":[],"body":"shuvbro\nupdated 3s ago\nWAITING ON YOU\n0\nNothing waiting on you.\nANSWERED - WITH BRO\n2\nShip the sample widget\nMerge PR 5 now? Recommend yes\nYou answered: no · 7s ago · sample\nPlain queued work\nLand the plain work now? Recommend yes\nYou answered: Not yet, wait for the docs · 5s ago · sample\nIN FLIGHT\n0\nNothing in flight.\nRECENTLY DONE\nNothing yet."}
+screenshot 05-after-reload-answered-with-lead
+--- task records after browser clicks ---
+## call-yes
+  state: done
+  held: no
+  body: "Resolution recorded by fm-captain-hold.\nDecision digest: ee624ba12c75716269241d8e6f5dcc8792db293795526c53006068b08ca438e1\nResolution mode: answered\n\nCaptain decision:\nCaptain answered this call through live board.\nTask: call-yes\nAnswer: yes\nAnswer as shown to the captain: Yes - in reply to: Close duplicate PR 13? Recommend yes"
+## sample-ship
+  state: queued
+  held: yes
+  body: "Captain hold set: 2026-10-04T08:25:19Z\n\nCaptain answer recorded: 2026-10-04T08:25:28Z\nRecorded answer digest: 15aa450f6f3e8f11a9c7dc2f89913c7b597ec150e0baf91c2873015fc38e9c44\nCaptain answered this call through live board.\nTask: sample-ship\nAnswer: no\nAnswer as shown to the captain: No - in reply to: Merge PR 5 now? Recommend yes"
+## sample-plain
+  state: queued
+  held: yes
+  body: "Captain hold set: 2026-10-04T08:25:19Z\n\nCaptain answer recorded: 2026-10-04T08:25:30Z\nRecorded answer digest: 967f4bdae403573d8279286cce06a0c655c71f845dd7798a30a66cbfeec3a7af\nCaptain answered this call through live board.\nTask: sample-plain\nAnswer: Not yet, wait for the docs\nAnswer as shown to the captain: Typed reply - in reply to: Land the plain work now? Recommend yes"
+## call-option
+  state: done
+  held: no
+  body: "Resolution recorded by fm-captain-hold.\nDecision digest: 426058c63561f5418b94318d69694b283e72a48e30b33c7e8bbda2a8a30883a8\nResolution mode: answered\n\nCaptain decision:\nCaptain answered this call through live board.\nTask: call-option\nAnswer: All at once\nAnswer as shown to the captain: All at once - in reply to: Staged or all at once?\n\nCaptain hold options: Staged | All at once"
+--- merge guard: sample-ship (answered No) still held ---
+fm-captain-hold.sh - deterministic mechanics for tasks held for the captain.
+
+The semantic policy is owned once by
+.agents/skills/captain-hold-lifecycle/SKILL.md. This script never reads
+report, visual-review, chat, or terminal prose to guess whether the captain
+--- inbox notes ---
+4
+Live board answer for call-yes: Yes
+Live board answer for sample-ship: No
+Live board answer for sample-plain: typed reply
+Live board answer for call-option: All at once
+--- stop the board server, watch the open page go stale ---
+STALE {"title":"shuvbro","you":"0","cards":[],"feedback":[],"body":"shuvbro\nupdated 3s ago\nWAITING ON YOU\n0\nNothing waiting on you.\nANSWERED - WITH BRO\n2\nShip the sample widget\nMerge PR 5 now? Recommend yes\nYou answered: no · 15s ago · sample\nPlain queued work\nLand the plain work now? Recommend yes\nYou answered: Not yet, wait for the docs · 13s ago · sample\nIN FLIGHT\n0\nNothing in flight.\nRECENTLY DONE\nNothing yet."}
+screenshot 06-stale-after-server-stopped
+HOME=/home/shuv/.cache/agent-ws/board-live.IvTO
