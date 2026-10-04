@@ -1,0 +1,80 @@
+== Scenario: board refuses to serve extra hosts without a login allowlist
+fm-board: /home/shuv/.cache/agent-ws/board-live/home.vLUM/config/board-hosts lists host names but /home/shuv/.cache/agent-ws/board-live/home.vLUM/config/board-logins is empty; list your Tailscale login there before sharing the board, or remove board-hosts to keep it on this computer only
+exit=1
+
+== Hold sample-ship with declared options 'Staged' / 'Not yet'; hold other-ship yes/no
+server on http://127.0.0.1:35253
+proxied request without allowlist:
+{"ok":false,"code":"local_only","message":"This board is served to this computer only. List your Tailscale login in config/board-logins to share it."}
+
+== /board.json age_seconds (server-measured staleness):
+{
+  "generated": "2026-10-04T21:23:42Z",
+  "age_seconds": 1,
+  "waiting": [
+    {
+      "id": "sample-ship",
+      "answer_mode": "release",
+      "choices": [
+        {
+          "id": "opt-1",
+          "label": "Staged"
+        },
+        {
+          "id": "opt-2",
+          "label": "Not yet"
+        }
+      ]
+    },
+    {
+      "id": "other-ship",
+      "answer_mode": "release",
+      "choices": [
+        {
+          "id": "yes",
+          "label": "Yes"
+        },
+        {
+          "id": "no",
+          "label": "No"
+        }
+      ]
+    }
+  ]
+}
+-- screenshot before answering
+-rw-r--r-- 1 shuv shuv 39955 Oct  4 14:23 /home/shuv/.no-mistakes/evidence/01M44CHJPKYG10S4CMW5EEEGVZ/board-before.png
+
+== Scenario: click declared option 'Not yet' (opt-2) on held ship work
+{"ok":true,"outcome":"recorded","task":"sample-ship","message":"Recorded. Bro will pick it up.","note":"1791149024-XkPdKB"}
+HTTP 200
+  held: yes
+  body: "Captain hold set: 2026-10-04T21:23:41Z\nCaptain hold options: Staged | Not yet\n\nCaptain answer recorded: 2026-10-04T21:23:44Z\nRecorded answer digest: b2fc5aa3adf36f441ced22111d853d76d204db86797d810be1584add54f5f735\nCaptain answered this call through live board.\nTask: sample-ship\nAnswer: Not yet\nAnswer as shown to the captain: Not yet - in reply to: Which rollout? Recommend staged"
+merge guard:
+error: no meta for task sample-ship at /home/shuv/.cache/agent-ws/board-live/home.vLUM/state/sample-ship.meta
+inbox notes: 1
+id=1791149024-XkPdKB
+at=2026-10-04T21:23:44Z
+source=text
+--
+Live board answer for sample-ship: Not yet
+
+== Scenario: retry the identical click (lost response recovery) -> committed result, not not_waiting
+{"ok":true,"outcome":"recorded","task":"sample-ship","message":"Recorded. Bro will pick it up.","note":"1791149024-XkPdKB"}
+HTTP 200
+inbox notes after retry: 1
+
+== Scenario: Yes on other-ship, response 'lost', retry same card -> released replayed
+{"ok":true,"outcome":"released","task":"other-ship","message":"Recorded. Bro will pick it up.","note":"1791149026-HgXm2X"}
+HTTP 200
+different choice on same card:
+{"ok":false,"code":"answer_conflict","message":"This question already received a different answer. Refresh to see the current question."}
+HTTP 409
+  held: no
+
+== Scenario: re-held task, old card digest posted -> rejected
+{"ok":false,"code":"answer_conflict","message":"This question already received a different answer. Refresh to see the current question."}
+HTTP 409
+  held: yes
+-- screenshot after answering
+-rw-r--r-- 1 shuv shuv 38400 Oct  4 14:23 /home/shuv/.no-mistakes/evidence/01M44CHJPKYG10S4CMW5EEEGVZ/board-after.png

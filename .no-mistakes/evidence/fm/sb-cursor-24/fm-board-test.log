@@ -7,11 +7,13 @@ ok - a no recorded in the same second as the hold still moves the item to Answer
 ok - re-asking an answered call never offers the already-answered question while the re-ask is written
 ok - a Later whose deferral fails is still recorded, reported as not deferred, and wakes the lead
 ok - a failed Later repair reports failure and wakes the lead without restoring answer buttons or releasing work
+ok - a failed Later repair explicitly reports an inbox-note failure and keeps the work held
 ok - a declared option on held work is recorded for the lead and never releases it
 ok - a re-ask racing an answer is never answered by the old click
 ok - without a login allowlist the board refuses extra host names and every proxied request
 ok - the page judges staleness by the board's clock, reports offline, and styles declared options neutrally
 ok - the actual page recovers a response lost after a committed release without duplicating the answer
+ok - an old receipt leaves a re-asked card and its draft untouched, and the new question can be answered
 ok - a committed result survives server restart and retries never release a re-asked question
 ok - a committed answer with unavailable confirmation storage reports uncertainty and does not reapply
 ok - a home that never starts the board gains no board state, notes, wakes, or backlog changes
