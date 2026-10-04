@@ -91,7 +91,7 @@ On green CI run [30725985757](https://github.com/kunchenguid/firstmate/actions/r
 On [PR 1495](https://github.com/kunchenguid/firstmate/pull/1495), its main step ran about 19m51s before the job was cancelled at that boundary.
 `portable-serial-<k>of<n>` splits it across `n` separate CI jobs.
 Each shard is still strictly serial in itself.
-Jobs do not run two of these stateful scripts at once, and each Linux job starts in a fresh container, so a later job on the same host does not reuse the previous workspace.
+Jobs do not run two of these stateful scripts at once, and each job starts on a fresh GitHub-hosted VM, so no job reuses another job's workspace.
 The split needs no concurrency isolation proof.
 
 `bin/fm-test-run.sh` owns `n` and refuses any lane whose `of<n>` disagrees with it.
