@@ -1,0 +1,34 @@
+POST /answer -> 500 {"ok":false,"code":"repair_failed","message":"Later could not be confirmed after the date failed. The work stays held. Refresh or ask Bro before answering again."}
+banner: Later could not be confirmed after the date failed. The work stays held. Refresh or ask Bro before answering again. Refresh
+later-ship answer buttons still offered: 0
+## update count: 2
+  held: yes
+  hold_until: "-"
+  body: "Captain hold set: 2026-10-04T20:38:31Z\n\nCaptain answer recorded: 2026-10-04T20:38:34Z\nRecorded answer digest: 390e509ce73a9103b0d27ec6d2cb7aea1ab231ea104443a3709a0e851df18c09\nCaptain answered this call through live board.\nTask: later-ship\nAnswer: later, until 2026-10-11\nAnswer as shown to the captain: Later, until 2026-10-11 - in reply to: Deploy the gizmo now? Recommend yes"
+## board.json with_lead / waiting ids
+{
+  "waiting": [
+    "call-q"
+  ],
+  "with_lead": [
+    {
+      "id": "sample-ship",
+      "answer": "Not yet"
+    },
+    {
+      "id": "later-ship",
+      "answer": "later, until 2026-10-11"
+    }
+  ]
+}
+## newest inbox note
+id=1791146315-4LV4TL
+at=2026-10-04T20:38:35Z
+source=text
+--
+Live board answer for later-ship: Later, until 2026-10-11
+Question: Deploy the gizmo - Deploy the gizmo now? Recommend yes
+Later was recorded through the live board, date could not be set, but deferring until 2026-10-11 failed (could not hold task later-ship for the captain) and the follow-up record did not land, so the outcome is uncertain; the work stays held: check the task, then re-hold it with that date or ask the captain.
+## serve2.log
+fm-board: serving http://127.0.0.1:38653/ for /tmp/fmboard-live.sfQQ
+fm-board: answer later-ship later: repair_failed

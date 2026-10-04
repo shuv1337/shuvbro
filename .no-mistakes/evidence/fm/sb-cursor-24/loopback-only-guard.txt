@@ -1,0 +1,60 @@
+## direct loopback
+200
+## X-Forwarded-For (proxied, no board-logins)
+{"ok":false,"code":"local_only","message":"This board is served to this computer only. List your Tailscale login in config/board-logins to share it."}
+403
+## X-Forwarded-Host 127.0.0.1
+{"ok":false,"code":"local_only","message":"This board is served to this computer only. List your Tailscale login in config/board-logins to share it."}
+403
+## Tailscale-User-Login, no allowlist
+{"ok":false,"code":"local_only","message":"This board is served to this computer only. List your Tailscale login in config/board-logins to share it."}
+403
+## board.json age_seconds
+{
+  "generated": "2026-10-04T20:37:15Z",
+  "age_seconds": 1,
+  "waiting": [
+    {
+      "id": "sample-ship",
+      "answer_mode": "release",
+      "choices": [
+        {
+          "id": "opt-1",
+          "label": "Staged"
+        },
+        {
+          "id": "opt-2",
+          "label": "Not yet"
+        }
+      ]
+    },
+    {
+      "id": "sample-plain",
+      "answer_mode": "release",
+      "choices": [
+        {
+          "id": "yes",
+          "label": "Yes"
+        },
+        {
+          "id": "no",
+          "label": "No"
+        }
+      ]
+    },
+    {
+      "id": "call-q",
+      "answer_mode": "done",
+      "choices": [
+        {
+          "id": "yes",
+          "label": "Yes"
+        },
+        {
+          "id": "no",
+          "label": "No"
+        }
+      ]
+    }
+  ]
+}

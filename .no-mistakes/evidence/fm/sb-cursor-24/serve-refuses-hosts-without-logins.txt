@@ -1,0 +1,2 @@
+fm-board: /tmp/fmboard-live.sfQQ/config/board-hosts lists host names but /tmp/fmboard-live.sfQQ/config/board-logins is empty; list your Tailscale login there before sharing the board, or remove board-hosts to keep it on this computer only
+exit=1

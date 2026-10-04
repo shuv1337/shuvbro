@@ -1,0 +1,33 @@
+## tasks-axi show sample-ship --full (declared option "Not yet" on held ship work)
+  held: yes
+  body: "Captain hold set: 2026-10-04T20:36:59Z\nCaptain hold options: Staged | Not yet\n\nCaptain answer recorded: 2026-10-04T20:37:39Z\nRecorded answer digest: b2fc5aa3adf36f441ced22111d853d76d204db86797d810be1584add54f5f735\nCaptain answered this call through live board.\nTask: sample-ship\nAnswer: Not yet\nAnswer as shown to the captain: Not yet - in reply to: Which rollout? Recommend staged"
+
+## tasks-axi show sample-plain --full (Yes, response dropped by the client)
+  held: no
+  body: "Resolution recorded by fm-captain-hold.\nDecision digest: cd53474ba8dd1be9d4a30d8e0e44426ad20073bd50dd153197f78cb27570118c\nResolution mode: released\n\nCaptain decision:\nCaptain answered this call through live board.\nTask: sample-plain\nAnswer: yes\nAnswer as shown to the captain: Yes - in reply to: Merge PR 7 now? Recommend yes"
+
+## inbox notes: 2
+--- 1791146259-wMqEzp.note
+id=1791146259-wMqEzp
+at=2026-10-04T20:37:39Z
+source=text
+--
+Live board answer for sample-ship: Not yet
+Question: Ship the sample widget - Which rollout? Recommend staged
+Recorded through the live board: the held work stays held until you act on this answer.
+--- 1791146265-sgQeXT.note
+id=1791146265-sgQeXT
+at=2026-10-04T20:37:45Z
+source=text
+--
+Live board answer for sample-plain: Yes
+Question: Plain queued work - Merge PR 7 now? Recommend yes
+Recorded through the live board: the held work is released with this answer.
+
+## receipts: 2
+
+## serve.log
+fm-board: serving http://127.0.0.1:45967/ for /tmp/fmboard-live.sfQQ
+fm-board: answer sample-ship opt-2: recorded
+fm-board: answer sample-plain yes: released
+fm-board: answer sample-plain yes: released

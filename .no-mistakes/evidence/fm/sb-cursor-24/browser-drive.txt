@@ -1,0 +1,13 @@
+skewed clock indicator: "updated 5s ago" class= updated
+buttons:
+  sample-ship/opt-1:"Staged" class=""
+  sample-ship/opt-2:"Not yet" class=""
+  sample-plain/yes:"Yes" class="primary"
+  sample-plain/no:"No" class="primary"
+  call-q/yes:"Yes" class="primary"
+  call-q/no:"No" class="primary"
+answer POSTs from page: 2 responses seen by page: [
+  '{"ok":true,"outcome":"released","task":"sample-plain","message":"Recorded. Bro will pick it up.","note":"1791146265-sgQeXT"}'
+]
+card text: ✓ Ship the sample widget: Recorded. Bro will pick it up. | ✓ Plain queued work: Recorded. Bro will pick it up.
+after server stop: "Board offline - last update 10s ago" class= updated stale
