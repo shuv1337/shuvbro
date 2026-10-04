@@ -415,6 +415,9 @@ test_claude_threads_model_and_effort() {
 #   FM_FAKE_V2_SIDECAR=<wt> the launch helper records an admitted worker session
 #   FM_FAKE_V2_PREFILL=yes  the launch helper only pre-fills the composer (the
 #                           older-release fallback) instead of auto-submitting
+#   FM_FAKE_V2_PANE_NOTE    extra line on the shell screen, before the TUI
+# A kill-window retires the screen to "window gone", so a failure that
+# captured after the close cannot still see the pre-close diagnostic.
 make_opencode_v2_tmux() {
   local fakebin=$1
   cat > "$fakebin/tmux" <<'SH'
@@ -430,7 +433,14 @@ fake_screen() {
     submitted)
       printf '  ┃\n  ┃\n  ┃\n%s\n  ╹▀▀▀▀▀▀▀▀▀▀▀▀\n' "$footer"
       ;;
-    *) printf 'shell starting\n$ \n' ;;
+    dead) printf 'window gone\n' ;;
+    *)
+      printf 'shell starting\n'
+      if [ -n "${FM_FAKE_V2_PANE_NOTE:-}" ]; then
+        printf '%s\n' "$FM_FAKE_V2_PANE_NOTE"
+      fi
+      printf '$ \n'
+      ;;
   esac
 }
 case "$*" in
@@ -491,7 +501,11 @@ case "${1:-}" in
     esac
     exit 0
     ;;
-  kill-window) printf 'kill-window\n' >> "$FM_FAKE_V2_STATE.ops"; exit 0 ;;
+  kill-window)
+    printf 'kill-window\n' >> "$FM_FAKE_V2_STATE.ops"
+    printf 'dead\n' > "$FM_FAKE_V2_STATE"
+    exit 0
+    ;;
   capture-pane)
     start= end= prev=
     for arg in "$@"; do
@@ -654,6 +668,12 @@ test_opencode_v2_unsubmitted_brief_fails_loudly() {
     "unsubmitted opencode-v2 brief lacked a loud diagnostic"
   assert_grep 'failed: shuvcode pre-filled launch brief could not be submitted' \
     "$HOME_DIR/state/$id.status" "unsubmitted opencode-v2 brief left no supervisor-visible failure"
+  assert_grep 'composer=pending marker=yes' \
+    "$HOME_DIR/state/$id.status" "unsubmitted opencode-v2 brief did not record the prefilled composer"
+  assert_grep 'Read the launch brief and follow it exactly' \
+    "$HOME_DIR/state/$id.status" "unsubmitted opencode-v2 brief dropped the composer text"
+  assert_not_contains "$(cat "$HOME_DIR/state/$id.status")" "window gone" \
+    "unsubmitted opencode-v2 brief recorded the pane after it was closed"
 
   id=profile-opencode-v2-notui-z13
   rec=$(make_spawn_case profile-opencode-v2-notui opencode-v2 "$id")
@@ -665,6 +685,36 @@ test_opencode_v2_unsubmitted_brief_fails_loudly() {
   assert_contains "$out" "did not show its pre-filled launch brief" \
     "missing opencode-v2 TUI lacked a loud diagnostic"
   pass "opencode-v2 spawn fails loudly when the brief cannot be shown or submitted"
+}
+
+# A helper that exits before the TUI prints its reason on the shell pane.
+# Closing the window is still required, but the failure record has to keep
+# that reason: the close is what used to make the failure uninspectable.
+test_opencode_v2_spawn_failure_keeps_pane_diagnostic() {
+  local rec id out status note
+  id=profile-opencode-v2-capture-z15
+  note='error: requested native variant unavailable'
+  rec=$(make_spawn_case profile-opencode-v2-capture opencode-v2 "$id")
+  read_case_record "$rec"
+  make_opencode_v2_tmux "$FAKEBIN_DIR"
+
+  out=$(FM_FAKE_V2_TUI=no FM_FAKE_V2_PANE_NOTE="$note" run_opencode_v2_spawn "$id")
+  status=$?
+  [ "$status" -ne 0 ] || fail "a shuvcode pane that never shows its brief must fail: $out"
+  assert_contains "$out" "$note" "the spawn error dropped the pane diagnostic"
+  assert_grep "failed: shuvcode did not show its pre-filled launch brief" \
+    "$HOME_DIR/state/$id.status" "missing TUI left no supervisor-visible failure"
+  assert_grep "composer=unknown marker=no" \
+    "$HOME_DIR/state/$id.status" "the failure did not record the shell pane's composer verdict"
+  assert_grep "$note" \
+    "$HOME_DIR/state/$id.status" "the failure record dropped the launcher diagnostic"
+  assert_not_contains "$(cat "$HOME_DIR/state/$id.status")" "window gone" \
+    "the failure record was taken after the window closed"
+  assert_grep 'kill-window' "$CASE_DIR/v2.state.ops" \
+    "a failed opencode-v2 spawn left its endpoint running"
+  [ "$(cat "$CASE_DIR/v2.state")" = dead ] \
+    || fail "the failed spawn did not retire the pane"
+  pass "opencode-v2 spawn keeps the pane diagnostic and then closes the endpoint"
 }
 
 # The launch helper admits the worker prompt on the shared service before the
@@ -1617,6 +1667,7 @@ test_claude_threads_model_and_effort
 test_opencode_v2_launch_uses_auto_and_omits_model
 test_opencode_v2_spawn_submits_the_prefilled_brief
 test_opencode_v2_unsubmitted_brief_fails_loudly
+test_opencode_v2_spawn_failure_keeps_pane_diagnostic
 test_opencode_v2_auto_submitted_brief
 test_opencode_v2_spawn_failure_cancels_admitted_session
 test_opencode_v2_rollback_cancels_admitted_session

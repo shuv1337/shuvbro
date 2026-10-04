@@ -50,6 +50,7 @@ Firstmate maps its supported effort levels onto the requested model's variant.
 An effort with no `provider/model` stays in task metadata and leaves the default root launch unchanged.
 Launch admits the brief through the native API before attaching its exact `--auto` TUI.
 `bin/fm-spawn.sh` accepts current-generation exact-worker execution events as submission proof, including a short turn that already finished.
+When that wait fails, spawn records the composer verdict and a bounded pane tail before closing the endpoint, so a launcher diagnostic is not discarded with the window.
 `tests/fm-opencode-v2-worker-live-e2e.test.sh` is an opt-in isolated-XDG/shared-service worker probe, pending a new live run; its former private-server result is not evidence for the current launcher.
 Under `--auto` the composer footer reads `Build auto · <model> · <effort>` with the `auto` word and `·` separators in muted truecolor, so the classifier recognises that footer from the plain row rather than the ghost-stripped one.
 The worker wiring writes `.opencode/plugins/package.json` only when the project has none, so a project that tracks that file keeps its own copy.
