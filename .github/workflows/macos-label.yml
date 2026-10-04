@@ -20,11 +20,10 @@ concurrency:
 jobs:
   macos-stock-bash:
     name: Stock macOS Bash snapshot compatibility
-    runs-on: [self-hosted, macOS, ARM64, shuv-ci, shuvbro-ci, shuvbot]
+    runs-on: macos-latest
     # Same stock-Bash steps as macos-stock-bash in ci.yml. Keep Node install,
     # the jq pin, and the shell script identical. A non-macos label skips
-    # this job. A fork pull request skips it too, so it is not assigned to
-    # the mac runner.
+    # this job. A fork pull request skips it too.
     if: >-
       github.event.label.name == 'macos' &&
       github.event.pull_request.head.repo.full_name == github.repository

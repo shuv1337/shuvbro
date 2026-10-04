@@ -22,16 +22,15 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Private self-hosted runners. Linux must include Linux: the mac runner
-  # also carries shuvbro-ci. Five Linux runners and one mac. The five serial
-  # shards stay five jobs; other Linux jobs queue instead of adding fan-out.
-  # Each Linux job is a fresh container, so a queued shard does not reuse
-  # the previous job's workspace. Fork pull requests never take a runner:
-  # the repo already refuses their workflows, and this if skips the job
-  # before assignment if one is started.
+  # GitHub-hosted runners. The repo is public, so standard ubuntu-latest and
+  # macos-latest minutes are free. Every job gets a fresh VM, so a stateful
+  # shard never reuses another job's workspace. No job reads a secret and the
+  # token is contents: read only. The fork clause in each if is kept from the
+  # private-runner setup; it can be relaxed later if fork pull requests should
+  # run CI.
   lint:
     name: Lint
-    runs-on: [self-hosted, Linux, X64, shuv-ci, shuvbro-ci]
+    runs-on: ubuntu-latest
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     # Full-corpus ShellCheck via bin/fm-lint.sh. Pinned tool installs are about
     # a second; the ~19 minute average is that analysis, so caching the
@@ -60,8 +59,8 @@ jobs:
       # fails locally before merge. FM_LINT_JOBS=1 runs the same two
       # ShellCheck shards one at a time. FM_LINT_ONE_FILE=1 invokes
       # ShellCheck once per root with the same --external-sources flags:
-      # one shard's combined graph was SIGKILL'd (exit 137) in the 8g
-      # self-hosted container even with the shards serialized.
+      # one shard's combined graph was SIGKILL'd (exit 137) in an 8g
+      # container even with the shards serialized. Keep the low-memory mode.
       - name: Run full lint
         env:
           FM_LINT_JOBS: "1"
@@ -73,7 +72,7 @@ jobs:
   # and that the portable serial CI shards partition that serial lane exactly.
   test-coverage:
     name: Test coverage guard
-    runs-on: [self-hosted, Linux, X64, shuv-ci, shuvbro-ci]
+    runs-on: ubuntu-latest
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     timeout-minutes: 10
     steps:
@@ -87,7 +86,7 @@ jobs:
   # set only. Composition owner: bin/fm-test-run.sh (docs/fm-test-portable-shards.md).
   tests-portable-parallel-1:
     name: Behavior portable parallel 1
-    runs-on: [self-hosted, Linux, X64, shuv-ci, shuvbro-ci]
+    runs-on: ubuntu-latest
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     # Hang tripwire, not the expected end of the lane. The old 10-minute cap
     # was sized for the 2026-08 proof (~2 min) and cancelled every slower run
@@ -152,7 +151,7 @@ jobs:
 
   tests-portable-parallel-2:
     name: Behavior portable parallel 2
-    runs-on: [self-hosted, Linux, X64, shuv-ci, shuvbro-ci]
+    runs-on: ubuntu-latest
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     # Same hang tripwire as shard 1. After the rebalance this shard's healthy
     # wall matches shard 1 (about 5 min, about 9 min on a slow runner).
@@ -197,15 +196,14 @@ jobs:
 
   # Required portable serial remainder: watcher, lock, AFK, tmux, daemon,
   # ambiguous, and other stateful tests. Real Herdr stays in tests-herdr.
-  # Each shard is its own job and stays strictly serial in itself. The runner
-  # gives every job a fresh container, so stateful scripts do not share a
-  # workspace when jobs queue on the same host. Do not grow this matrix:
-  # five shards already match the five Linux runners. Shard membership and
+  # Each shard is its own job and stays strictly serial in itself. Every job
+  # gets a fresh hosted VM, so stateful scripts never share a workspace.
+  # Do not grow this matrix without bin/fm-test-run.sh. Shard membership and
   # the shard count both belong to bin/fm-test-run.sh, which refuses a lane
   # whose "ofN" disagrees with it (docs/fm-test-portable-shards.md).
   tests-portable-serial:
     name: Behavior portable serial ${{ matrix.shard }}
-    runs-on: [self-hosted, Linux, X64, shuv-ci, shuvbro-ci]
+    runs-on: ubuntu-latest
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     # Current runners can take ~20 min for a balanced shard. This 30-minute cap
     # preserves the timeout as a hang tripwire while allowing runner-speed and
@@ -269,8 +267,8 @@ jobs:
       - name: Install pinned Ruby, ps, lsof, and Chrome
         run: |
           set -eu
-          # Hosted images ship these. The rootless runner does not, and the
-          # portable lane calls them directly. No apt and no sudo.
+          # Pinned user-local copies so the lane does not depend on the
+          # hosted image's versions. No apt and no sudo.
           bin/fm-install-runner-tools.sh "$RUNNER_TEMP/runner-tools" ruby ps lsof chrome
           echo "$RUNNER_TEMP/runner-tools/bin" >> "$GITHUB_PATH"
       - name: Run portable serial shard ${{ matrix.shard }}
@@ -304,7 +302,7 @@ jobs:
   # the failure evidence and move the job to macOS rather than skip assertions.
   tests-herdr:
     name: Behavior tests (Herdr)
-    runs-on: [self-hosted, Linux, X64, shuv-ci, shuvbro-ci]
+    runs-on: ubuntu-latest
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     # Healthy runs finish around 7 minutes. This job cap is a last-resort hang
     # tripwire, not the expected end of the lane. The family-run step owns the
@@ -426,14 +424,14 @@ jobs:
   # Aggregate per-lane timing into one summary artifact for critical-path review.
   tests-timing-aggregate:
     name: Behavior timing aggregate
-    runs-on: [self-hosted, Linux, X64, shuv-ci, shuvbro-ci]
+    runs-on: ubuntu-latest
     needs:
       - tests-portable-parallel-1
       - tests-portable-parallel-2
       - tests-portable-serial
       - tests-herdr
     # always() so a failed lane still publishes timings. The fork clause
-    # still keeps a fork pull request off the runner.
+    # matches the other jobs.
     if: >-
       always() &&
       (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
@@ -471,14 +469,13 @@ jobs:
 
   macos-stock-bash:
     name: Stock macOS Bash snapshot compatibility
-    runs-on: [self-hosted, macOS, ARM64, shuv-ci, shuvbro-ci, shuvbot]
-    # macOS minutes are weighted 10x on hosted runners. Run this only on
-    # demand or when the pull request already carries the macos label.
-    # Adding that label later is macos-label.yml, not a second copy of this
-    # suite. Keep the Node install, jq pin, and shell script identical there.
-    # A fork pull request never matches, so it is not assigned to the mac
-    # runner. Do not require
-    # this check: a skipped conditional job counts as success.
+    runs-on: macos-latest
+    # The only job that needs macOS: it checks stock /bin/bash 3.2 on Apple
+    # silicon. Run it only on demand or when the pull request already carries
+    # the macos label. Adding that label later is macos-label.yml, not a
+    # second copy of this suite. Keep the Node install, jq pin, and shell
+    # script identical there. A fork pull request never matches. Do not
+    # require this check: a skipped conditional job counts as success.
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (
@@ -566,7 +563,7 @@ jobs:
 
   invariants:
     name: Repo invariants
-    runs-on: [self-hosted, Linux, X64, shuv-ci, shuvbro-ci]
+    runs-on: ubuntu-latest
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     timeout-minutes: 10
     steps:

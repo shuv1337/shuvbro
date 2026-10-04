@@ -1,8 +1,0 @@
-# Custom runner labels for this private repo. actionlint's built-in list
-# covers GitHub-hosted images only. These are the extra labels on the
-# self-hosted runners, so a real runs-on array is not reported as unknown.
-self-hosted-runner:
-  labels:
-    - shuv-ci
-    - shuvbro-ci
-    - shuvbot
