@@ -55,7 +55,7 @@ Treat it as the captain's word on exactly the question the card showed, under ev
 On held work only Yes or a declared option releases it; a No, a typed reply, or a Later is recorded with `answers` mode `record` and the work stays held, so act on it: re-hold with the follow-up as the new reason, retire the work, or relay it in chat, and never release it without the captain's word.
 The live board lists such work as answered and with you, not waiting on the captain, until a re-hold asks the captain again.
 A typed reply on a question row closes it but may still ask something back or change the ask: hold a new task for the follow-up and relay it in chat.
-A Later needs nothing beyond the date it already carries.
+A Later needs nothing beyond the date it already carries, unless its note says the deferral failed: then re-hold the work with that date.
 Acknowledge the note with `bin/fm-inbox.sh drain --ack <id>` once it is handled.
 
 A captain call can be written down twice - as the keyed status decision the fold reads, and as the backlog task held for the captain - and those two records can disagree without either surface saying so.

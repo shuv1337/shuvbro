@@ -37,6 +37,7 @@ A question that only asked you something is closed with your answer.
 Held work goes ahead only on Yes or one of its declared choices; No or a typed reply is recorded and the work stays held until the lead acts on it.
 Until then it leaves Waiting on you for an "Answered - with" list that shows your answer and when you gave it, without buttons; if the lead asks you again, it returns to Waiting on you.
 Later asks for a date, records it, and moves the item off the list until that day; it closes nothing.
+If that date cannot be set, the card says so and the item waits with the lead under "Answered - with" instead.
 Every recorded answer also leaves the lead a captain inbox note, so it acts on your answer at its next turn.
 
 A click is your recorded words and nothing more.
