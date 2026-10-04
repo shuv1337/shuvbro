@@ -486,6 +486,24 @@ test_stale_shuvcode_registration_cannot_confirm_replacement() {
   v2_process_info_fixture w1:p2 22712 40069 "$V2_LIVE_FOREGROUND" > "$dir/responses/3.out"
   out=$(run_v2_state "$dir" codex)
   [ "$out" = ambiguous ] || fail "a surviving shuvcode must not count as the requested codex replacement, got '$out'"
+  dir=$(v2_state_case sticky-claude-up)
+  printf '{"result":{"pane":{"pane_id":"w1:p2"}}}\n' > "$dir/responses/1.out"
+  printf '{"result":{"agent":{"agent":"shuvcode","agent_status":"idle"}}}\n' > "$dir/responses/2.out"
+  v2_process_info_fixture w1:p2 22712 31000 \
+    '[{"pid":31000,"name":"2.1.220","argv":["/home/u/.local/share/claude/versions/2.1.220","--dangerously-skip-permissions"]}]' \
+    > "$dir/responses/3.out"
+  out=$(run_v2_state "$dir" claude)
+  [ "$out" = alive ] || fail "claude's own foreground process must confirm it under a sticky shuvcode registration, got '$out'"
+  dir=$(v2_state_case sticky-codex-up)
+  printf '{"result":{"pane":{"pane_id":"w1:p2"}}}\n' > "$dir/responses/1.out"
+  printf '{"result":{"agent":{"agent":"shuvcode","agent_status":"idle"}}}\n' > "$dir/responses/2.out"
+  v2_process_info_fixture w1:p2 22712 31000 '[{"pid":31000,"name":"codex","argv":["codex","--yolo"]}]' > "$dir/responses/3.out"
+  cp "$dir/responses/3.out" "$dir/responses/4.out"
+  out=$(run_v2_state "$dir" codex)
+  [ "$out" = alive ] || fail "codex's own foreground process must confirm it under a sticky shuvcode registration, got '$out'"
+  printf '0\n' > "$dir/responses/.count"
+  out=$(run_v2_state "$dir" claude)
+  [ "$out" = ambiguous ] || fail "another adapter's foreground process must not confirm the requested claude, got '$out'"
   dir=$(v2_state_case fresh-switch)
   printf '{"result":{"pane":{"pane_id":"w1:p2"}}}\n' > "$dir/responses/1.out"
   printf '{"result":{"agent":{"agent":"claude","agent_status":"working"}}}\n' > "$dir/responses/2.out"
@@ -515,6 +533,8 @@ test_opencode_v2_nested_worktree_shell() {
 #!/usr/bin/env bash
 case "$*" in
   "-axo pid=,ppid=") printf '1 0\n22712 1\n28000 22712\n30000 28000\n' ;;
+  "-p 28000 -o comm=") printf 'treehouse\n' ;;
+  "-p 28000 -o args=") printf '/home/u/.local/bin/treehouse get\n' ;;
   "-p 30000 -o stat=") printf 'Ss+\n' ;;
   *) exit 1 ;;
 esac
@@ -548,6 +568,43 @@ SH
   out=$(run_v2_state "$dir" opencode-v2)
   [ "$out" = ambiguous ] || fail "a wrapper with another child cannot prove the agent gone, got '$out'"
   pass "Herdr worktree wrapper: the lone descendant foreground shell proves the agent exited"
+}
+
+# nested_shell_state <case> <ps-rows> <wrapper-comm> <wrapper-args>: classify
+# a lone idle `zsh -l` (pid 30000) under the given process table.
+nested_shell_state() {  # <case> <rows> <comm> <args>
+  local dir n
+  dir=$(v2_state_case "$1")
+  cat > "$dir/ps" <<SH
+#!/usr/bin/env bash
+case "\$*" in
+  "-axo pid=,ppid=") printf '$2' ;;
+  "-p 28000 -o comm=") printf '%s\\n' '$3' ;;
+  "-p 28000 -o args=") printf '%s\\n' '$4' ;;
+  "-p 29000 -o comm=") printf 'treehouse\\n' ;;
+  "-p 29000 -o args=") printf 'treehouse get\\n' ;;
+  "-p 30000 -o stat=") printf 'Ss+\\n' ;;
+  *) exit 1 ;;
+esac
+SH
+  printf '{"result":{"pane":{"pane_id":"w1:p2"}}}\n' > "$dir/responses/1.out"
+  for n in 2 3 4 5; do
+    v2_process_info_fixture w1:p2 22712 30000 '[{"pid":30000,"name":"zsh","argv":["zsh","-l"]}]' > "$dir/responses/$n.out"
+  done
+  run_v2_state "$dir" opencode-v2
+}
+
+test_nested_shell_requires_one_treehouse_hop() {
+  local out
+  out=$(nested_shell_state th-argv0 '1 0\n22712 1\n28000 22712\n30000 28000\n' th-renamed '/opt/bin/treehouse get')
+  [ "$out" = dead ] || fail "a treehouse argv0 must prove the wrapper, got '$out'"
+  out=$(nested_shell_state non-treehouse '1 0\n22712 1\n28000 22712\n30000 28000\n' script 'script -q /dev/null')
+  [ "$out" = ambiguous ] || fail "a non-Treehouse intermediate must keep the nested shell ambiguous, got '$out'"
+  out=$(nested_shell_state two-hops '1 0\n22712 1\n28000 22712\n29000 28000\n30000 29000\n' treehouse 'treehouse get')
+  [ "$out" = ambiguous ] || fail "a chain longer than one Treehouse hop must stay ambiguous, got '$out'"
+  out=$(nested_shell_state direct-child '1 0\n22712 1\n30000 22712\n' treehouse 'treehouse get')
+  [ "$out" = ambiguous ] || fail "a shell with no Treehouse hop must stay ambiguous, got '$out'"
+  pass "Herdr nested shell: only pane shell -> one Treehouse wrapper -> lone shell proves exit"
 }
 
 test_opencode_v2_agent_state_never_guesses_agent_free() {
@@ -4900,6 +4957,7 @@ test_cli_helper_sets_env_and_appends_trailing_session_flag
 test_agent_state_bypasses_a_stale_client_shadowing_a_compatible_one
 test_opencode_v2_agent_state_reads_foreground_processes
 test_opencode_v2_nested_worktree_shell
+test_nested_shell_requires_one_treehouse_hop
 test_stale_shuvcode_registration_cannot_confirm_replacement
 test_exited_v2_husk_and_doorbell_use_recorded_harness
 test_opencode_v2_agent_state_never_guesses_agent_free

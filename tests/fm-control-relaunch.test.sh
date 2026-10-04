@@ -1688,22 +1688,25 @@ test_opencode_v2_relaunch_after_another_harness_starts_fresh() {
   pass "fm-control relaunch: opencode-v2 after another harness starts a fresh native session"
 }
 
-test_herdr_stale_registration_does_not_finish_relaunch() {
-  local dir out rc entry CONTROL
-  v2_relaunch_case v2-herdr-stale rl65
+# herdr_stale_switch_case <case> <id> <starts>: an exited opencode-v2 worker
+# whose shuvcode registration sticks across a relaunch onto claude. The launch
+# stand-in starts claude in the pane foreground only when <starts> is 1.
+herdr_stale_switch_case() {  # <case> <id> <starts>
+  local entry
+  v2_relaunch_case "$1" "$2"
   dir=$V2R_DIR
   printf 'zsh' > "$dir/fake/command"
-  cat >> "$dir/home/state/rl65.meta" <<'EOF'
+  cat >> "$dir/home/state/$2.meta" <<'EOF'
 backend=herdr
 herdr_session=fm-lab-stale-switch
 herdr_workspace_id=w1
 herdr_tab_id=w1:t2
 herdr_pane_id=w1:p2
 EOF
-  sed 's|^window=.*|window=fm-lab-stale-switch:w1:p2|' "$dir/home/state/rl65.meta" > "$dir/meta.new"
-  mv "$dir/meta.new" "$dir/home/state/rl65.meta"
+  sed 's|^window=.*|window=fm-lab-stale-switch:w1:p2|' "$dir/home/state/$2.meta" > "$dir/meta.new"
+  mv "$dir/meta.new" "$dir/home/state/$2.meta"
   # Use the real control and Herdr classifier. Only the launch half is a
-  # stand-in: it publishes the target adapter, but deliberately starts nothing.
+  # stand-in: it publishes the target adapter and starts claude only on request.
   mkdir -p "$dir/toolbelt/bin"
   ln -s "$ROOT/.opencode" "$dir/toolbelt/.opencode"
   for entry in "$ROOT"/bin/*; do ln -s "$entry" "$dir/toolbelt/bin/${entry##*/}"; done
@@ -1716,6 +1719,8 @@ meta="$FM_HOME/state/$1.meta"
 sed 's/^harness=.*/harness=claude/' "$meta" > "$meta.next"
 printf 'control_relaunch_tx=%s\n' "$FM_CONTROL_RELAUNCH_TX" >> "$meta.next"
 mv "$meta.next" "$meta"
+[ "$(cat "$FM_FAKE_DIR/starts")" = 1 ] && : > "$FM_FAKE_DIR/claude-up"
+exit 0
 SH
   cat > "$dir/fakebin/herdr" <<'SH'
 #!/usr/bin/env bash
@@ -1723,7 +1728,13 @@ case "$1 $2" in
   'status --json') printf '{"client":{"version":"0.9.1","protocol":14},"server":{"running":true}}\n' ;;
   'pane get') printf '{"result":{"pane":{"pane_id":"w1:p2","foreground_cwd":"%s"}}}\n' "$(cat "$FM_FAKE_DIR/cwd")" ;;
   'agent get') printf '{"result":{"agent":{"agent":"shuvcode","agent_status":"idle"}}}\n' ;;
-  'pane process-info') printf '{"result":{"type":"pane_process_info","process_info":{"pane_id":"w1:p2","shell_pid":22712,"foreground_process_group_id":22712,"foreground_processes":[{"pid":22712,"name":"zsh","argv":["-zsh"]}]}}}\n' ;;
+  'pane process-info')
+    if [ -e "$FM_FAKE_DIR/claude-up" ]; then
+      printf '{"result":{"type":"pane_process_info","process_info":{"pane_id":"w1:p2","shell_pid":22712,"foreground_process_group_id":31000,"foreground_processes":[{"pid":31000,"name":"claude","argv":["claude","--dangerously-skip-permissions"]}]}}}\n'
+    else
+      printf '{"result":{"type":"pane_process_info","process_info":{"pane_id":"w1:p2","shell_pid":22712,"foreground_process_group_id":22712,"foreground_processes":[{"pid":22712,"name":"zsh","argv":["-zsh"]}]}}}\n'
+    fi
+    ;;
   *) exit 1 ;;
 esac
 SH
@@ -1735,8 +1746,14 @@ case "$*" in
   *) exit 1 ;;
 esac
 SH
+  printf '%s' "$3" > "$dir/fake/starts"
   chmod +x "$dir/toolbelt/bin/fm-spawn.sh" "$dir/fakebin/herdr" "$dir/fakebin/ps-proof"
   CONTROL="$dir/toolbelt/bin/fm-control.sh"
+}
+
+test_herdr_stale_registration_does_not_finish_relaunch() {
+  local dir out rc CONTROL
+  herdr_stale_switch_case v2-herdr-stale rl65 0
   out=$(FM_ROOT_OVERRIDE="$ROOT" FM_HERDR_PS_BIN="$dir/fakebin/ps-proof" \
     v2_run control "$dir" rl65 relaunch --harness claude --note "replace exited worker"); rc=$?
   expect_code 1 "$rc" "a stale Herdr registration must never complete a launch that started nothing"$'\n'"$out"
@@ -1744,6 +1761,16 @@ SH
   assert_not_contains "$out" "relaunched rl65" "the control plane must never report a false replacement"
   [ "$(journal_field "$dir" rl65 phase)" != complete ] || fail "the unstarted replacement was recorded complete"
   pass "Herdr control relaunch: a stale shuvcode registration cannot confirm an unstarted claude replacement"
+}
+
+test_herdr_sticky_registration_confirms_started_replacement() {
+  local dir out rc CONTROL
+  herdr_stale_switch_case v2-herdr-sticky rl66 1
+  out=$(FM_ROOT_OVERRIDE="$ROOT" FM_HERDR_PS_BIN="$dir/fakebin/ps-proof" \
+    v2_run control "$dir" rl66 relaunch --harness claude --note "replace exited worker"); rc=$?
+  expect_code 0 "$rc" "a started claude must confirm despite the sticky shuvcode registration"$'\n'"$out"
+  [ "$(journal_field "$dir" rl66 phase)" = complete ] || fail "the started replacement was not recorded complete"
+  pass "Herdr control relaunch: the replacement's own foreground process confirms it under a sticky shuvcode registration"
 }
 
 test_relaunch_moves_a_drifted_item_back_in_flight() {
@@ -1821,3 +1848,4 @@ test_opencode_v2_relaunch_threads_model_and_effort
 test_spawn_relaunch_requires_an_idle_opencode_v2_session
 test_opencode_v2_relaunch_after_another_harness_starts_fresh
 test_herdr_stale_registration_does_not_finish_relaunch
+test_herdr_sticky_registration_confirms_started_replacement
