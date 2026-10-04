@@ -1,0 +1,10 @@
+ok - ownership: the registered lead's model shell acquires .lock for the live owner and passes the helper proof
+ok - ownership: model shells reach the stand-in only through its registered endpoint and credential; anything else is refused
+ok - ownership: the lead session's shell outside the frozen root is refused by the shell-identity proof; at the root it passes
+ok - ownership: another session on the same service is refused the registered lead's home lock and told the live lead holds it
+ok - ownership: a service shell without a session id never locks; the lead then locks for its owner, never the service pid
+ok - ownership: exporting the lead's session id from another service shell gains no lead helper authority
+ok - ownership: an overwritten shell environment is refused with an environment diagnostic, the frozen one acquires
+ok - ownership: a new service incarnation refuses the helper proof until the owner republishes
+ok - ownership: two homes registered on one service each lock only their own home
+ok - ownership: a second claim on a live lead is refused and the live owner keeps its registration

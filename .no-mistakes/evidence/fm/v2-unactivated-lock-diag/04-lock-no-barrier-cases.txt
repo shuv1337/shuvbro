@@ -1,0 +1,11 @@
+=== D. inherited OPENCODE_SESSION_ID outside any service barrier, orphaned shell with no harness ancestry -> generic error ===
+2378435 bash
+   1629 systemd
+error: cannot locate harness process in ancestry
+exit=1
+lock file present: no
+
+=== E. regression: ordinary shuvcode TUI ancestry (no service barrier) still acquires the lock ===
+lock acquired: harness pid 2383106
+exit=0
+lock pid=2383106 shuvcode-tui pid=2383106

@@ -1,0 +1,11 @@
+=== BEFORE (base 4b14c03): plain shuvcode lead, model shell under shuvcode serve --service ===
+--- process ancestry seen by the model shell ---
+--- running: /tmp/fm-v2-base.NCjmG4/bin/fm-lock.sh (OPENCODE_SESSION_ID=ses_plainLaunchProbe01) ---
+error: cannot locate harness process in ancestry
+--- exit code: 1 ---
+
+=== AFTER (target ddb540e): same tree ===
+--- process ancestry seen by the model shell ---
+--- running: /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M43RFP96N1GWQJTRC3KVBGFR/bin/fm-lock.sh (OPENCODE_SESSION_ID=ses_plainLaunchProbe01) ---
+error: OpenCode V2 lead is not activated for session ses_plainLaunchProbe01, so it cannot own this home's fleet lock; exit this client and relaunch with /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M43RFP96N1GWQJTRC3KVBGFR/bin/fm-opencode-v2-lead.sh --session ses_plainLaunchProbe01 (equivalent: /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M43RFP96N1GWQJTRC3KVBGFR/bin/fm-opencode-v2-primary.sh --session ses_plainLaunchProbe01 --native-binary /home/shuv/.npm-global/lib/node_modules/shuvcode/node_modules/shuvcode-linux-x64/bin/shuvcode)
+--- exit code: 1 ---

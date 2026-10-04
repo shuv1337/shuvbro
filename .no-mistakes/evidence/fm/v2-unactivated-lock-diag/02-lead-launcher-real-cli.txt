@@ -1,0 +1,41 @@
+$ FM_ROOT_OVERRIDE=~/repos/shuvbro fm-opencode-v2-lead.sh   # real shuvcode CLI + real native resolver; activation stubbed
+resuming lead session ses_efad9e0e8ffeHxH7bU55LSxhs4
+[stub fm-opencode-v2-primary.sh] would activate: --session ses_efad9e0e8ffeHxH7bU55LSxhs4 --native-binary /home/shuv/.npm-global/lib/node_modules/shuvcode/node_modules/shuvcode-linux-x64/bin/shuvcode
+exit=0
+
+$ fm-opencode-v2-lead.sh --session ses_exact   # explicit session, real resolver
+[stub fm-opencode-v2-primary.sh] would activate: --session ses_exact --native-binary /home/shuv/.npm-global/lib/node_modules/shuvcode/node_modules/shuvcode-linux-x64/bin/shuvcode
+exit=0
+
+$ FM_OPENCODE_V2_BIN=<npm launcher.mjs> fm-opencode-v2-lead.sh --session ses_exact   # npm wrapper must be refused
+error: cannot resolve the installed native shuvcode executable; pass --native-binary PATH or set FM_OPENCODE_V2_BIN
+exit=2
+
+$ fm-opencode-v2-lead.sh --bogus
+error: unknown argument: --bogus (see --help)
+exit=2
+
+$ fm-opencode-v2-lead.sh --help
+Default OpenCode V2 lead launcher: resolve the installed native shuvcode
+executable and the exact lead session, then exec the explicit activation
+bin/fm-opencode-v2-primary.sh, which owns every ownership and launch rule.
+A plain `shuvcode` launch is never activated, so its session start stays
+read-only; this is the supported way to open or resume a lead instead.
+
+Usage: fm-opencode-v2-lead.sh [--continue | --new | --session ID] [--native-binary PATH]
+  --continue (default)  resume the newest top-level session whose directory is
+                        this code root, creating one when none exists. The
+                        session list is project-scoped and includes sibling
+                        copies and worktrees, so only an exact directory
+                        match counts. When no match is found and the list
+                        filled its whole window, the launcher stops instead
+                        of creating a session; pass --session ID or --new.
+  --new                 create a fresh session at this code root.
+  --session ID          resume exactly that session.
+  --native-binary PATH  skip resolution; otherwise fm_shuvcode_native_binary
+                        (bin/fm-shuvcode-lib.sh) resolves it and honors
+                        FM_OPENCODE_V2_BIN.
+Session discovery and creation use `shuvcode` on PATH against the default
+shared service. FM_HOME and the other frozen overrides pass through to the
+activation unchanged. Linux only, like the activation it wraps.
+exit=0

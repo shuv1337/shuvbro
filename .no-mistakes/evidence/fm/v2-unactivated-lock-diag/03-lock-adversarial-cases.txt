@@ -1,0 +1,29 @@
+=== A. service shell, NO OPENCODE_SESSION_ID (generic error must remain) ===
+--- process ancestry seen by the model shell ---
+--- running: /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M43RFP96N1GWQJTRC3KVBGFR/bin/fm-lock.sh (OPENCODE_SESSION_ID=<unset>) ---
+error: cannot locate harness process in ancestry
+--- exit code: 1 ---
+
+=== B. unactivated session while a live lead holds the lock (must name holder, no relaunch) ===
+holder pid=2110913: shuvcode        /tmp/fm-v2-holder.Oq06s4/shuvcode -c sleep 120; true
+--- process ancestry seen by the model shell ---
+--- running: /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M43RFP96N1GWQJTRC3KVBGFR/bin/fm-lock.sh (OPENCODE_SESSION_ID=ses_plainLaunchProbe02) ---
+error: OpenCode V2 session ses_plainLaunchProbe02 is not the activated lead, and another live firstmate session holds this home's fleet lock (pid 2110913); this client stays a read-only observer
+--- exit code: 1 ---
+.lock after refusal: 2110913
+
+=== C. same, but the lock holder is dead (stale) -> relaunch hint, lock not taken ===
+--- process ancestry seen by the model shell ---
+--- running: /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M43RFP96N1GWQJTRC3KVBGFR/bin/fm-lock.sh (OPENCODE_SESSION_ID=ses_plainLaunchProbe02) ---
+error: OpenCode V2 lead is not activated for session ses_plainLaunchProbe02, so it cannot own this home's fleet lock; exit this client and relaunch with /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M43RFP96N1GWQJTRC3KVBGFR/bin/fm-opencode-v2-lead.sh --session ses_plainLaunchProbe02 (equivalent: /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M43RFP96N1GWQJTRC3KVBGFR/bin/fm-opencode-v2-primary.sh --session ses_plainLaunchProbe02 --native-binary /home/shuv/.npm-global/lib/node_modules/shuvcode/node_modules/shuvcode-linux-x64/bin/shuvcode)
+--- exit code: 1 ---
+.lock after refusal: 2110913
+
+=== D. inherited session id OUTSIDE any service barrier (no harness ancestry) -> generic error ===
+lock acquired: harness pid 1901096
+exit=0
+
+=== E. regression: ordinary shuvcode TUI ancestry (no service) still acquires the lock ===
+error: another live firstmate session holds the lock (pid 1901096); operate read-only until resolved
+exit=1
+lock pid=1901096 tui pid=2112418
