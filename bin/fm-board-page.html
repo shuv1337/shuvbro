@@ -107,15 +107,16 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "
 const isWeb = (u) => typeof u === "string" && /^https?:\/\/[^\s"<>]+$/.test(u);
 const shortUrl = (u) => { const m = String(u).match(/github\.com\/[^/]+\/([^/]+)\/(pull|issues)\/(\d+)/); return m ? `${m[1]}#${m[3]}` : u; };
 const link = (u, label) => isWeb(u) ? `<a href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(label || shortUrl(u))}</a>` : "";
-const ago = (iso) => {
-  if (!iso) return "";
-  const s = Math.max(0, (Date.now() - Date.parse(iso)) / 1000);
+const agoSeconds = (s) => {
+  s = Math.max(0, s);
   return s < 60 ? `${Math.round(s)}s ago` : s < 3600 ? `${Math.round(s / 60)}m ago` : s < 86400 ? `${Math.round(s / 3600)}h ago` : `${Math.round(s / 86400)}d ago`;
 };
+const ago = (iso) => iso ? agoSeconds((Date.now() - Date.parse(iso)) / 1000) : "";
 const utcDay = (offset) => new Date(Date.now() + offset * 86400000).toISOString().slice(0, 10);
 const dayLabel = (d) => new Date(`${d}T12:00:00Z`).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" });
 
 let last = null;
+let receivedAt = 0;
 let offline = false;
 let lastWaitingSignature = "";
 const cardState = new Map();   // task id -> {state, message}
@@ -129,7 +130,7 @@ function choicesHtml(w) {
   const dis = busy ? " disabled" : "";
   const open = panels.get(w.id);
   let html = `<div class="actions">${(w.choices || []).map((c) =>
-    `<button class="primary" data-act="choice" data-id="${esc(w.id)}" data-choice="${esc(c.id)}"${dis}>${esc(c.label)}</button>`).join("")}
+    `<button class="${c.id.startsWith("opt-") ? "" : "primary"}" data-act="choice" data-id="${esc(w.id)}" data-choice="${esc(c.id)}"${dis}>${esc(c.label)}</button>`).join("")}
     <button data-act="panel" data-id="${esc(w.id)}" data-panel="later"${dis}>Later…</button>
     <button class="quiet" data-act="panel" data-id="${esc(w.id)}" data-panel="reply"${dis}>Reply…</button></div>`;
   if (open === "later" && !busy) {
@@ -196,6 +197,7 @@ function renderWaiting(d) {
 
 function render(d) {
   last = d;
+  receivedAt = Date.now();
   if (d.instance && d.instance !== INSTANCE) {
     if ([...drafts.values()].some((t) => t.trim())) {
       $("banner").innerHTML = `<div class="banner">The board restarted. <button data-act="reload">Reload</button> to keep answering.</div>`;
@@ -232,12 +234,18 @@ function render(d) {
   tick();
 }
 
+// The data's age on the server's clock when it arrived, plus time elapsed since
+// on this device's clock, so a phone whose clock is off never misreads it.
+function dataAge() {
+  return (Number(last.age_seconds) || 0) + (Date.now() - receivedAt) / 1000;
+}
+
 function tick() {
   const el = $("updated");
-  if (offline) { el.textContent = last ? `Board offline - last update ${ago(last.generated)}` : "Board offline"; el.className = "updated stale"; return; }
+  if (offline) { el.textContent = last ? `Board offline - last update ${agoSeconds(dataAge())}` : "Board offline"; el.className = "updated stale"; return; }
   if (!last) return;
-  const age = (Date.now() - Date.parse(last.generated)) / 1000;
-  el.textContent = age > STALE_AFTER ? `Not updating - last update ${ago(last.generated)}` : `updated ${ago(last.generated)}`;
+  const age = dataAge();
+  el.textContent = age > STALE_AFTER ? `Not updating - last update ${agoSeconds(age)}` : `updated ${agoSeconds(age)}`;
   el.className = "updated" + (age > STALE_AFTER ? " stale" : "");
 }
 

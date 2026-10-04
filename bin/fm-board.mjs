@@ -8,9 +8,10 @@
 //   - a Tailscale Funnel request is refused outright;
 //   - the Host header must name a loopback host or one listed in
 //     config/board-hosts, which defeats DNS rebinding;
-//   - with config/board-logins present, a request must carry an allowlisted
-//     Tailscale-User-Login (set, and stripped from clients, by tailscale serve)
-//     or be a direct loopback request with no proxy headers at all;
+//   - a request must carry an allowlisted Tailscale-User-Login (set, and
+//     stripped from clients, by tailscale serve) or be a direct loopback
+//     request with no proxy headers at all; without config/board-logins only
+//     the direct loopback request is served;
 //   - POST /answer additionally requires application/json, an Origin equal to
 //     the page's own origin, a same-origin Sec-Fetch-Site when sent, a body of
 //     at most 8 KiB with exactly the documented fields, and the per-start
@@ -169,18 +170,19 @@ function accessDenied(req) {
       return { status: 403, code: "bad_host", message: "This board does not answer to that host name. Add it to config/board-hosts." };
     }
   }
-  if (allowedLogins.size === 0) return null;
   const login = headerValue(req, "tailscale-user-login");
-  if (login !== undefined) {
-    return allowedLogins.has(login.toLowerCase())
-      ? null
-      : { status: 403, code: "login_refused", message: "This board is not shared with your login." };
-  }
   const direct = loopbackHosts.has(host)
     && headerValue(req, "x-forwarded-for") === undefined
     && forwardedHost === undefined
+    && login === undefined
     && headerValue(req, "tailscale-user-name") === undefined;
-  return direct ? null : { status: 403, code: "login_refused", message: "This board is not shared with your login." };
+  if (direct) return null;
+  if (allowedLogins.size === 0) {
+    return { status: 403, code: "local_only", message: "This board is served to this computer only. List your Tailscale login in config/board-logins to share it." };
+  }
+  return login !== undefined && allowedLogins.has(login.toLowerCase())
+    ? null
+    : { status: 403, code: "login_refused", message: "This board is not shared with your login." };
 }
 
 function servePage(req, res) {
@@ -211,7 +213,8 @@ function serveData(res) {
   }
   const errors = [...(model.errors || [])];
   if (refreshError) errors.push(refreshError);
-  send(res, 200, { ...model, errors, instance, refresh_seconds: config.interval });
+  const age = Math.max(0, Math.round((Date.now() - Date.parse(model.generated)) / 1000));
+  send(res, 200, { ...model, errors, instance, refresh_seconds: config.interval, age_seconds: Number.isFinite(age) ? age : null });
 }
 
 function readBody(req) {
