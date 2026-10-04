@@ -63,8 +63,9 @@
 #
 # answer prints exactly one JSON line, {"ok":true,"outcome":...,"message":...}
 # or {"ok":false,"code":...,"message":...}, and exits 0 when recorded (a Later
-# whose deferral fails after its answer was recorded reports outcome
-# not_deferred and still wakes the lead), 2 for an
+# whose deferral fails after its answer was recorded records it again, so the
+# answer stays newer than the rewritten hold-set stamp, reports outcome
+# not_deferred, and still wakes the lead), 2 for an
 # invalid request, 3 when the item is no longer the one the captain saw, and 1
 # when recording failed. Free text is at most 500 characters and becomes one
 # line; dates must be after today (UTC) and at most 366 days out.
@@ -418,7 +419,7 @@ valid_until() {  # <YYYY-MM-DD> <today>
 command_answer() {
   local id=${1:-} card='' choice='' until='' text_file='' login='' text='' have_text=0
   local item lead source label answer_value mode intake_mode reason title outcome rc out note_body note_out note_id
-  local today summary defer_error=''
+  local today summary defer_error='' option
   trap model_cleanup EXIT
   [ "$#" -ge 1 ] || { usage >&2; exit 2; }
   shift
@@ -545,8 +546,11 @@ command_answer() {
       ;;
   esac
   label=$(printf '%s' "$label" | tr '\t\r\n' '   ')
-  out=$(printf '%s\t%s\t%s\t%s\n' "$id" "$answer_value" "$label" "$intake_mode" \
-    | "$SCRIPT_DIR/fm-captain-hold.sh" answers --source "$source" 2>/dev/null) || true
+  feed_intake() {
+    printf '%s\t%s\t%s\t%s\n' "$id" "$answer_value" "$label" "$intake_mode" \
+      | "$SCRIPT_DIR/fm-captain-hold.sh" answers --source "$source" 2>/dev/null
+  }
+  out=$(feed_intake) || true
   if ! printf '%s\n' "$out" | grep -Fxq -e "closed: $id" -e "recorded: $id"; then
     answer_result 1 record_failed "Not recorded: $(printf '%s\n' "$out" | grep -F "$id" | head -1 | sed 's/^[a-z]*: [^ ]* //; s/^(//; s/)$//' | cut -c1-300)"
   fi
@@ -558,9 +562,9 @@ command_answer() {
 
   if [ "$choice" = later ]; then
     set -- hold "$id" --reason "$reason" --until "$until"
-    while IFS= read -r label; do
-      [ -n "$label" ] || continue
-      set -- "$@" --option "$label"
+    while IFS= read -r option; do
+      [ -n "$option" ] || continue
+      set -- "$@" --option "$option"
     done <<EOF
 $(printf '%s' "$item" | jq -r 'if .choices[0].id == "yes" then empty else .choices[].label end')
 EOF
@@ -568,6 +572,7 @@ EOF
       outcome=deferred
     else
       outcome=not_deferred
+      feed_intake >/dev/null || true
       defer_error=$(printf '%s' "$out" | tail -1 | sed 's/^fm-captain-hold: //' | cut -c1-300)
     fi
   fi

@@ -45,7 +45,9 @@
 # existing timestamp, while re-holding released work, or an active hold that
 # has a captain answer recorded on it (`answer --record`) since that timestamp,
 # starts a new lifecycle, so the re-asked call reads as waiting on the captain
-# again.
+# again. A new hold-set stamp and a recorded answer are each written one second
+# past the newest stamp or recorded answer already on the task when the clock
+# has not moved past it, so their order is always strict.
 # A task already closed is refused rather than reopened. `--until` records the
 # captain's own deferral date through `tasks-axi hold --until`, so a "revisit
 # later" answer is stored as a date instead of a live card.
@@ -754,6 +756,30 @@ body_hold_set_timestamp() {  # <decoded-task-body>
     | head -1
 }
 
+# The newest `Captain answer recorded:` time on a body, or nothing.
+newest_recorded_answer_at() {  # <decoded-task-body>
+  printf '%s\n' "$1" \
+    | sed -n 's/^Captain answer recorded: \([0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z\)$/\1/p' \
+    | tail -1
+}
+
+# The time for a new hold-set stamp or recorded answer: <now>, or one second
+# past the newest such event already on the body when the clock has not moved
+# past it, so every comparison between the two can be strict.
+next_event_stamp() {  # <decoded-task-body> <now>
+  local now=$2 newest epoch
+  newest=$({ body_hold_set_timestamp "$1"; newest_recorded_answer_at "$1"; } \
+    | grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2}T' | LC_ALL=C sort | tail -1)
+  if [ -n "$newest" ] && ! [[ "$now" > "$newest" ]]; then
+    epoch=$(fm_utc_iso_to_epoch "$newest") || fail "cannot read the event time $newest"
+    epoch=$((epoch + 1))
+    now=$(date -u -r "$epoch" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+      || date -u -d "@$epoch" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null) \
+      || fail "cannot compute the next event time after $newest"
+  fi
+  printf '%s' "$now"
+}
+
 HOLD_OPTIONS_PREFIX='Captain hold options: '
 HOLD_OPTIONS_MAX=6
 
@@ -890,9 +916,9 @@ command_hold() {
       preserve_hold_set=1
       body=$(decode_shown_value "$(show_field "$show" body)") \
         || fail "could not decode the existing body for $id"
-      hold_answered=$(printf '%s\n' "$body" | sed -n 's/^Captain answer recorded: \([0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z\)$/\1/p' | tail -1)
+      hold_answered=$(newest_recorded_answer_at "$body")
       existing_hold_set=$(body_hold_set_timestamp "$body")
-      if [ -n "$hold_answered" ] && [ -n "$existing_hold_set" ] && ! [[ "$hold_answered" < "$existing_hold_set" ]]; then
+      if [ -n "$hold_answered" ] && [ -n "$existing_hold_set" ] && [[ "$hold_answered" > "$existing_hold_set" ]]; then
         preserve_hold_set=0
       fi
       body=''
@@ -924,6 +950,11 @@ command_hold() {
   # snapshot may see the harmless stamp by itself, but can never see a newly
   # held task without the timestamp that defines this hold lifecycle's age.
   show=$(task_show "$id") || fail "task $id disappeared before recording its hold-set stamp"
+  if [ "$preserve_hold_set" = 0 ]; then
+    body=$(decode_shown_value "$(show_field "$show" body)") \
+      || fail "could not decode the existing body for $id"
+    hold_set=$(next_event_stamp "$body" "$hold_set")
+  fi
   write_hold_set_stamp "$id" "$(show_field "$show" body)" "$hold_set" "$preserve_hold_set" "$options"
   show=$(task_show "$id") || fail "task $id disappeared while recording its hold-set stamp"
   [ -n "$(body_hold_set_timestamp "$(show_field_value "$show" body)")" ] \
@@ -1023,7 +1054,7 @@ record_answer_keeping_hold() {  # <task-id> <shown-body>
   case "$newest" in
     retry) : ;;
     *)
-      stamp=${FM_CAPTAIN_HOLD_NOW:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
+      stamp=$(next_event_stamp "$body" "${FM_CAPTAIN_HOLD_NOW:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}")
       tmp=$(umask 077; mktemp "${TMPDIR:-/tmp}/fm-captain-hold-record.XXXXXX") \
         || fail "cannot stage the recorded answer"
       if ! printf '%s\n\nCaptain answer recorded: %s\n%s\n%s\n' "$body" "$stamp" "$marker" "$DECISION_TEXT" > "$tmp"; then

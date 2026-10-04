@@ -513,6 +513,11 @@ test_answers_land_through_the_intake() {
   printf '%s\n' "$show" | grep -F "Captain hold options: Rename | Keep foo" >/dev/null || fail "later dropped the declared options: $show"
   printf '%s\n' "$show" | grep -F "Resolution recorded" >/dev/null && fail "later recorded a resolution: $show"
   printf '%s\n' "$show" | grep -F "Answer: later, until $until" >/dev/null || fail "later was not recorded on the task: $show"
+  board_data | jq -e 'all(.waiting_on_you[], .with_lead[]; .id != "call-later")' >/dev/null \
+    || fail "a deferred question is still waiting on the captain or listed as answered: $(board_data)"
+  in_home "$home" env FM_SNAPSHOT_NOW="${until}T12:00:00Z" "$BOARD" model \
+    | jq -e 'any(.waiting_on_you[]; .id == "call-later" and .answerable) and all(.with_lead[]; .id != "call-later")' >/dev/null \
+    || fail "a deferred question did not return to Waiting on you on its date"
 
   out=$(post_answer "$(answer_body call-reply reply '{"text": "SQLite for now,\n\tmove later"}')")
   [ "$(body_of "$out" | jq -r '.outcome')" = closed ] || fail "a typed reply was not recorded: $out"
@@ -549,6 +554,22 @@ test_answers_land_through_the_intake() {
   pass "yes, no, later, typed replies, and declared options land through the intake with board provenance and one wake each, and only yes releases held work"
 }
 
+test_same_second_answer_still_moves_to_answered() {
+  local home now model
+  home=$(make_home same-second)
+  now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  FM_CAPTAIN_HOLD_NOW=$now hold "$home" sample-ship --reason "Merge PR 5 now? Recommend yes"
+  printf 'sample-ship\tno\tNo - in reply to: Merge PR 5 now? Recommend yes\trecord\n' \
+    | FM_CAPTAIN_HOLD_NOW=$now in_home "$home" "$ROOT/bin/fm-captain-hold.sh" answers --source "live board" >/dev/null \
+    || fail "a same-second no was not recorded"
+  task_show "$home" sample-ship | grep -F "held: yes" >/dev/null || fail "a same-second no released the work"
+  model=$(in_home "$home" "$BOARD" model) || fail "model failed after a same-second answer"
+  printf '%s' "$model" | jq -e '[.with_lead[] | {id, answer}] == [{id: "sample-ship", answer: "no"}]
+    and all(.waiting_on_you[]; .id != "sample-ship")' >/dev/null \
+    || fail "a no recorded in the same second as the hold left it waiting on the captain: $model"
+  pass "a no recorded in the same second as the hold still moves the item to Answered"
+}
+
 test_later_that_cannot_defer_is_still_recorded() {
   local home real out show until
   home=$(make_home later-fails)
@@ -575,6 +596,9 @@ EOF
   printf '%s\n' "$show" | grep -F "held: yes" >/dev/null || fail "a failed deferral released the work: $show"
   printf '%s\n' "$show" | grep -F "Answer: later, until $until" >/dev/null || fail "the Later answer was not recorded: $show"
   printf '%s\n' "$show" | grep -F "hold_until: $until" >/dev/null && fail "the failed deferral still set the date: $show"
+  board_data | jq -e 'any(.with_lead[]; .id == "sample-ship" and .answer == "later, until \($d)")
+    and all(.waiting_on_you[]; .id != "sample-ship")' --arg d "$until" >/dev/null \
+    || fail "a recorded Later whose deferral failed is not listed as answered: $(board_data)"
   [ "$(inbox_notes "$home")" = 1 ] || fail "a recorded Later whose deferral failed did not wake the lead"
   grep -h -F "deferring until $until failed" "$home"/state/inbox/*.note >/dev/null \
     || fail "the lead's note does not say the deferral failed: $(cat "$home"/state/inbox/*.note)"
@@ -611,5 +635,6 @@ test_page_and_data_are_guarded
 test_answer_requests_are_validated
 test_tailscale_login_allowlist
 test_answers_land_through_the_intake
+test_same_second_answer_still_moves_to_answered
 test_later_that_cannot_defer_is_still_recorded
 test_a_home_that_never_opts_in_is_untouched
