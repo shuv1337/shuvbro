@@ -1,0 +1,14 @@
+## cross-origin POST (Origin: https://evil.example)
+{"ok":false,"code":"bad_origin","message":"Answers are accepted only from the board's own page."} HTTP 403
+## missing/wrong token
+{"ok":false,"code":"bad_token","message":"This page is out of date. Reload it and answer again."} HTTP 403
+## form-encoded body (no JSON)
+{"ok":false,"code":"bad_request","message":"The board accepts only its own answer requests."} HTTP 415
+## DNS-rebinding host header
+{"ok":false,"code":"bad_host","message":"This board does not answer to that host name. Add it to config/board-hosts."} HTTP 403
+
+## stale card (lead re-asked the question after page load)
+{"ok":false,"code":"stale_card","message":"This question changed since the page loaded. Review it again."} HTTP 409
+## task state after all refused attempts
+  state: queued
+  hold_reason: Rewrite the cache next month instead?

@@ -6,3 +6,7 @@ ok - yes, no, later, typed replies, and declared options land through the intake
 ok - a no recorded in the same second as the hold still moves the item to Answered
 ok - a Later whose deferral fails is still recorded, reported as not deferred, and wakes the lead
 ok - a home that never starts the board gains no board state, notes, wakes, or backlog changes
+
+real	0m36.715s
+user	0m12.334s
+sys	0m5.565s
