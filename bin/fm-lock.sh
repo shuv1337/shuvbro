@@ -37,6 +37,8 @@ fi
 # missing, not a process-detection failure: its model shell runs under the
 # shared service, which no ancestry walk may climb through. While another live
 # session holds the lock, activation would be refused too, so name the holder.
+# The printed commands must stay safe to paste: quote real paths and keep
+# placeholders free of shell metacharacters such as `<`/`>`.
 v2_unactivated_error() {
   local session=${OPENCODE_SESSION_ID:-} binary holder lead primary
   [[ "$session" =~ ^ses_[A-Za-z0-9_-]+$ ]] || session=ses_INVALID
