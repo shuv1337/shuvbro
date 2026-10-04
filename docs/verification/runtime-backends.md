@@ -1593,18 +1593,27 @@ A throwaway scout was spawned through `bin/fm-spawn.sh --scout --harness omp --m
 
 ## Shuvcode explicit-model worker
 
-Verified on 2026-10-02 at 01:55 PDT on Linux with shuvcode v2.0.22-shuv.1,
-using `opencode/space-bunny-free#low`:
+Verified on 2026-10-04 at 09:25 PDT on Linux with shuvcode v2.0.22-shuv.1 and tmux 3.7c,
+using `opencode/space-bunny-free#low` on the current shared-service launcher:
 
 ```sh
 FM_OPENCODE_V2_WORKER_LIVE=1 bash tests/fm-opencode-v2-worker-live-e2e.test.sh
 ```
 
-Observed result: `ok - shuvcode v2.0.22-shuv.1 explicit model/variant, unattended ask, explicit deny, busy/idle, turn-end and persistent follow-up`.
-This result used the former private leased-server launcher, not the current shared-service launcher.
-The opt-in test now requires relocated XDG native paths, a disposable registered shared service and an explicit non-default ownership namespace; it has not been rerun live after that change.
+Observed result:
+
+```text
+ok - shuvcode v2.0.22-shuv.1 explicit model/variant, unattended ask, explicit deny, busy/idle, turn-end and persistent follow-up
+ok - shuvcode v2.0.22-shuv.1 exit is confirmed only once the TUI has left the pane and the recorded session is idle
+ok - shuvcode v2.0.22-shuv.1 relaunch resumes the recorded session in the same endpoint and worktree and the note is acted on
+```
+
+The test runs relocated XDG native paths, a disposable registered shared service and an explicit non-default ownership namespace.
+Its second and third results are the live guard for `bin/fm-control.sh` on opencode-v2: the tmux classifier attributed the real worker processes, `exit` reported `native-session=idle`, and `relaunch` kept the recorded session ID, the endpoint and the worktree while the resumed worker acted on its progress note.
 Only Treehouse allocation is replaced with entry into the disposable worktree.
 The guard requires configured model credentials and is opt-in, outside portable CI.
+Herdr was not exercised live for these control paths; its process-based opencode-v2 endpoint read is covered by `tests/fm-backend-herdr.test.sh`, `tests/fm-control.test.sh`, and the real-binary `tests/fm-control-herdr-smoke.test.sh` lab case.
+The same day, a read-only `fm_backend_agent_state herdr <session>:<pane> opencode-v2` against a running shuvcode worker pane on Herdr 0.9.1-shuv.5 printed `alive` from its three foreground processes (owner attach wrapper, node launcher, compiled `shuvcode` binary).
 
 The installed root TUI rejects `--model`; its `mini --model` path did not honor
 the requested model in the live probe and lacks the root's `--auto` contract.
@@ -1615,5 +1624,5 @@ The current `bin/fm-opencode-v2-launch.sh` creates an exact model-bound session 
 The native route is implemented but is not yet qualified for the combined issue #1 matrix.
 On 2026-10-02, isolated Linux probes with installed shuvcode v2.0.22-shuv.1 demonstrated native package loading, exact TUI-owned lock and pathless binding RPC, a real typed cd-guard refusal, unrelated-root execution, observer environment recovery, ordinary session-ID spoof refusal, one durable queued wake and shared-worker attachment, plus natural TUI retirement with the shared service surviving.
 Those probes used a deterministic local provider, not a paid/vendor model, and did not qualify the actual two-home/two-worker/Herdr, busy-and-idle delivery or restarted-service positive matrix.
-The endpoint, worker execution-reconciliation and isolated worker-live safety changes have portable regression coverage only until their opt-in live tests are rerun.
+The isolated worker-live probe was rerun on 2026-10-04 (see above); the endpoint and worker execution-reconciliation changes otherwise have portable regression coverage only until their opt-in live tests are rerun.
 No upstream `opencode2`, cross-host split or V2 secondmate qualification is claimed.

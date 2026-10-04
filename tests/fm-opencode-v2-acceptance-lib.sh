@@ -265,6 +265,27 @@ v2_session() {  # <dir> <id> <directory> [parent] [marker-session] [marker-claim
   jq --arg id "$2" --argjson info "$info" '.[$id] = $info' "$dir/sessions.json" > "$dir/sessions.tmp" && mv "$dir/sessions.tmp" "$dir/sessions.json"
 }
 
+# A worker task's session binding exactly as bin/fm-opencode-v2-launch.sh
+# publishes it: <record> (a state/<id>.opencode-v2-session.json path) names
+# <session>, a root session at <worktree> with a fixed model, bound to the
+# running stand-in's incarnation. The session is also added to the stand-in,
+# and its durable execution claims start empty (idle).
+v2_worker_binding() {  # <dir> <record> <session> <worktree>
+  local dir=$1
+  v2_session "$dir" "$3" "$4"
+  jq --arg id "$3" '.[$id].model = {providerID: "mock", id: "echo"}' "$dir/sessions.json" > "$dir/sessions.tmp" \
+    && mv "$dir/sessions.tmp" "$dir/sessions.json"
+  [ -f "$dir/execution.json" ] || printf '{}' > "$dir/execution.json"
+  RECORD="$2" SID="$3" WT="$4" OWNER_URL="file://$V2_CODE_ROOT/bin/fm-opencode-v2-owner.mjs" \
+    V2_SERVICE_PID="$V2_SERVICE_PID" "$V2_NODE_BIN" --input-type=module -e '
+      const owner = await import(process.env.OWNER_URL);
+      const service = owner.identity(Number(process.env.V2_SERVICE_PID));
+      owner.writePrivate(process.env.RECORD, { version: 1, sessionID: process.env.SID, location: { directory: process.env.WT },
+        model: { providerID: "mock", id: "echo" }, servicePID: service.pid, serviceStart: service.start, hostBootID: service.boot,
+        serviceURL: process.env.V2_SERVICE_URL });' \
+    || fail "fixture: could not write the worker session binding"
+}
+
 # Publish a real exact registration through a live owner stand-in; sets
 # V2_OWNER_PID and V2_CLAIM. The owner retires on SIGUSR1. It runs through the
 # `shuvcode` link like the real activated lead, so lock-holder liveness sees a

@@ -103,6 +103,9 @@ SKIPPED=
 # cursor matters for the same reason muse does, from the other direction: it
 # runs as a bundled node script, so its pane title is a bare `node` that no name
 # pattern can own, and identity has to come from its install path or argv[0].
+# opencode-v2 (shuvcode) is deliberately absent: a bare launch attaches to the
+# operator's shared service, so its live attribution is asserted instead by
+# tests/fm-opencode-v2-worker-live-e2e.test.sh on an isolated service.
 for harness in claude codex opencode pi pi-signed grok kimi cursor muse; do
   if ! bin_path=$(resolve_harness_binary "$harness"); then
     SKIPPED="$SKIPPED $harness"

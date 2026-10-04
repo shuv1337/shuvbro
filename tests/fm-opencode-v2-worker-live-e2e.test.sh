@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Credentialed shuvcode worker launch, permissions, steering and semantic hooks.
+# Credentialed shuvcode worker launch, permissions, steering and semantic hooks,
+# then lifecycle control: a confirmed exit and a same-session relaunch.
 # Run with FM_OPENCODE_V2_WORKER_LIVE=1; optionally set FM_OPENCODE_V2_MODEL
 # (default opencode/space-bunny-free) and FM_OPENCODE_V2_EFFORT (default low).
 # Uses an isolated XDG shared service, registry namespace, private tmux socket,
@@ -181,3 +182,49 @@ api session.message.list --param "sessionID=$SESSION" --param "location[director
   | ($models | length)>0 and all($models[]; (.providerID + "/" + .id)==$model and .variant==$effort)
 ' >/dev/null || fail "$VERSION follow-up assistant used a different provider/model/variant"
 pass "$VERSION explicit model/variant, unattended ask, explicit deny, busy/idle, turn-end and persistent follow-up"
+
+# Lifecycle control on the real TUI: the tmux classifier must attribute the
+# worker's own processes, exit must be confirmed from both the pane and the
+# native session, and relaunch must resume that same session in place.
+control() {
+  FM_HOME="$HOME_DIR" FM_ROOT_OVERRIDE='' FM_STATE_OVERRIDE='' FM_DATA_OVERRIDE='' \
+    FM_CONFIG_OVERRIDE='' FM_PROJECTS_OVERRIDE='' FM_SPAWN_NO_GUARD=1 \
+    "$ROOT/bin/fm-control.sh" "$ID" "$@"
+}
+endpoint_state() {
+  FM_HOME="$HOME_DIR" bash -c '. "$1/bin/fm-backend.sh"; fm_backend_agent_state tmux "$2" opencode-v2' _ "$ROOT" "$TARGET"
+}
+[ "$(endpoint_state)" = alive ] \
+  || fail "$VERSION worker TUI is not attributed alive by the tmux classifier (foreground: $(ps -t "$(tmux display-message -p -t "$TARGET" '#{pane_tty}' | sed 's|^/dev/||')" -o comm= | tr '\n' ' '))"
+control exit > "$LAB/exit.log" 2>&1 || { cat "$LAB/exit.log" >&2; capture; fail "$VERSION exit was not confirmed"; }
+grep -q "^stopped $ID harness=opencode-v2 backend=tmux .*native-session=idle" "$LAB/exit.log" \
+  || fail "$VERSION exit did not report both stop proofs: $(cat "$LAB/exit.log")"
+[ "$(endpoint_state)" = dead ] || fail "$VERSION pane is not agent-free after a confirmed exit"
+api session.active | jq -e --arg id "$SESSION" '.data | has($id) | not' >/dev/null \
+  || fail "$VERSION recorded session still executes after a confirmed exit"
+pass "$VERSION exit is confirmed only once the TUI has left the pane and the recorded session is idle"
+
+rm -f "$HOME_DIR/state/$ID.turn-ended"
+printf '%s\n' 'Live relaunch probe: use shell to execute printf RESUMED > resumed-proof.txt, then reply RESUMED_DONE.' > "$LAB/note.md"
+control relaunch --harness opencode-v2 --model "$MODEL" --effort "$EFFORT" --note-file "$LAB/note.md" > "$LAB/relaunch.log" 2>&1 \
+  || { cat "$LAB/relaunch.log" >&2; capture; fail "$VERSION relaunch failed"; }
+grep -q "^relaunched $ID harness=opencode-v2 from=opencode-v2 .*endpoint=$TARGET worktree=$WORKTREE" "$LAB/relaunch.log" \
+  || fail "$VERSION relaunch did not keep the endpoint and worktree: $(cat "$LAB/relaunch.log")"
+[ "$(jq -r .sessionID "$HOME_DIR/state/$ID.opencode-v2-session.json")" = "$SESSION" ] \
+  || fail "$VERSION relaunch did not resume the recorded native session"
+for _ in $(seq 1 360); do
+  if [ -f "$WORKTREE/resumed-proof.txt" ] && [ -f "$HOME_DIR/state/$ID.turn-ended" ] \
+    && grep -q 'state=idle source=opencode-plugin' "$HOME_DIR/state/$ID.busy-state"; then
+    break
+  fi
+  sleep 0.5
+done
+capture
+[ "$(cat "$WORKTREE/resumed-proof.txt" 2>/dev/null)" = RESUMED ] || fail "$VERSION relaunched worker did not act on its progress note"
+grep -q 'state=idle source=opencode-plugin' "$HOME_DIR/state/$ID.busy-state" \
+  || fail "$VERSION relaunched worker did not report semantic busy/idle under its new generation"
+[ "$(endpoint_state)" = alive ] || fail "$VERSION relaunched TUI is not attributed alive"
+api session.message.list --param "sessionID=$SESSION" --param "location[directory]=$WORKTREE" > "$LAB/resumed-messages.json"
+jq -e '[.data[] | select(.type=="user")] | length >= 3' "$LAB/resumed-messages.json" >/dev/null \
+  || fail "$VERSION relaunch did not continue the earlier conversation in the same session"
+pass "$VERSION relaunch resumes the recorded session in the same endpoint and worktree and the note is acted on"

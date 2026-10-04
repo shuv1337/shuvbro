@@ -30,7 +30,12 @@
 #              every uncommitted change. Interrupts first when the task reads
 #              busy, then submits the harness's exit command. Postcondition:
 #              the backend's recovery-grade classifier reports the agent gone.
-#              Already-stopped is success (idempotent).
+#              Already-stopped is success (idempotent). opencode-v2's execution
+#              lives on the shared service, so its exit cancels the exact
+#              recorded session first and is confirmed only when its TUI has
+#              left the endpoint AND that session has no active execution
+#              (bin/fm-control-lib.sh's fm_control_v2_execution); a dead pane
+#              alone is never proof.
 #   relaunch   Transactionally replace the running agent with a new one, in the
 #              SAME endpoint and SAME worktree, on the same or a newly chosen
 #              harness/model/effort - so switching harness is one ordinary use
@@ -43,7 +48,8 @@
 #              A prefixed raw-command basename cannot reconstruct its launch
 #              command, so relaunch requires an explicit --harness for it.
 #              --note is required for a ship or scout, whose replacement
-#              inherits the local copy but none of the conversation; a
+#              inherits the local copy but, unless it resumes an opencode-v2
+#              session, none of the conversation; a
 #              secondmate reconciles its own home's records at startup, so its
 #              standing charter is never rewritten.
 #              Records a durable checkpoint and that note, exits the old agent,
@@ -51,7 +57,11 @@
 #              bin/fm-spawn.sh --relaunch. A failure before publication keeps
 #              the prior durable record in place and reports the concrete
 #              state; it never leaves a half-transitioned task claiming to be
-#              running.
+#              running. An opencode-v2 replacement resumes the task's recorded
+#              native session when it is idle and reachable, so the worker
+#              keeps its conversation, and receives the re-rendered brief with
+#              the note as a queued prompt (bin/fm-opencode-v2-launch.sh owns
+#              resume and its fresh-session fallback).
 #
 # Teardown and discard are NOT verbs here and never will be. `exit` stops an
 # agent and preserves everything else; removing a worktree, killing an
@@ -315,8 +325,29 @@ fm_backend_validate "$BACKEND" || exit 1
 
 # --- shared helpers ---------------------------------------------------------
 
+# The adapter whose endpoint evidence agent_state reads: the recorded one, until
+# a relaunch waits for its replacement (bin/fm-backend.sh's
+# fm_backend_agent_state owns why the adapter matters).
+STATE_HARNESS=$HARNESS
 agent_state() {
-  fm_backend_agent_state "$BACKEND" "$T"
+  fm_backend_agent_state "$BACKEND" "$T" "$STATE_HARNESS"
+}
+
+# Whether this adapter's execution is the exact native session rather than the
+# process in its pane (opencode-v2).
+native_session_harness() {
+  [ "$(fm_control_interrupt_ack_source "$HARNESS")" = native-session ]
+}
+
+# require_native_idle <context>: for a native-session adapter, refuse unless
+# the exactly recorded session positively has no active execution. A stopped
+# or absent TUI is never proof on its own.
+require_native_idle() {  # <context>
+  local execution
+  native_session_harness || return 0
+  execution=$(fm_control_v2_execution "$STATE" "$ID" "$WT")
+  [ "$execution" = idle ] \
+    || die "$1 native-session=$execution exit=unconfirmed; task $ID's recorded native session is not proven idle, so its agent cannot be called stopped"
 }
 
 busy_verdict() {
@@ -359,6 +390,8 @@ send_interrupt_keys() {
   key=$(fm_control_interrupt_key "$HARNESS")
   repeat=$(fm_control_interrupt_repeat "$HARNESS")
   clear=$(fm_control_interrupt_clear_key "$HARNESS")
+  [ -n "$key" ] && [ "$repeat" -gt 0 ] \
+    || die "harness $HARNESS has no verified interrupt key; refusing to send a key into its endpoint"
   fm_control_backend_supports_key "$BACKEND" "$key" \
     || die "harness $HARNESS interrupts with $key, which the $BACKEND backend cannot deliver; refusing to send a different key"
   [ -z "$clear" ] || fm_control_backend_supports_key "$BACKEND" "$clear" \
@@ -409,7 +442,7 @@ interrupt_cancel_claim() {
 # cancellation claim available after delivery.
 deliver_interrupt() {
   local cancel
-  if [ "$RECORDED_HARNESS" = opencode-v2 ]; then
+  if native_session_harness; then
     fm_control_v2_interrupt "$STATE" "$ID" "$WT" >/dev/null || return $?
     printf 'confirmed'
     return 0
@@ -450,16 +483,19 @@ retire_busy_incarnation() {
 }
 
 # do_exit: stop the running agent, preserving endpoint and worktree. Prints
-# `already-stopped` or `stopped`.
+# `already-stopped` or `stopped`. A native-session adapter's execution is
+# cancelled before anything is typed, and both outcomes additionally require
+# its recorded session to be proven idle.
 do_exit() {
   local state cmd verdict cancel interrupt_result=not-needed
-  if [ "$RECORDED_HARNESS" = opencode-v2 ]; then
+  if native_session_harness; then
     fm_control_v2_interrupt "$STATE" "$ID" "$WT" >/dev/null || return $?
   fi
   require_state_verified_backend exit
   state=$(agent_state)
   case "$state" in
     dead)
+      require_native_idle "exit-not-needed $ID agent-state=dead"
       printf 'already-stopped'
       return 0
       ;;
@@ -474,6 +510,7 @@ do_exit() {
       state=$(agent_state)
       case "$state" in
         dead)
+          require_native_idle "exit-delivered $ID interrupt=delivered cancel=$cancel agent-state=dead"
           retire_busy_incarnation
           printf 'stopped'
           return 0
@@ -498,6 +535,7 @@ do_exit() {
   state=$(wait_agent_state "$EXIT_WAIT" dead) || {
     die "exit-delivered $ID interrupt=$interrupt_result exit-command=delivered agent-state=$state exit=unconfirmed; the agent did not stop within ${EXIT_WAIT}s"
   }
+  require_native_idle "exit-delivered $ID interrupt=$interrupt_result exit-command=delivered agent-state=dead"
   # The incarnation is over: retire its busy wiring so no stale record or
   # orphaned generation survives the agent that produced it.
   retire_busy_incarnation
@@ -807,7 +845,7 @@ do_relaunch() {
       [ -f "$RELAUNCH_BRIEF" ] \
         || die "task $ID has no instructions at $RELAUNCH_BRIEF; refusing to relaunch a worker with nothing to work from"
       [ "$NOTE_SET" = 1 ] && [ -n "$NOTE" ] \
-        || die "relaunch of a $KIND task requires --note (or --note-file): the replacement worker inherits the local copy but none of the conversation, so it must be told what happened"
+        || die "relaunch of a $KIND task requires --note (or --note-file): the replacement worker inherits the local copy but not necessarily the conversation, so it must be told what happened"
       ;;
     secondmate)
       # The charter in the secondmate's own home is its instruction source and
@@ -852,6 +890,7 @@ do_relaunch() {
     die "the replacement agent for $ID could not be launched on $TARGET_HARNESS"
   fi
 
+  STATE_HARNESS=$TARGET_HARNESS
   state=$(wait_agent_state "$LAUNCH_WAIT" alive) || {
     die "the replacement agent for $ID did not come up within ${LAUNCH_WAIT}s (endpoint reads '$state')"
   }
@@ -866,14 +905,14 @@ do_relaunch() {
 
 case "$VERB" in
   interrupt)
-    if [ "$RECORDED_HARNESS" = opencode-v2 ]; then
+    if native_session_harness; then
       result=$(fm_control_v2_interrupt "$STATE" "$ID" "$WT") || exit 1
       if jq -e '.recorded == false' <<< "$result" >/dev/null; then
-        echo "interrupt-not-needed $ID harness=opencode-v2 backend=$BACKEND verified=no-recorded-session cancel=not-needed"
+        echo "interrupt-not-needed $ID harness=$HARNESS backend=$BACKEND verified=no-recorded-session cancel=not-needed"
       elif jq -e '.cancellation == "settled"' <<< "$result" >/dev/null; then
-        echo "interrupt-not-needed $ID harness=opencode-v2 backend=$BACKEND verified=settled-successor cancel=not-needed"
+        echo "interrupt-not-needed $ID harness=$HARNESS backend=$BACKEND verified=settled-successor cancel=not-needed"
       else
-        echo "interrupt-delivered $ID harness=opencode-v2 backend=$BACKEND verified=native-session cancel=confirmed"
+        echo "interrupt-delivered $ID harness=$HARNESS backend=$BACKEND verified=native-session cancel=confirmed"
       fi
       exit 0
     fi
@@ -894,7 +933,9 @@ case "$VERB" in
     ;;
   exit)
     result=$(do_exit)
-    echo "$result $ID harness=$HARNESS backend=$BACKEND endpoint=$T worktree=$WT"
+    native_proof=
+    native_session_harness && native_proof=' native-session=idle'
+    echo "$result $ID harness=$HARNESS backend=$BACKEND endpoint=$T worktree=$WT$native_proof"
     ;;
   relaunch)
     do_relaunch

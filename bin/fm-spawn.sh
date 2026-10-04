@@ -41,7 +41,11 @@
 #   agent-free on a backend with a recovery-grade agent-state classifier (tmux
 #   or herdr), refuses unless the endpoint's shell is sitting in the recorded
 #   worktree, and clears the previous harness's per-task wiring before arming
-#   the new incarnation.
+#   the new incarnation. For a task recorded on opencode-v2, agent-free means
+#   no shuvcode TUI in the endpoint AND no active execution on its recorded
+#   native session; an exited TUI over an executing or unproven session
+#   refuses. An opencode-v2 replacement launches with --resume, so the helper
+#   continues that recorded session when it can.
 #   --harness <name> is the explicit per-spawn harness/profile adapter. The old
 #   positional harness arg still works for back-compat.
 #   --model <name> and --effort <low|medium|high|xhigh|max|ultra> are concrete profile
@@ -1321,12 +1325,15 @@ if [ "$RELAUNCH" -eq 1 ]; then
     echo "error: backend '$BACKEND' has no recovery-grade agent-state classifier, so a relaunch cannot prove the previous agent exited; refusing rather than risking two agents in one endpoint" >&2
     exit 1
   }
-  RELAUNCH_STATE=$(fm_backend_agent_state "$BACKEND" "$RELAUNCH_TARGET")
+  # The recorded adapter decides which endpoint evidence is authoritative
+  # (bin/fm-backend.sh's fm_backend_agent_state owns that rule).
+  RELAUNCH_PRIOR_HARNESS=$(fm_meta_get "$RELAUNCH_META" harness)
+  RELAUNCH_PRIOR_FAMILY=$(fm_control_harness_family "$RELAUNCH_PRIOR_HARNESS" 2>/dev/null || true)
+  RELAUNCH_STATE=$(fm_backend_agent_state "$BACKEND" "$RELAUNCH_TARGET" "$RELAUNCH_PRIOR_FAMILY")
   [ "$RELAUNCH_STATE" = dead ] || {
     echo "error: task $ID's endpoint reads '$RELAUNCH_STATE'; a relaunch requires a positively agent-free endpoint (stop the agent first with bin/fm-control.sh $ID exit)" >&2
     exit 1
   }
-  RELAUNCH_PRIOR_HARNESS=$(fm_meta_get "$RELAUNCH_META" harness)
   KIND=$(fm_meta_get "$RELAUNCH_META" kind)
   [ -n "$KIND" ] || KIND=ship
   MODE=$(fm_meta_get "$RELAUNCH_META" mode)
@@ -1336,6 +1343,17 @@ if [ "$RELAUNCH" -eq 1 ]; then
     echo "error: task $ID's recorded worktree '${RELAUNCH_WT:-none}' is missing; refusing to relaunch without the local copy its work lives in" >&2
     exit 1
   }
+  # An opencode-v2 worker executes on the shared service, so an endpoint whose
+  # TUI has exited is agent-free only when its exactly recorded session also
+  # has no active execution. Anything short of a proven idle session refuses,
+  # preserving the cleanup refusal's at-least-once replay boundary.
+  if [ "$RELAUNCH_PRIOR_FAMILY" = opencode-v2 ]; then
+    RELAUNCH_V2_EXECUTION=$(fm_control_v2_execution "$(cd "$STATE" && pwd -P)" "$ID" "$RELAUNCH_WT")
+    [ "$RELAUNCH_V2_EXECUTION" = idle ] || {
+      echo "error: task $ID's opencode-v2 TUI has left its endpoint, but its recorded native session reads '$RELAUNCH_V2_EXECUTION'; a relaunch requires no active execution on that session (stop it first with bin/fm-control.sh $ID exit)" >&2
+      exit 1
+    }
+  fi
   if [ "$KIND" = secondmate ]; then
     FIRSTMATE_HOME=$(fm_meta_get "$RELAUNCH_META" home)
     [ -n "$FIRSTMATE_HOME" ] || FIRSTMATE_HOME=$RELAUNCH_WT
@@ -4038,11 +4056,15 @@ sq_worktree=$(shell_quote "$WT")
 MODELFLAG=$(model_flag_for_harness "$HARNESS" "$MODEL") || exit 1
 EFFORTFLAG=$(effort_flag_for_harness "$HARNESS" "$EFFORT" "$MODEL") || exit 1
 # Preserve the root TUI's unattended permissions and composer handshake while
-# binding an explicitly requested model before its first prompt.
+# binding an explicitly requested model before its first prompt. A relaunch
+# asks the helper to resume the task's recorded session, which it does only
+# when that session is idle and reachable, falling back to a fresh one.
 if [ "$HARNESS" = opencode-v2 ]; then
+  V2_RESUMEFLAG=
+  [ "$RELAUNCH" -ne 1 ] || V2_RESUMEFLAG='--resume '
   case "$LAUNCH" in
     'shuvcode --standalone --auto --prompt '*)
-      LAUNCH="env -u FM_V2_ACTIVATION $(shell_quote "$FM_ROOT/bin/fm-opencode-v2-launch.sh") --session-record $(shell_quote "$STATE_REAL/$ID.opencode-v2-session.json") ${MODELFLAG}${LAUNCH#shuvcode --standalone --auto }"
+      LAUNCH="env -u FM_V2_ACTIVATION $(shell_quote "$FM_ROOT/bin/fm-opencode-v2-launch.sh") --session-record $(shell_quote "$STATE_REAL/$ID.opencode-v2-session.json") ${V2_RESUMEFLAG}${MODELFLAG}${LAUNCH#shuvcode --standalone --auto }"
       ;;
     *)
       echo "error: opencode-v2 model launch could not use the model-bound root session helper" >&2

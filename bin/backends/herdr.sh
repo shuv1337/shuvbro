@@ -78,6 +78,10 @@ FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 # shellcheck source=bin/fm-composer-lib.sh
 . "$FM_BACKEND_HERDR_ROOT/bin/fm-composer-lib.sh"
 
+# Shuvcode process identity, for the opencode-v2 process-based agent state.
+# shellcheck source=bin/fm-shuvcode-lib.sh
+. "$FM_BACKEND_HERDR_ROOT/bin/fm-shuvcode-lib.sh"
+
 # Shared, backend-neutral normalized-transition shape and the single-owner
 # status->action policy table (bin/fm-transition-lib.sh). This adapter's event
 # subscriber (fm_backend_herdr_wait_transition) normalizes every
@@ -2045,14 +2049,95 @@ fm_backend_herdr_tab_is_husk() {  # <session> <pane_id>
   esac
 }
 
+# fm_backend_herdr_pane_process_agent_state: classify the exact pane's
+# FOREGROUND processes for one adapter whose Herdr registration cannot prove
+# liveness, printing alive|dead|ambiguous|unreadable from one `pane
+# process-info` read.
+#   alive      - a foreground process carries the adapter's own structural
+#                identity (opencode-v2: bin/fm-shuvcode-lib.sh, matching the
+#                compiled binary or its node launcher, never the shared
+#                `--service` process, which never runs in a pane anyway).
+#   dead       - the foreground process group is the pane's own shell and
+#                holds nothing but recognized shells.
+#   ambiguous  - anything else, including a wrapper whose TUI child has not
+#                started or has already gone.
+#   unreadable - the read failed or its pane id, shell pid, process group, or
+#                process list did not round-trip.
+# Only the foreground group is read, so a background child of an idle shell
+# (gitstatusd, zsh-async) cannot fake a live agent, exactly as on tmux.
+# Unsupported adapters print unreadable rather than guessing an identity.
+fm_backend_herdr_pane_process_agent_state() {  # <session> <pane-id> <harness>
+  local session=$1 pane=$2 harness=$3 info shell_pid fg_pgid rows name argv0 args base
+  local seen=0 shells=0 other=0
+  case "$harness" in
+    opencode-v2) ;;
+    *) printf 'unreadable'; return 0 ;;
+  esac
+  info=$(fm_backend_herdr_cli "$session" pane process-info --pane "$pane" 2>/dev/null) \
+    || { printf 'unreadable'; return 0; }
+  printf '%s' "$info" | jq -e --arg pane "$pane" '
+    .result.type == "pane_process_info"
+    and .result.process_info.pane_id == $pane
+    and (.result.process_info.foreground_processes | type) == "array"
+  ' >/dev/null 2>&1 || { printf 'unreadable'; return 0; }
+  shell_pid=$(printf '%s' "$info" | jq -er \
+    '.result.process_info.shell_pid | select(type == "number" and . > 1) | floor' 2>/dev/null) \
+    || { printf 'unreadable'; return 0; }
+  fg_pgid=$(printf '%s' "$info" | jq -er \
+    '.result.process_info.foreground_process_group_id | select(type == "number" and . > 1) | floor' 2>/dev/null) \
+    || { printf 'unreadable'; return 0; }
+  rows=$(printf '%s' "$info" | jq -r '
+    .result.process_info.foreground_processes[]
+    | [ (.name // "" | tostring),
+        (.argv0 // (.argv // [])[0] // "" | tostring),
+        (.cmdline // ((.argv // []) | map(tostring) | join(" ")) | tostring) ]
+    | @tsv' 2>/dev/null) || { printf 'unreadable'; return 0; }
+  while IFS=$'\t' read -r name argv0 args; do
+    [ -n "$name$argv0" ] || continue
+    seen=1
+    if fm_shuvcode_process_matches "$name" "$args" "$argv0"; then
+      printf 'alive'
+      return 0
+    fi
+    base=${name##*/}
+    base=${base#-}
+    case "$base" in
+      sh|bash|zsh|dash|ash|ksh|mksh|tcsh|csh|fish) shells=1 ;;
+      *) other=1 ;;
+    esac
+  done <<EOF
+$rows
+EOF
+  [ "$seen" -eq 1 ] || { printf 'unreadable'; return 0; }
+  if [ "$other" -eq 0 ] && [ "$shells" -eq 1 ] && [ "$fg_pgid" = "$shell_pid" ]; then
+    printf 'dead'
+  else
+    printf 'ambiguous'
+  fi
+}
+
 # fm_backend_herdr_agent_state: recovery-grade state for the same session-start
 # sweep as the tmux classifier. It reuses the husk classifier rather than
 # creating a second Herdr state machine: a structurally gone pane is `missing`,
 # a confirmed agent-less pane is `dead`, a registered agent is `alive`, and an
 # unexpected or failed API read is `unreadable`.
-fm_backend_herdr_agent_state() {  # <target>
-  local target=$1
+# opencode-v2 is the exception. Its shuvcode hook registration outlives the
+# TUI (observed 2026-10-04: after /exit returned two worker panes to their
+# shell prompts, this read stayed alive for the whole exit wait and the later
+# relaunch gate), so that registration can neither prove the agent gone nor,
+# after a relaunch, prove a new one came up. Its pane is classified by
+# fm_backend_herdr_pane_process_agent_state instead.
+fm_backend_herdr_agent_state() {  # <target> [harness]
+  local target=$1 harness=${2:-}
   fm_backend_herdr_parse_target "$target" || { printf 'unreadable'; return 0; }
+  if [ "$harness" = opencode-v2 ]; then
+    case "$(fm_backend_herdr_pane_presence_state "$FM_BACKEND_HERDR_SESSION" "$FM_BACKEND_HERDR_PANE")" in
+      dead) printf 'missing' ;;
+      present) fm_backend_herdr_pane_process_agent_state "$FM_BACKEND_HERDR_SESSION" "$FM_BACKEND_HERDR_PANE" "$harness" ;;
+      *) printf 'unreadable' ;;
+    esac
+    return 0
+  fi
   case "$(fm_backend_herdr_pane_agent_state "$FM_BACKEND_HERDR_SESSION" "$FM_BACKEND_HERDR_PANE")" in
     dead) printf 'missing' ;;
     no-agent) printf 'dead' ;;

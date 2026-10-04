@@ -17,10 +17,14 @@
 #   6. fm-spawn --relaunch refuses on its own: a live agent, a contradicting
 #      flag, an extra positional, or a backend that cannot prove the previous
 #      agent exited.
+#   7. opencode-v2: the whole transaction runs against the acceptance stand-in
+#      service, the replacement resumes the recorded native session, and an
+#      exited TUI over an executing or unproven session is never agent-free.
 set -u
 
-# shellcheck source=tests/lib.sh
-. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+# shellcheck source=tests/fm-opencode-v2-acceptance-lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/fm-opencode-v2-acceptance-lib.sh"
+v2_assert_test_namespace || exit 1
 # shellcheck source=/dev/null
 . "$ROOT/bin/fm-control-lib.sh"
 # shellcheck source=/dev/null
@@ -38,11 +42,14 @@ TMP_ROOT=$(cd "$TMP_ROOT" && pwd)
 TASK_TMPS=()
 
 relaunch_cleanup() {
-  local d
+  local d status=$?
   for d in "${TASK_TMPS[@]:-}"; do
     [ -n "$d" ] && rm -rf "$d"
   done
   rm -rf "$TMP_ROOT"
+  v2_teardown
+  [ "$V2_TEARDOWN_FAILED" = 0 ] || status=1
+  exit "$status"
 }
 trap relaunch_cleanup EXIT
 
@@ -77,6 +84,15 @@ case "${1:-}" in
           ;;
         *'encode launch-brief'*)
           cat "$D/becomes" > "$D/command"
+          # A shuvcode replacement proves submission the way its worker plugin
+          # does: one current-generation native execution event.
+          case "$payload" in
+            *fm-opencode-v2-launch.sh*)
+              printf '%s\n' "$payload" > "$D/v2-launch"
+              "$FM_FAKE_V2_ROOT/bin/fm-busy-event.sh" apply "$FM_FAKE_V2_STATE" "$FM_FAKE_V2_ID" busy \
+                --current-gen --source opencode-plugin --event session-execution-started >/dev/null 2>&1
+              ;;
+          esac
           [ -z "${FM_FAKE_LAUNCH_TRANSPORT_FAIL_AFTER_START:-}" ] || exit 1
           ;;
       esac
@@ -836,14 +852,18 @@ test_secondmate_relaunch_onto_a_crewmate_only_adapter_refuses_before_stop() {
   } > "$home/state/sm7.meta"
   printf '%s\n' "fm-sm7" > "$dir/fake/windows"
   printf '%s' "$dir/smhome" > "$dir/fake/cwd"
-  out=$(run_control "$dir" sm7 relaunch --harness muse); rc=$?
-  expect_code 1 "$rc" "a crewmate-only adapter should refuse a secondmate relaunch"
-  assert_contains "$out" "not verified to run a secondmate task" \
-    "the refusal should name the kind the adapter cannot run"
-  [ "$(cat "$dir/fake/command")" = claude ] \
-    || fail "the refusal must land before the running agent is stopped"
-  [ "$(meta_field "$dir" sm7 harness)" = claude ] \
-    || fail "a refused relaunch must leave the durable record on the recorded harness"
+  # opencode-v2 has verified worker control mechanics, but its secondmate role
+  # is not qualified, so it belongs with the crewmate-only adapters here.
+  for adapter in muse opencode-v2; do
+    out=$(run_control "$dir" sm7 relaunch --harness "$adapter"); rc=$?
+    expect_code 1 "$rc" "$adapter should refuse a secondmate relaunch"
+    assert_contains "$out" "not verified to run a secondmate task" \
+      "the $adapter refusal should name the kind the adapter cannot run"
+    [ "$(cat "$dir/fake/command")" = claude ] \
+      || fail "the $adapter refusal must land before the running agent is stopped"
+    [ "$(meta_field "$dir" sm7 harness)" = claude ] \
+      || fail "a refused $adapter relaunch must leave the durable record on the recorded harness"
+  done
   pass "fm-control relaunch: an adapter unverified for this task kind refuses before the agent is stopped"
 }
 
@@ -1540,6 +1560,112 @@ test_relaunch_reverifies_an_already_in_flight_item_instead_of_rewriting_it() {
   pass "relaunch re-reads the backlog item instead of blindly re-running the transition"
 }
 
+# --- 7. opencode-v2: resume the recorded native session ----------------------
+
+# v2_relaunch_case <name> <id>: sets V2R_DIR to a case whose ship task runs
+# opencode-v2 with a live TUI and an idle, exactly recorded session on a
+# running stand-in service. The fakebin `shuvcode` answers the pre-dispatch
+# capability probe itself and hands every other call to the stand-in's own
+# CLI, so no installed shuvcode or real service is ever reached.
+v2_relaunch_case() {  # <name> <id>
+  V2R_DIR=$(new_case "$1" "$2")
+  add_ship_task "$V2R_DIR" "$2" opencode-v2
+  printf 'shuvcode' > "$V2R_DIR/fake/command"
+  printf 'shuvcode' > "$V2R_DIR/fake/becomes"
+  v2_start_service "$V2R_DIR/v2"
+  v2_worker_binding "$V2R_DIR/v2" "$V2R_DIR/home/state/$2.opencode-v2-session.json" "ses_$2" "$V2R_DIR/wt"
+  : > "$V2R_DIR/v2/api.log"
+  cat > "$V2R_DIR/fakebin/shuvcode" <<SH
+#!/usr/bin/env bash
+case "\${1:-}" in
+  --version) echo 'shuvcode v2.0.22-shuv.1'; exit 0 ;;
+  --help) echo '--server --session --auto'; exit 0 ;;
+esac
+exec "$V2_NATIVE_BIN/shuvcode" "\$@"
+SH
+  chmod +x "$V2R_DIR/fakebin/shuvcode"
+}
+
+v2_run() {  # <control|spawn> <case-dir> <id> <args...>
+  local kind=$1 dir=$2 id=$3
+  shift 3
+  if [ "$kind" = control ]; then
+    FM_FAKE_V2_ROOT="$ROOT" FM_FAKE_V2_STATE="$dir/home/state" FM_FAKE_V2_ID="$id" \
+      FM_OPENCODE_V2_READY_POLLS=3 FM_OPENCODE_V2_POLL_INTERVAL=0 run_control "$dir" "$id" "$@"
+  else
+    FM_FAKE_V2_ROOT="$ROOT" FM_FAKE_V2_STATE="$dir/home/state" FM_FAKE_V2_ID="$id" \
+      FM_OPENCODE_V2_READY_POLLS=3 FM_OPENCODE_V2_POLL_INTERVAL=0 run_spawn "$dir" "$id" "$@"
+  fi
+}
+
+test_opencode_v2_relaunch_resumes_the_recorded_session() {
+  local out rc note
+  v2_relaunch_case v2-relaunch rl60
+  note="$V2R_DIR/resume-note.md"
+  printf 'CI runner is back; resume the parked PR from its current head.\n' > "$note"
+  out=$(v2_run control "$V2R_DIR" rl60 relaunch --note-file "$note"); rc=$?
+  expect_code 0 "$rc" "relaunching an opencode-v2 worker should succeed"$'\n'"$out"
+  assert_contains "$out" "relaunched rl60 harness=opencode-v2 from=opencode-v2" "the outcome should name the transition"
+  [ "$(meta_field "$V2R_DIR" rl60 window)" = "fmses:fm-rl60" ] || fail "the endpoint must be reused"
+  [ "$(meta_field "$V2R_DIR" rl60 worktree)" = "$V2R_DIR/wt" ] || fail "the worktree must be reused"
+  [ "$(meta_field "$V2R_DIR" rl60 harness)" = opencode-v2 ] || fail "the record must stay on opencode-v2"
+  [ "$(journal_field "$V2R_DIR" rl60 phase)" = complete ] || fail "the transaction journal should end complete"
+  [ "$(head -n 1 "$V2R_DIR/fake/literal")" = /exit ] || fail "the old TUI should have been exited first"
+  grep -q " session.interrupt .*sessionID=ses_rl60.*resume=false" "$V2R_DIR/v2/api.log" \
+    || fail "the old agent's exact session must be cancelled before its TUI exits"
+  assert_contains "$(cat "$V2R_DIR/fake/v2-launch")" \
+    "--session-record '$V2R_DIR/home/state/rl60.opencode-v2-session.json' --resume --prompt" \
+    "the replacement must ask the launch helper to resume the recorded session"
+  assert_contains "$(cat "$V2R_DIR/fake/v2-launch")" "rl60/launch-brief.md" \
+    "the replacement must receive the re-rendered brief"
+  assert_grep "CI runner is back" "$V2R_DIR/home/data/rl60/brief.md" "the note must reach the instructions"
+  assert_grep "CI runner is back" "$V2R_DIR/home/data/rl60/launch-brief.md" "the note must reach the admitted brief"
+  jq -e '.sessionID == "ses_rl60"' "$V2R_DIR/home/state/rl60.opencode-v2-session.json" >/dev/null \
+    || fail "the recorded session binding must survive for the helper to resume"
+  [ -f "$V2R_DIR/wt/.opencode/plugins/fm-worker-v2/server.js" ] \
+    || fail "the replacement must re-arm the native worker package"
+  pass "fm-control relaunch: an opencode-v2 worker is replaced in place and resumes its recorded session"
+}
+
+test_opencode_v2_relaunch_threads_model_and_effort() {
+  local out rc
+  v2_relaunch_case v2-relaunch-profile rl61
+  out=$(v2_run control "$V2R_DIR" rl61 relaunch --harness opencode-v2 \
+    --model opencode/space-bunny-free --effort low --note "switch model"); rc=$?
+  expect_code 0 "$rc" "an explicit opencode-v2 relaunch profile should succeed"$'\n'"$out"
+  [ "$(meta_field "$V2R_DIR" rl61 model)" = opencode/space-bunny-free ] || fail "the record must name the new model"
+  [ "$(meta_field "$V2R_DIR" rl61 effort)" = low ] || fail "the record must name the new effort"
+  assert_contains "$(cat "$V2R_DIR/fake/v2-launch")" "--resume --model 'opencode/space-bunny-free#low' --prompt" \
+    "the resumed session must be asked for the requested model and variant"
+  pass "fm-control relaunch: --harness opencode-v2 with a model and effort resumes onto that model"
+}
+
+test_spawn_relaunch_requires_an_idle_opencode_v2_session() {
+  local out rc
+  v2_relaunch_case v2-gate rl63
+  printf 'zsh' > "$V2R_DIR/fake/command"
+  jq -nc '{ses_rl63: true}' > "$V2R_DIR/v2/execution.json"
+  out=$(v2_run spawn "$V2R_DIR" rl63 --relaunch --harness opencode-v2); rc=$?
+  expect_code 1 "$rc" "an exited TUI over an executing session is not agent-free"$'\n'"$out"
+  assert_contains "$out" "recorded native session reads 'executing'" "the refusal should name the live execution"
+  [ ! -e "$V2R_DIR/fake/v2-launch" ] || fail "no replacement may launch beside live execution"
+
+  printf '{}' > "$V2R_DIR/v2/execution.json"
+  kill "$V2_SERVICE_PID" 2>/dev/null
+  for _ in $(seq 1 50); do kill -0 "$V2_SERVICE_PID" 2>/dev/null || break; sleep 0.1; done
+  out=$(v2_run spawn "$V2R_DIR" rl63 --relaunch --harness opencode-v2); rc=$?
+  expect_code 1 "$rc" "a session whose service is gone cannot be proven idle"$'\n'"$out"
+  assert_contains "$out" "recorded native session reads 'unproven'" "the refusal should keep the replay boundary"
+  [ ! -e "$V2R_DIR/fake/v2-launch" ] || fail "no replacement may launch over an unproven session"
+
+  v2_start_service "$V2R_DIR/v2"
+  v2_worker_binding "$V2R_DIR/v2" "$V2R_DIR/home/state/rl63.opencode-v2-session.json" ses_rl63 "$V2R_DIR/wt"
+  out=$(v2_run spawn "$V2R_DIR" rl63 --relaunch --harness opencode-v2); rc=$?
+  expect_code 0 "$rc" "an exited TUI over an idle session is agent-free"$'\n'"$out"
+  assert_contains "$(cat "$V2R_DIR/fake/v2-launch")" "--resume" "the direct relaunch must resume too"
+  pass "fm-spawn --relaunch: an opencode-v2 endpoint is agent-free only when its TUI has exited and its session is idle"
+}
+
 test_relaunch_moves_a_drifted_item_back_in_flight() {
   local dir out rc=0
   command -v tasks-axi >/dev/null 2>&1 || {
@@ -1610,3 +1736,6 @@ test_spawn_relaunch_refuses_an_unrecorded_task
 test_spawn_relaunch_refuses_a_pane_outside_the_worktree
 test_relaunch_reverifies_an_already_in_flight_item_instead_of_rewriting_it
 test_relaunch_moves_a_drifted_item_back_in_flight
+test_opencode_v2_relaunch_resumes_the_recorded_session
+test_opencode_v2_relaunch_threads_model_and_effort
+test_spawn_relaunch_requires_an_idle_opencode_v2_session

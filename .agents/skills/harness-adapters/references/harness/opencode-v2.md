@@ -51,7 +51,7 @@ An effort with no `provider/model` stays in task metadata and leaves the default
 Launch admits the brief through the native API before attaching its exact `--auto` TUI.
 `bin/fm-spawn.sh` accepts current-generation exact-worker execution events as submission proof, including a short turn that already finished.
 When that wait fails, spawn records the composer verdict and a bounded pane tail before closing the endpoint, so a launcher diagnostic is not discarded with the window.
-`tests/fm-opencode-v2-worker-live-e2e.test.sh` is an opt-in isolated-XDG/shared-service worker probe, pending a new live run; its former private-server result is not evidence for the current launcher.
+`tests/fm-opencode-v2-worker-live-e2e.test.sh` is the opt-in isolated-XDG/shared-service worker probe, including exit and relaunch; [runtime verification](../../../../../docs/verification/runtime-backends.md#shuvcode-explicit-model-worker) records its current result.
 Under `--auto` the composer footer reads `Build auto · <model> · <effort>` with the `auto` word and `·` separators in muted truecolor, so the classifier recognises that footer from the plain row rather than the ghost-stripped one.
 The worker wiring writes `.opencode/plugins/package.json` only when the project has none, so a project that tracks that file keeps its own copy.
 Secondmate launches are refused until that role is qualified.
@@ -64,3 +64,14 @@ Unproven successors remain visibly unproven; confirmed cancellation or settlemen
 `--force` discard without proof accepts that a later service start may resume work in a removed isolated copy; it never reports confirmed cancellation.
 Portable regressions and isolated installed-fork probes cover these lifecycle paths; combined shared-service/Herdr qualification remains pending.
 The worker session is created without a permission override, so project deny rules still apply; `--auto` on its TUI is the only unattended-approval mechanism.
+
+## Control
+
+`../../../bin/fm-control.sh` drives `interrupt`, `exit`, and `relaunch` for ship and scout workers; `../../../bin/fm-control-lib.sh` holds the adapter row and `../../../docs/agent-control.md` the verb contracts.
+No pane key reaches the execution: interrupt cancels the exact recorded session, and exit does that before typing `/exit` into the TUI.
+Exit is confirmed only when no shuvcode process remains in the endpoint's foreground and the recorded session has no active execution; either fact alone is not a stop.
+On Herdr the endpoint fact comes from the pane's foreground processes, because the shuvcode hook registration still answers after the TUI exits.
+`fm-spawn.sh --relaunch` applies the same two-fact agent-free test, so an exited TUI over an executing or unproven session refuses.
+Relaunch resumes the recorded session in the same endpoint and worktree when it is idle and still bound to this service incarnation, switching its model only when one is named, and admits the re-rendered brief with the progress note as a queued prompt.
+Otherwise the launch helper starts a fresh session and records the new binding.
+`../../../bin/fm-opencode-v2-launch.sh` owns resume, its fallback, and model switching.

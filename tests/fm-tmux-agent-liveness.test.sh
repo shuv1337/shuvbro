@@ -194,6 +194,30 @@ for decoy in ompd comp; do
 done
 pass "tmux liveness: unrelated omp-containing command names stay ambiguous"
 
+# --- shuvcode's compiled binary (adapter opencode-v2) -----------------------
+# A shuvcode worker pane runs node wrappers around the compiled `shuvcode`
+# binary, whose process name is exactly that word. None of the table globs
+# contain it, so before bin/fm-shuvcode-lib.sh's rule reached this classifier a
+# live worker read ambiguous: exit could not act and a relaunch could never see
+# its replacement come up. The decoys are what keep the match structural.
+
+ln -s "$SLEEP_BIN" "$LAB/bin/shuvcode"
+ln -s "$SLEEP_BIN" "$LAB/bin/shuvcode-helper"
+ln -s "$SLEEP_BIN" "$LAB/bin/not-shuvcode"
+new_window shuvcode "$LAB/bin/shuvcode" 900
+wait_for_state "$SESSION:shuvcode" alive \
+  || fail "shuvcode's compiled binary name must classify alive"
+[ "$(fm_backend_agent_state tmux "$SESSION:shuvcode" opencode-v2)" = alive ] \
+  || fail "the opencode-v2 adapter hint must not change a tmux verdict"
+pass "tmux liveness: shuvcode's compiled binary classifies alive"
+
+for decoy in shuvcode-helper not-shuvcode; do
+  new_window "decoy-$decoy" "$LAB/bin/$decoy" 900
+  wait_for_state "$SESSION:decoy-$decoy" ambiguous \
+    || fail "'$decoy' merely contains 'shuvcode' and must not classify as a live agent pane"
+done
+pass "tmux liveness: unrelated shuvcode-containing command names stay ambiguous"
+
 # --- a version name blinds one source ---------------------------------------
 # Giving a genuine harness-named executable the version-string argv[0] that
 # Claude Code 2.1.220 reports drives the two sources apart on both supported

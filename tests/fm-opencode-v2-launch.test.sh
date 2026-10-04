@@ -49,7 +49,12 @@ case "$operation" in
     printf '%s\n' "$body" > "$TEST_CREATE"
     jq -e --arg root "$TEST_WORK" '.location.directory==$root and (has("permissions")|not)' <<< "$body" >/dev/null
     echo created >> "$TEST_LOG"
+    jq -c '.model + {variant:(.model.variant // "default")}' <<< "$body" > "$TEST_LOG.model"
     jq -cn --argjson body "$body" '{data:{id:"ses_worker_exact",location:$body.location,model:($body.model + {variant:($body.model.variant // "default")})}}' ;;
+  session.switchModel)
+    [ "$session_param" = sessionID=ses_worker_exact ] && [ "$param" = "location[directory]=$TEST_WORK" ] || exit 95
+    jq -c '.model + {variant:(.model.variant // "default")}' <<< "$body" > "$TEST_LOG.model"
+    echo switched >> "$TEST_LOG" ;;
   session.prompt)
     [ -f "$TEST_RECORD" ] && [ "$session_param" = sessionID=ses_worker_exact ] && [ "$param" = "location[directory]=$TEST_WORK" ] || exit 95
     jq -e '.sessionID=="ses_worker_exact" and .text=="exact worker brief" and .delivery=="queue"' <<< "$body" >/dev/null
@@ -61,8 +66,12 @@ case "$operation" in
     jq -e '.variables.TEST_WORK!=null and .variables.FM_V2_ACTIVATION==null and .variables.OPENCODE_SESSION_ID==null and .variables.OPENCODE_PASSWORD==null and .variables.OPENCODE_SERVER_PASSWORD==null' <<< "$body" >/dev/null
     echo environment >> "$TEST_LOG"
     case "${TEST_META_RACE:-}" in remove) rm -f "${TEST_RECORD%.opencode-v2-session.json}.meta" ;; replace) echo replacement > "${TEST_RECORD%.opencode-v2-session.json}.meta" ;; esac ;;
-  session.get) jq -cn --arg dir "$TEST_WORK" '{data:{id:"ses_worker_exact",location:{directory:$dir},model:{providerID:"fixture",id:"test-model",variant:"default"}}}' ;;
-  session.active) if [ -e "$TEST_LOG.cancelled" ]; then echo '{"data":{}}'; else echo '{"data":{"ses_worker_exact":{"type":"running"}}}'; fi ;;
+  session.get)
+    [ -z "${TEST_SESSION_MISSING:-}" ] || { echo 'HTTP 404 Not Found' >&2; exit 1; }
+    [ -z "$session_param" ] || [ "$session_param" = sessionID=ses_worker_exact ] || exit 95
+    model=$(cat "$TEST_LOG.model" 2>/dev/null || echo '{"providerID":"fixture","id":"test-model","variant":"default"}')
+    jq -cn --arg dir "$TEST_WORK" --argjson model "$model" '{data:{id:"ses_worker_exact",location:{directory:$dir},model:$model}}' ;;
+  session.active) if [ "${TEST_ACTIVE:-}" = idle ] || [ -e "$TEST_LOG.cancelled" ]; then echo '{"data":{}}'; else echo '{"data":{"ses_worker_exact":{"type":"running"}}}'; fi ;;
   session.interrupt) : > "$TEST_LOG.cancelled"; echo '{"interrupted":true}' ;;
   *) exit 96 ;;
 esac
@@ -109,6 +118,79 @@ for model in default explicit variant configured configured-object; do
   jq -e --arg variant "$expected" '.sessionID=="ses_worker_exact" and .model.variant==$variant' "$TEST_RECORD" >/dev/null || fail "incorrect $model variant record"
   pass "$model worker shares service, records exact session/model, strips activation and admits before attachment"
 done
+
+# --resume (fm-spawn --relaunch) continues the exact recorded session instead
+# of creating one: same session, same binding, the brief admitted as a queued
+# prompt, and the TUI attached to it. Each case starts from a fresh launch so
+# the recorded binding names this stand-in's exact incarnation.
+fresh_binding() {
+  rm -f "$TEST_RECORD" "$TEST_LOG.model"
+  : > "$TEST_LOG"
+  (cd "$TEST_WORK" && "$ROOT/bin/fm-opencode-v2-launch.sh" --model fixture/test-model --prompt 'exact worker brief' --session-record "$TEST_RECORD" < "$TMP_ROOT/input") \
+    || fail 'fixture: fresh worker launch before a resume case'
+  : > "$TEST_LOG"
+}
+resume_launch() {  # [launcher args...]
+  (cd "$TEST_WORK" && TEST_ACTIVE="${TEST_ACTIVE:-idle}" "$ROOT/bin/fm-opencode-v2-launch.sh" --resume "$@" \
+    --prompt 'exact worker brief' --session-record "$TEST_RECORD" < "$TMP_ROOT/input")
+}
+unset TEST_CONFIGURED TEST_CONFIGURED_OBJECT
+fresh_binding
+before=$(jq -c . "$TEST_RECORD")
+resume_launch 2> "$TMP_ROOT/resume.err" || fail "an idle recorded session should resume: $(cat "$TMP_ROOT/resume.err")"
+[ "$(cat "$TEST_LOG")" = $'environment\nadmitted\nattached' ] \
+  || fail "resume must admit to and attach the recorded session without creating one, got: $(tr '\n' ' ' < "$TEST_LOG")"
+[ "$(jq -c . "$TEST_RECORD")" = "$before" ] || fail 'resume must keep the exact session binding'
+[ ! -s "$TMP_ROOT/resume.err" ] || fail "a successful resume must not announce a fallback: $(cat "$TMP_ROOT/resume.err")"
+pass 'resume admits the brief to the idle recorded session and attaches it without creating another'
+
+fresh_binding
+resume_launch --model fixture/test-model || fail 'resume with the recorded model'
+assert_not_contains "$(cat "$TEST_LOG")" switched 'resume with the session model must not switch it'
+fresh_binding
+resume_launch --model 'fixture/test-model#high' || fail 'resume with a new variant'
+[ "$(cat "$TEST_LOG")" = $'switched\nenvironment\nadmitted\nattached' ] \
+  || fail "a requested model change must switch the resumed session before admission, got: $(tr '\n' ' ' < "$TEST_LOG")"
+jq -e '.sessionID=="ses_worker_exact" and .model.variant=="high"' "$TEST_RECORD" >/dev/null \
+  || fail 'the binding must record the switched model the service reports'
+pass 'resume keeps the session model unless a different one is requested, then switches it natively'
+
+fresh_binding
+if TEST_ACTIVE=running resume_launch 2> "$TMP_ROOT/resume-busy.err"; then
+  fail 'resume must refuse a recorded session that is still executing'
+fi
+assert_contains "$(cat "$TMP_ROOT/resume-busy.err")" 'is executing' 'the refusal must name the live execution'
+assert_not_contains "$(cat "$TEST_LOG")" admitted 'an executing session must not receive a second brief'
+assert_not_contains "$(cat "$TEST_LOG")" attached 'an executing session must not gain another TUI'
+pass 'resume refuses a recorded session with active execution instead of joining it'
+
+for broken in incarnation location missing absent; do
+  fresh_binding
+  case "$broken" in
+    incarnation) jq -c '.serviceStart = "1"' "$TEST_RECORD" > "$TEST_RECORD.tmp" ;;
+    location) jq -c '.location.directory = "/elsewhere"' "$TEST_RECORD" > "$TEST_RECORD.tmp" ;;
+  esac
+  if [ -f "$TEST_RECORD.tmp" ]; then
+    chmod 600 "$TEST_RECORD.tmp"
+    mv "$TEST_RECORD.tmp" "$TEST_RECORD"
+  fi
+  [ "$broken" != absent ] || rm -f "$TEST_RECORD"
+  if [ "$broken" = missing ]; then
+    TEST_SESSION_MISSING=1 resume_launch 2> "$TMP_ROOT/resume-$broken.err" || fail "$broken binding should fall back to a fresh session"
+  else
+    resume_launch 2> "$TMP_ROOT/resume-$broken.err" || fail "$broken binding should fall back to a fresh session"
+  fi
+  [ "$(cat "$TEST_LOG")" = $'created\nenvironment\nadmitted\nattached' ] \
+    || fail "$broken binding must fall back to the ordinary fresh worker, got: $(tr '\n' ' ' < "$TEST_LOG")"
+  jq -e --arg dir "$TEST_WORK" '.sessionID=="ses_worker_exact" and .location.directory==$dir and .serviceStart != "1"' "$TEST_RECORD" >/dev/null \
+    || fail "$broken fallback must republish a binding for the session it created"
+  if [ "$broken" = absent ]; then
+    [ ! -s "$TMP_ROOT/resume-$broken.err" ] || fail 'a relaunch with no recorded session has nothing to announce'
+  else
+    assert_contains "$(cat "$TMP_ROOT/resume-$broken.err")" 'starting a fresh session' "$broken fallback must be announced"
+  fi
+done
+pass 'resume falls back to a fresh session when the binding names another incarnation, worktree or a missing session'
 
 for race in remove replace; do
   printf '%s\n' task-fixture > "$TMP_ROOT/worker.meta"
