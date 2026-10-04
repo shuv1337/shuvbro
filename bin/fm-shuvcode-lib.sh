@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Shuvcode (OpenCode V2 fork) process identity.
-# Sourced by bin/fm-harness.sh and bin/fm-session-lock-lib.sh.
+# Sourced by bin/fm-harness.sh, bin/fm-session-lock-lib.sh, and
+# bin/fm-opencode-v2-lead.sh.
 # This file is sourced by scripts and has no side effects on source.
 #
 # Why one owner: shuvcode is a V2 OpenCode fork distributed under its own
@@ -103,4 +104,64 @@ fm_shuvcode_process_matches() {  # <comm> <args> [argv0]
 # identifies the tool runtime even though it is excluded from lock ancestry.
 fm_shuvcode_runtime_matches() {
   fm_shuvcode_process_matches "$1" "${2/--service/}" "${3:-}"
+}
+
+# True when path $1 is an executable Linux ELF file - the only shape explicit
+# V2 lead activation can exec while keeping its own PID.
+fm_shuvcode_is_native_executable() {  # <path>
+  [ -f "$1" ] && [ -x "$1" ] && [ "$(head -c 4 -- "$1" 2>/dev/null)" = $'\177ELF' ]
+}
+
+# Print the installed native shuvcode executable for explicit V2 lead
+# activation, or return 1. The npm `shuvcode` command is a node launcher that
+# forks the platform binary as a child, so activation must exec that binary
+# directly. Resolution inspects paths and never executes a shuvcode binary:
+#   1. FM_OPENCODE_V2_BIN, when set, is the only candidate.
+#   2. `shuvcode` on PATH, when it already resolves to a native executable.
+#   3. The launcher's platform packages, nested (<pkg>/node_modules) or hoisted
+#      (sibling of <pkg>), in the launcher's own preference order: baseline
+#      first on x64 without AVX2, musl first on a musl host.
+fm_shuvcode_native_binary() {
+  local launcher dir arch base root name
+  local -a names
+  if [ -n "${FM_OPENCODE_V2_BIN:-}" ]; then
+    fm_shuvcode_is_native_executable "$FM_OPENCODE_V2_BIN" || return 1
+    readlink -f -- "$FM_OPENCODE_V2_BIN"
+    return
+  fi
+  launcher=$(command -v shuvcode 2>/dev/null) || return 1
+  launcher=$(readlink -f -- "$launcher") || return 1
+  if fm_shuvcode_is_native_executable "$launcher"; then
+    printf '%s\n' "$launcher"
+    return 0
+  fi
+  [ "$(uname -s)" = Linux ] || return 1
+  case "$(uname -m)" in
+    x86_64|amd64) arch=x64 ;;
+    aarch64|arm64) arch=arm64 ;;
+    *) return 1 ;;
+  esac
+  base=shuvcode-linux-$arch
+  if [ "$arch" = x64 ] && ! grep -qw avx2 /proc/cpuinfo 2>/dev/null; then
+    names=("$base-baseline" "$base")
+  else
+    names=("$base" "$base-baseline")
+  fi
+  # The launcher's own musl test: the C library ldd reports, not whether a
+  # musl loader merely happens to be installed beside glibc.
+  if ldd --version 2>&1 | grep -qi musl; then
+    names=("${names[@]/%/-musl}" "${names[@]}")
+  else
+    names=("${names[@]}" "${names[@]/%/-musl}")
+  fi
+  dir=$(dirname -- "$launcher")
+  for name in "${names[@]}"; do
+    for root in "$dir/../node_modules" "$dir/../.."; do
+      if fm_shuvcode_is_native_executable "$root/$name/bin/shuvcode"; then
+        readlink -f -- "$root/$name/bin/shuvcode"
+        return
+      fi
+    done
+  done
+  return 1
 }

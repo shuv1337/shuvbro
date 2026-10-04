@@ -6,7 +6,8 @@ When this session owns supervision and away mode is not active:
 1. Drain first with `bin/fm-wake-drain.sh`.
    After handling all emitted wakes and reconciling open decisions and unread status lines, run the exact `--ack-through` command printed as `WAKE_ACK_REQUIRED`; until then the work remains durable for idempotent re-handling after interruption.
 2. First cycle: let `.opencode/plugins/fm-native-v2/tui.js` reconcile the explicit lead claim and arm after canonical session startup acquires the home lock.
-3. Explicit activation uses `bin/fm-opencode-v2-primary.sh`; its help owns launch mechanics.
+3. Explicit activation uses `bin/fm-opencode-v2-primary.sh`; its help owns launch mechanics, and `bin/fm-opencode-v2-lead.sh` is the default launcher that resolves the session and native executable for it.
+   A plain `shuvcode` launch is never activated, so its session start refuses the fleet lock and names this relaunch.
    The installed Linux native executable is required, rather than the npm wrapper that forks a different PID.
    Install the pinned runtime with `npm ci --prefix .opencode/plugins` before activation.
 4. Ownership is one immutable TUI process/start token, exact root session, frozen home/state/config tuple and verified execution-service incarnation.

@@ -272,7 +272,8 @@ family_for_basename() {
     fm-supervision-instructions.test.sh|fm-task-delivery.test.sh|\
     fm-tmux-submit-busy.test.sh|fm-trace-context-lib.test.sh|\
     fm-transition-lib.test.sh|\
-    fm-test-run.test.sh|fm-test-isolation-proof.test.sh)
+    fm-test-run.test.sh|fm-test-isolation-proof.test.sh|\
+    fm-opencode-v2-lead.test.sh)
       printf '%s\n' pure-contract-unit
       ;;
     fm-daemon.test.sh|fm-guard-stale-banner.test.sh|fm-opencode-v2-plugin.test.sh|fm-opencode-v2-launch.test.sh|fm-pi-watch-extension.test.sh|\
@@ -1453,6 +1454,10 @@ families_for_changed_path() {
     bin/fm-shuvcode-lib.sh)
       printf '%s\n' "__script__:fm-harness-shuvcode.test.sh"
       printf '%s\n' "__script__:fm-session-lock-ancestry.test.sh"
+      printf '%s\n' "__script__:fm-opencode-v2-lead.test.sh"
+      ;;
+    bin/fm-opencode-v2-lead.sh)
+      printf '%s\n' "__script__:fm-opencode-v2-lead.test.sh"
       ;;
     bin/fm-spawn.sh|bin/fm-send.sh|bin/fm-harness.sh|\
     bin/fm-peek.sh|bin/fm-composer*)

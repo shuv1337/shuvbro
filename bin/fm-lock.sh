@@ -33,7 +33,20 @@ if [ "${1:-}" = "status" ]; then
   exit 0
 fi
 
-me=$(fm_harness_ancestry_pid) || { echo "error: cannot locate harness process in ancestry" >&2; exit 1; }
+# An unactivated OpenCode V2 lead (return 3) must name the activation it is
+# missing, not a process-detection failure: its model shell runs under the
+# shared service, which no ancestry walk may climb through.
+v2_unactivated_error() {
+  local session=${OPENCODE_SESSION_ID:-} binary
+  [[ "$session" =~ ^ses_[A-Za-z0-9_-]+$ ]] || session='<session-id>'
+  binary=$(fm_shuvcode_native_binary 2>/dev/null) || binary='<installed-native-shuvcode-executable>'
+  echo "error: OpenCode V2 lead is not activated for session $session, so it cannot own this home's fleet lock; exit this client and relaunch with $SCRIPT_DIR/fm-opencode-v2-lead.sh --session $session (equivalent: $SCRIPT_DIR/fm-opencode-v2-primary.sh --session $session --native-binary $binary)" >&2
+}
+me=$(fm_harness_ancestry_pid) || {
+  rc=$?
+  if [ "$rc" -eq 3 ]; then v2_unactivated_error; else echo "error: cannot locate harness process in ancestry" >&2; fi
+  exit 1
+}
 probe=$(mktemp "$STATE/.lock-write.XXXXXX" 2>/dev/null) || {
   echo "error: cannot write session lock; operate read-only until resolved" >&2
   exit 1
