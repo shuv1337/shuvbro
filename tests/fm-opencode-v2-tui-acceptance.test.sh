@@ -66,9 +66,8 @@ helper_step() { jq -nc --argjson p "{\"PATH\":\"$PATH\"}" '{do: "shell", command
 owned_and_armed() {  # <lock-step-json>: steps until the owner holds .lock and a watcher is live
   jq -nc --argjson l "$1" '[{do: "wait", until: "admitted", match: "fm-session-start"}, $l, {do: "wait", until: "lock"}, {do: "wait", until: "watcher"}]'
 }
-# Count fm-watch.sh processes serving this home (singleton evidence). A forked
-# command-substitution subshell of a watcher shares its cmdline and environ,
-# so a process whose parent has the identical cmdline is not a watcher.
+# Count fm-watch.sh processes serving this home (singleton evidence).
+# tests/assets/fm-watch-count.mjs owns the subshell-exclusion and stable-rescan rules.
 watchers_step() {
   jq -nc --arg n "$V2_NODE_BIN" --arg h "$ROOT/tests/assets/fm-watch-count.mjs" --arg s "$HOME_DIR/state" \
     '{do: "shell", command: ([$n, $h, $s] | map(@sh) | join(" "))}'
