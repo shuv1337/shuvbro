@@ -1,0 +1,4 @@
+config-path line: HERDR_SHELL_CONFIG=${HERDR_CONFIG_PATH:-${XDG_CONFIG_HOME:-$HOME/.config}/herdr/config.toml}
+env: HERDR_CONFIG_PATH=/x/explicit.toml XDG_CONFIG_HOME=/xdg -> /x/explicit.toml
+env: XDG_CONFIG_HOME=/xdg                               -> /xdg/herdr/config.toml
+env: <neither set>                                      -> /home/u/.config/herdr/config.toml

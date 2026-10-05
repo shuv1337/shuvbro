@@ -1,0 +1,24 @@
+== base commit (4dbf0f5) hardcoded-zsh assertion ==
+BASE old  bash-login host, no default_shell (papercut repro)         fg=bash  exit=1
+BASE old  zsh host                                                   fg=zsh   exit=0
+== changed fixture (828568966) ==
+PASS new  bash-login host, no herdr config (papercut)                SHELL=/bin/bash      fg=bash  exit=0 expected=0
+PASS new  zsh login host, no config                                  SHELL=/usr/bin/zsh   fg=zsh   exit=0 expected=0
+PASS new  config without [terminal]                                  SHELL=/bin/bash      fg=bash  exit=0 expected=0
+PASS new  default_shell=zsh overrides SHELL=bash                     SHELL=/bin/bash      fg=zsh   exit=0 expected=0
+PASS new  default_shell abs path /usr/bin/fish                       SHELL=/bin/bash      fg=fish  exit=0 expected=0
+PASS new  single-quoted default_shell                                SHELL=/usr/bin/zsh   fg=bash  exit=0 expected=0
+PASS new  inline comment on value                                    SHELL=/bin/bash      fg=zsh   exit=0 expected=0
+PASS new  commented section header                                   SHELL=/bin/bash      fg=zsh   exit=0 expected=0
+PASS new  commented-out default_shell ignored                        SHELL=/bin/bash      fg=bash  exit=0 expected=0
+PASS new  empty default_shell falls back to SHELL                    SHELL=/bin/bash      fg=bash  exit=0 expected=0
+PASS new  default_shell under other section ignored                  SHELL=/bin/bash      fg=bash  exit=0 expected=0
+PASS new  SHELL unset, no config -> /bin/sh                          SHELL=<unset>        fg=sh    exit=0 expected=0
+PASS new  non-allowlisted shell (nu) accepted                        SHELL=/usr/bin/nu    fg=nu    exit=0 expected=0
+== adversarial: mismatch must still fail ==
+PASS new  SHELL=bash but fg=zsh (wrong shell)                        SHELL=/bin/bash      fg=zsh   exit=1 expected=1
+      stderr: not ok - after exit the sole nested foreground process was not bash
+PASS new  default_shell=zsh but fg=bash                              SHELL=/bin/bash      fg=bash  exit=1 expected=1
+      stderr: not ok - after exit the sole nested foreground process was not zsh
+PASS new  harness still in fg (fg=node)                              SHELL=/bin/bash      fg=node  exit=1 expected=1
+      stderr: not ok - after exit the sole nested foreground process was not bash
