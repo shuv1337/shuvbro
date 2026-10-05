@@ -70,6 +70,21 @@ try {
     assert.ok(parentReadStarted && fired, "must remove the parent during the subshell parent read");
     assert.ok(scans >= 3, "must invalidate the vanished-parent sample");
   });
+  await test("a parent vanishing on every scan never counts its subshell as a root", async ({ procRoot, options }) => {
+    let subshellEnvironReads = 0;
+    let parentFailures = 0;
+    options.list = (path) => { subshellEnvironReads = 0; return readdirSync(path); };
+    options.read = (path, encoding) => {
+      if (path === join(procRoot, "21/environ")) subshellEnvironReads++;
+      if (subshellEnvironReads >= 2 && path === join(procRoot, "20/stat")) {
+        parentFailures++;
+        throw Object.assign(new Error("gone"), { code: "ENOENT" });
+      }
+      return readFileSync(path, encoding);
+    };
+    await assert.rejects(countWatchers(home, { ...options, attempts: 3 }), /did not stabilize after 3 scans/);
+    assert.equal(parentFailures, 3, "every scan must reach the subshell parent read");
+  });
   await test("a vanished candidate is tolerated", async ({ procRoot, options }) => {
     let fired = false;
     options.read = (path, encoding) => {
