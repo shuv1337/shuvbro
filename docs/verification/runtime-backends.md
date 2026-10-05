@@ -1612,7 +1612,19 @@ The test runs relocated XDG native paths, a disposable registered shared service
 Its second and third results are the live guard for `bin/fm-control.sh` on opencode-v2: the tmux classifier attributed the real worker processes, `exit` reported `native-session=idle`, and `relaunch` kept the recorded session ID, the endpoint and the worktree while the resumed worker acted on its progress note.
 Only Treehouse allocation is replaced with entry into the disposable worktree.
 The guard requires configured model credentials and is opt-in, outside portable CI.
-Herdr was not exercised live for these control paths; its process-based opencode-v2 endpoint read is covered by `tests/fm-backend-herdr.test.sh`, `tests/fm-control.test.sh`, and the real-binary `tests/fm-control-herdr-smoke.test.sh` lab case.
+Herdr's real Treehouse path was verified on 2026-10-04 at 15:17 PDT on Linux with Herdr 0.9.1-shuv.5+ecb35624bc44, Treehouse 2.0.0, and shuvcode v2.0.22-shuv.1:
+
+```sh
+FM_CONTROL_HERDR_V2_LIVE=1 bin/fm-test-run.sh tests/fm-control-herdr-v2-live-e2e.test.sh
+```
+
+```text
+ok - shuvcode v2.0.22-shuv.1: real Herdr/Treehouse nested-shell exit, in-place relaunch and second exit
+```
+
+After exit, the sole foreground process was `zsh -l`, with a foreground process-group ID different from the pane shell PID; the recorded native session was idle and relaunch completed in the same pane and Treehouse worktree.
+This opt-in guard uses the named-session helper's default-session tripwire, isolated XDG service and worker registry settings, and lab-only `MISE_YES=1`, never global mise trust changes.
+The stale-registration harness switch (refused without, and confirmed only by, the target adapter's own foreground process), matching-adapter `unknown` startup status, and recorded-harness consumers have portable regressions in `tests/fm-control-relaunch.test.sh`, `tests/fm-backend-herdr.test.sh`, `tests/fm-crew-state.test.sh`, and `tests/fm-task-inbox.test.sh`.
 The same day, a read-only `fm_backend_agent_state herdr <session>:<pane> opencode-v2` against a running shuvcode worker pane on Herdr 0.9.1-shuv.5 printed `alive` from its three foreground processes (owner attach wrapper, node launcher, compiled `shuvcode` binary).
 
 The installed root TUI rejects `--model`; its `mini --model` path did not honor

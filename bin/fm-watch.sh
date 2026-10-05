@@ -420,7 +420,7 @@ inbox_steer_check() {  # <window> <task>
       ;;
   esac
   backend=$(window_backend "$w")
-  agent_state=$(fm_backend_agent_state "$backend" "$w" 2>/dev/null || true)
+  agent_state=$(fm_backend_agent_state "$backend" "$w" "$(window_harness "$w")" 2>/dev/null || true)
   case "$agent_state" in
     dead|missing)
       inbox_steer_escalate_unavailable "$w" "$task" "$rec"
@@ -434,7 +434,7 @@ inbox_steer_check() {  # <window> <task>
   case "$verb" in
     ring)
       ring_rc=0
-      fm_task_inbox_ring "$backend" "$w" "$rec" "$(window_label "$w")" || ring_rc=$?
+      fm_task_inbox_ring "$backend" "$w" "$rec" "$(window_label "$w")" "$(window_harness "$w")" || ring_rc=$?
       if [ "$ring_rc" -eq 3 ]; then
         inbox_steer_escalate_unavailable "$w" "$task" "$rec"
         return 0

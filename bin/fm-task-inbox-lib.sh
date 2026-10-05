@@ -282,9 +282,9 @@ fm_task_inbox_doorbell_line() {  # <record-path>
 # CONSTANT line the worker recovers semantically, while skipping on ambiguous
 # verdicts would starve a harness whose idle screen the classifier cannot
 # positively identify (that classifier is advisory here by design).
-fm_task_inbox_ring() {  # <backend> <target> <record-path> [expected-label]
-  local backend=$1 target=$2 rec=$3 label=${4:-} line cstate verdict
-  case "$(fm_backend_agent_state "$backend" "$target" 2>/dev/null || true)" in
+fm_task_inbox_ring() {  # <backend> <target> <record-path> [expected-label] [harness]
+  local backend=$1 target=$2 rec=$3 label=${4:-} harness=${5:-} line cstate verdict
+  case "$(fm_backend_agent_state "$backend" "$target" "$harness" 2>/dev/null || true)" in
     dead|missing) return 3 ;;
   esac
   if ! line=$(fm_task_inbox_doorbell_line "$rec"); then

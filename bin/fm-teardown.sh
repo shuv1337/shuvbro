@@ -966,7 +966,7 @@ MODE=$(grep '^mode=' "$META" | cut -d= -f2- || true)
 # passed, immediately before the close marker binds to it, so any refusal
 # leaves the record byte-identical.
 if [ "$TEARDOWN_LEGACY_PENDING" = 1 ]; then
-  TEARDOWN_LEGACY_ENDPOINT=$(fm_backend_agent_state "$BACKEND" "$T")
+  TEARDOWN_LEGACY_ENDPOINT=$(fm_backend_agent_state "$BACKEND" "$T" "$(fm_meta_get "$META" harness)")
   case "$TEARDOWN_LEGACY_ENDPOINT" in
     dead|missing) ;;
     *)
