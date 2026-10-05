@@ -1,0 +1,16 @@
+=== $ fm-peek.sh t1 40   (stub herdr server: running)
+exit code: 0
+--- stdout:
+codex> working on task t1--- stderr:
+--- herdr calls (deduped):
+      1 status --json --session default
+      1 pane read w1:p2 --source recent --lines 200 --session default
+=== $ fm-peek.sh t1 40   (stub herdr server: down)
+exit code: 1
+--- stdout:
+--- stderr:
+error: herdr server for session 'default' did not report running within 10s
+--- herdr calls (deduped):
+      1 status --json --session default
+      1 server --session default
+     20 status --json --session default

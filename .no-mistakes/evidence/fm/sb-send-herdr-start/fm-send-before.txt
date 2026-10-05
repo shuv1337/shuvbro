@@ -1,0 +1,86 @@
+=== [before-fix b952627] $ fm-send.sh t1 'please continue'  (code: before-fix b952627)
+exit code: 0
+--- stdout:
+--- stderr:
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the requested message WILL still be sent.
+●  watcher supervision needs Stop-owned automatic recovery; inspect the hook registration and startup status before ending the turn.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+fm-send: doorbell did not reach default:w1:p2; the steer is durably recorded at /home/shuv/.cache/agent-ws/fmsend.qp9C9H/state/t1.inbox/001.msg and the watcher will re-ring
+--- inbox record:
+schema=fm-task-inbox.v1
+at=2026-10-05T21:15:11Z
+--
+please continue--- herdr calls made by fm-send:
+pane get w1:p2 --session default
+agent get w1:p2 --session default
+status --json --session default
+server --session default
+status --json --session default
+status --json --session default
+status --json --session default
+status --json --session default
+status --json --session default
+status --json --session default
+status --json --session default
+status --json --session default
+status --json --session default
+status --json --session default
+status --json --session default
+status --json --session default
+status --json --session default
+status --json --session default
+status --json --session default
+status --json --session default
+status --json --session default
+status --json --session default
+status --json --session default
+status --json --session default
+status --json --session default
+server --session default
+status --json --session default
+status --json --session default
+status --json --session default
+status --json --session default
+status --json --session default
+status --json --session default
+status --json --session default
+status --json --session default
+status --json --session default
+status --json --session default
+status --json --session default
+status --json --session default
+status --json --session default
+status --json --session default
+status --json --session default
+status --json --session default
+status --json --session default
+status --json --session default
+status --json --session default
+status --json --session default
+status --json --session default
+server --session default
+status --json --session default
+status --json --session default
+status --json --session default
+status --json --session default
+status --json --session default
+status --json --session default
+status --json --session default
+status --json --session default
+status --json --session default
+status --json --session default
+status --json --session default
+status --json --session default
+status --json --session default
+status --json --session default
+status --json --session default
+status --json --session default
+status --json --session default
+status --json --session default
+status --json --session default
+status --json --session default
+--- 'herdr server' invocations: 3

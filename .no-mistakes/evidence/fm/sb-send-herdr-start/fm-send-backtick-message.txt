@@ -1,0 +1,18 @@
+=== [after-fix 35d22e3, backticked text in message] $ fm-send.sh t1 'run `herdr server` only if asked'  (code: after-fix 35d22e3, backticked text in message)
+exit code: 0
+--- stdout:
+--- stderr:
+--- inbox record:
+schema=fm-task-inbox.v1
+at=2026-10-05T21:15:19Z
+--
+run `herdr server` only if asked--- herdr calls made by fm-send:
+pane get w1:p2 --session default
+agent get w1:p2 --session default
+pane read w1:p2 --source recent --lines 200 --format ansi --session default
+pane send-text w1:p2 : Firstmate instruction waiting: list '/home/shuv/.cache/agent-ws/fmsend.65Qdj6/state/t1.inbox'/*.msg and, in numeric order, read and act on each, then mv each handled file to '/home/shuv/.cache/agent-ws/fmsend.65Qdj6/state/t1.inbox'/handled/. --session default
+agent get w1:p2 --session default
+pane send-keys w1:p2 enter --session default
+agent get w1:p2 --session default
+pane read w1:p2 --source recent --lines 200 --format ansi --session default
+--- 'herdr server' invocations: 0

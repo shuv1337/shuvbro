@@ -21,10 +21,10 @@ exit 0
 SH
 printf '#!/usr/bin/env bash\nexit 0\n' > "$W/fakebin/sleep"
 chmod +x "$W/fakebin/"*
-echo "=== [$LABEL] \$ fm-send.sh t1 'please continue'  (code: $LABEL)"
+echo "=== [$LABEL] \$ fm-send.sh t1 'run \`herdr server\` only if asked'  (code: $LABEL)"
 FM_GATE_REFUSE_BYPASS=1 PATH="$W/fakebin:$PATH" FM_HOME="$W" FM_ROOT_OVERRIDE="$W" FM_STATE_OVERRIDE="$state" \
   FM_HERDR_LOG="$W/herdr.log" FM_SEND_SETTLE=0 FM_BACKEND_HERDR_SUBMIT_MIN_SLEEP=0 FM_BACKEND_HERDR_SUBMIT_POLLS=1 \
-  "$ROOT/bin/fm-send.sh" t1 'please continue' >"$W/out" 2>"$W/err"
+  "$ROOT/bin/fm-send.sh" t1 'run `herdr server` only if asked' >"$W/out" 2>"$W/err"
 echo "exit code: $?"
 echo "--- stdout:"; cat "$W/out"
 echo "--- stderr:"; cat "$W/err"

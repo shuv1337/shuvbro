@@ -1,0 +1,25 @@
+=== [after-fix 35d22e3] $ fm-send.sh t1 'please continue'  (code: after-fix 35d22e3)
+exit code: 0
+--- stdout:
+--- stderr:
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the requested message WILL still be sent.
+●  watcher supervision needs Stop-owned automatic recovery; inspect the hook registration and startup status before ending the turn.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+--- inbox record:
+schema=fm-task-inbox.v1
+at=2026-10-05T21:15:11Z
+--
+please continue--- herdr calls made by fm-send:
+pane get w1:p2 --session default
+agent get w1:p2 --session default
+pane read w1:p2 --source recent --lines 200 --format ansi --session default
+pane send-text w1:p2 : Firstmate instruction waiting: list '/home/shuv/.cache/agent-ws/fmsend.VpGTAS/state/t1.inbox'/*.msg and, in numeric order, read and act on each, then mv each handled file to '/home/shuv/.cache/agent-ws/fmsend.VpGTAS/state/t1.inbox'/handled/. --session default
+agent get w1:p2 --session default
+pane send-keys w1:p2 enter --session default
+agent get w1:p2 --session default
+pane read w1:p2 --source recent --lines 200 --format ansi --session default
+--- 'herdr server' invocations: 0
