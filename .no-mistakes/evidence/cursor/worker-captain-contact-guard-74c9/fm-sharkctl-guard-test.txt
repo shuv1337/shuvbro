@@ -1,0 +1,11 @@
+ok - FM_TASK_ID set: sharkctl notify ask refuses and does not call sharkctl
+ok - FM_TASK_ID set: ask refuses, other verbs delegate, flags do not hide notify
+ok - FM_TASK_ID unset: sharkctl notify ask reaches the next sharkctl
+ok - two guard aliases skip each other and delegate allowed and unmarked invocations once
+ok - two separate guard copies delegate allowed and unmarked invocations once and still refuse notify
+ok - spawned ship and scout environments refuse sharkctl notify ask
+ok - filtered launch keeps the guard and refuses sharkctl notify ask
+
+real	0m6.185s
+user	0m0.868s
+sys	0m0.598s

@@ -1,0 +1,14 @@
+== demo-ship brief.md (excerpt) ==
+66:8. Never contact the captain.
+67-   Do not run `sharkctl`, and do not use any other notification, email, chat, or phone tool.
+68-   Do not address the captain in a pull request or an issue.
+69-   Every question goes to firstmate as a keyed status line (`needs-decision [key=<slug>]: {the question}`), then stop.
+70-
+
+== demo-scout brief.md (excerpt) ==
+58:8. Never contact the captain.
+59-   Do not run `sharkctl`, and do not use any other notification, email, chat, or phone tool.
+60-   Do not address the captain in a pull request or an issue.
+61-   Every question goes to firstmate as a keyed status line (`needs-decision [key=<slug>]: {the question}`), then stop.
+62-
+

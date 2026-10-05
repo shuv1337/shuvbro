@@ -1,0 +1,46 @@
+== S1 worker notify/ask refused (FM_TASK_ID set, guard first on PATH) ==
+$ FM_TASK_ID=demo-task PATH=/home/shuv/.no-mistakes/worktrees/8a7692f99431/01M450J5E51QAC6VY5MMTC8RZX/bin/worker-guards:/tmp/tmp.T9u6achzer/decoy:/usr/bin:/bin sharkctl notify 'hi captain'
+error: task worker FM_TASK_ID=demo-task must not contact the captain with sharkctl notify; send the question to firstmate as a keyed status line
+[rc=1]
+
+$ FM_TASK_ID=demo-task PATH=/home/shuv/.no-mistakes/worktrees/8a7692f99431/01M450J5E51QAC6VY5MMTC8RZX/bin/worker-guards:/tmp/tmp.T9u6achzer/decoy:/usr/bin:/bin sharkctl --json ask 'ok?'
+error: task worker FM_TASK_ID=demo-task must not contact the captain with sharkctl ask; send the question to firstmate as a keyed status line
+[rc=1]
+
+$ FM_TASK_ID=demo-task PATH=/home/shuv/.no-mistakes/worktrees/8a7692f99431/01M450J5E51QAC6VY5MMTC8RZX/bin/worker-guards:/tmp/tmp.T9u6achzer/decoy:/usr/bin:/bin sharkctl notify ask
+error: task worker FM_TASK_ID=demo-task must not contact the captain with sharkctl notify; send the question to firstmate as a keyed status line
+[rc=1]
+
+== S2 worker allowed verb delegates ==
+$ FM_TASK_ID=demo-task PATH=/home/shuv/.no-mistakes/worktrees/8a7692f99431/01M450J5E51QAC6VY5MMTC8RZX/bin/worker-guards:/tmp/tmp.T9u6achzer/decoy:/usr/bin:/bin sharkctl devices list
+DECOY REACHED: devices list (REST=/usr/bin:/bin)
+[rc=0]
+
+== S3 unmarked (lead) notify delegates ==
+$ env -u FM_TASK_ID PATH=/home/shuv/.no-mistakes/worktrees/8a7692f99431/01M450J5E51QAC6VY5MMTC8RZX/bin/worker-guards:/tmp/tmp.T9u6achzer/decoy:/usr/bin:/bin sharkctl notify 'from lead'
+DECOY REACHED: notify from lead (REST=/usr/bin:/bin)
+[rc=0]
+
+== S4 adversarial: two differently named symlink aliases before decoy (issue #36 P2) ==
+$ FM_TASK_ID=demo-task PATH=/tmp/tmp.T9u6achzer/links/l1:/tmp/tmp.T9u6achzer/links/l2:/tmp/tmp.T9u6achzer/decoy:/usr/bin:/bin timeout 5 sharkctl devices list
+DECOY REACHED: devices list (REST=/usr/bin:/bin)
+[rc=0]
+
+== S5 adversarial: two distinct copies a,b before decoy (review round 1 loop) ==
+$ env -u FM_TASK_ID PATH=/tmp/tmp.T9u6achzer/a:/tmp/tmp.T9u6achzer/b:/tmp/tmp.T9u6achzer/decoy:/usr/bin:/bin timeout 5 sharkctl devices list
+DECOY REACHED: devices list (REST=/usr/bin:/bin)
+[rc=0]
+
+$ FM_TASK_ID=demo-task PATH=/tmp/tmp.T9u6achzer/a:/tmp/tmp.T9u6achzer/b:/home/shuv/.no-mistakes/worktrees/8a7692f99431/01M450J5E51QAC6VY5MMTC8RZX/bin/worker-guards:/tmp/tmp.T9u6achzer/decoy:/usr/bin:/bin timeout 5 sharkctl status
+DECOY REACHED: status (REST=/usr/bin:/bin)
+[rc=0]
+
+$ FM_TASK_ID=demo-task PATH=/tmp/tmp.T9u6achzer/a:/tmp/tmp.T9u6achzer/b:/tmp/tmp.T9u6achzer/decoy:/usr/bin:/bin timeout 5 sharkctl notify x
+error: task worker FM_TASK_ID=demo-task must not contact the captain with sharkctl notify; send the question to firstmate as a keyed status line
+[rc=1]
+
+== S6 adversarial: only guard copies on PATH, no real CLI -> terminates with 127 ==
+$ env -u FM_TASK_ID PATH=/tmp/tmp.T9u6achzer/a:/tmp/tmp.T9u6achzer/b:/home/shuv/.no-mistakes/worktrees/8a7692f99431/01M450J5E51QAC6VY5MMTC8RZX/bin/worker-guards:/usr/bin:/bin timeout 5 sharkctl devices list
+error: sharkctl: command not found
+[rc=127]
+
