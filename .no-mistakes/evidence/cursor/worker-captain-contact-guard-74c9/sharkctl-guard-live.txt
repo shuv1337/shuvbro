@@ -1,0 +1,47 @@
+== Scenario 1: worker pane (FM_TASK_ID set) refuses notify/ask via PATH guard ==
+$ PATH=/home/shuv/.no-mistakes/worktrees/8a7692f99431/01M44XPQ95WQV8759ZA531C2GW/bin/worker-guards:/tmp/tmp.fOo09jNEiW/real:/usr/bin:/bin FM_TASK_ID=demo-task timeout 5 sharkctl notify 'hi captain'
+error: task worker FM_TASK_ID=demo-task must not contact the captain with sharkctl notify; send the question to firstmate as a keyed status line
+[exit 1]
+
+$ PATH=/home/shuv/.no-mistakes/worktrees/8a7692f99431/01M44XPQ95WQV8759ZA531C2GW/bin/worker-guards:/tmp/tmp.fOo09jNEiW/real:/usr/bin:/bin FM_TASK_ID=demo-task timeout 5 sharkctl --verbose ask 'q?'
+error: task worker FM_TASK_ID=demo-task must not contact the captain with sharkctl ask; send the question to firstmate as a keyed status line
+[exit 1]
+
+$ PATH=/home/shuv/.no-mistakes/worktrees/8a7692f99431/01M44XPQ95WQV8759ZA531C2GW/bin/worker-guards:/tmp/tmp.fOo09jNEiW/real:/usr/bin:/bin FM_TASK_ID=demo-task timeout 5 sharkctl notify ask
+error: task worker FM_TASK_ID=demo-task must not contact the captain with sharkctl notify; send the question to firstmate as a keyed status line
+[exit 1]
+
+== Scenario 2: other verbs and unmarked panes delegate to the real CLI ==
+$ PATH=/home/shuv/.no-mistakes/worktrees/8a7692f99431/01M44XPQ95WQV8759ZA531C2GW/bin/worker-guards:/tmp/tmp.fOo09jNEiW/real:/usr/bin:/bin FM_TASK_ID=demo-task timeout 5 sharkctl status
+DECOY real sharkctl reached: status
+[exit 0]
+
+$ PATH=/home/shuv/.no-mistakes/worktrees/8a7692f99431/01M44XPQ95WQV8759ZA531C2GW/bin/worker-guards:/tmp/tmp.fOo09jNEiW/real:/usr/bin:/bin timeout 5 sharkctl notify 'lead ok'
+DECOY real sharkctl reached: notify lead ok
+[exit 0]
+
+== Scenario 3 (adversarial, reported P2): two differently named symlinks to the guard ahead of the real CLI ==
+lrwxrwxrwx 1 shuv shuv 100 Oct  4 19:21 /tmp/tmp.fOo09jNEiW/a/sharkctl -> /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M44XPQ95WQV8759ZA531C2GW/bin/worker-guards/sharkctl
+lrwxrwxrwx 1 shuv shuv  98 Oct  4 19:21 /tmp/tmp.fOo09jNEiW/b/sharkctl -> /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M44XPQ95WQV8759ZA531C2GW/bin/fm-sharkctl-guard.sh
+$ PATH=/tmp/tmp.fOo09jNEiW/a:/tmp/tmp.fOo09jNEiW/b:/home/shuv/.no-mistakes/worktrees/8a7692f99431/01M44XPQ95WQV8759ZA531C2GW/bin/worker-guards:/tmp/tmp.fOo09jNEiW/real:/usr/bin:/bin timeout 5 sharkctl notify 'lead ok'
+DECOY real sharkctl reached: notify lead ok
+[exit 0]
+
+$ PATH=/tmp/tmp.fOo09jNEiW/b:/tmp/tmp.fOo09jNEiW/a:/tmp/tmp.fOo09jNEiW/real:/usr/bin:/bin FM_TASK_ID=demo-task timeout 5 sharkctl status
+DECOY real sharkctl reached: status
+[exit 0]
+
+$ PATH=/tmp/tmp.fOo09jNEiW/a:/tmp/tmp.fOo09jNEiW/b:/tmp/tmp.fOo09jNEiW/real:/usr/bin:/bin FM_TASK_ID=demo-task timeout 5 sharkctl notify x
+error: task worker FM_TASK_ID=demo-task must not contact the captain with sharkctl notify; send the question to firstmate as a keyed status line
+[exit 1]
+
+== Scenario 4: guard aliases only, no real CLI -> clean 127, no loop ==
+$ PATH=/tmp/tmp.fOo09jNEiW/a:/tmp/tmp.fOo09jNEiW/b:/home/shuv/.no-mistakes/worktrees/8a7692f99431/01M44XPQ95WQV8759ZA531C2GW/bin/worker-guards:/usr/bin:/bin timeout 5 sharkctl status
+error: sharkctl: command not found
+[exit 127]
+
+== Scenario 3b: invoked via relative PATH entry (cwd-relative $0) ==
+$ cd /tmp/tmp.fOo09jNEiW && PATH=a:b:/tmp/tmp.fOo09jNEiW/real:/usr/bin:/bin timeout 5 sharkctl status
+DECOY real sharkctl reached: status
+[exit 0]
+

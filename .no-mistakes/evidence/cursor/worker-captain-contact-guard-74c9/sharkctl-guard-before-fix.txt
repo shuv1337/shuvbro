@@ -1,0 +1,3 @@
+== Before fix (1760dd0 guard): two symlink aliases ahead of real CLI ==
+$ PATH=a:b:real timeout 5 sharkctl status
+[exit 124]  (124 = timeout, decoy never reached)
