@@ -1608,8 +1608,9 @@ fm_backend_herdr_projection_order_best_effort() {  # <session> <created-workspac
 # fm_backend_herdr_server_ensure: start the herdr server for <session>
 # headless (no TUI client) if not already running, mirroring tmux's `tmux
 # has-session || tmux new-session -d`. Verified: a bare socket CLI call does
-# NOT auto-start the server, so this must run before any workspace/tab/pane
-# call. The server outlives its launcher and passes its startup environment to
+# NOT auto-start the server, so lifecycle paths must run this before any
+# workspace/tab/pane call; send and doorbell calls deliberately skip it (see
+# fm_backend_herdr_client_ready). The server outlives its launcher and passes its startup environment to
 # every later pane, so remove home, harness identity, and supervision selection
 # inherited from whichever agent happened to start it. Bounded poll for the
 # server to report running.
