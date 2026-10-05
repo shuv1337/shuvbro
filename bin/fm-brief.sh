@@ -56,6 +56,10 @@
 # declared-external-wait verb (FM_CLASSIFY_PAUSED_VERB, default "paused") from
 # "blocked:": pause for a known external wait expected to clear on its own,
 # blocked when firstmate must act.
+# Ship and scout scaffolds, including those passed --herdr-lab, forbid contacting
+# the captain directly. Questions go to firstmate as a keyed status line.
+# bin/fm-sharkctl-guard.sh refuses sharkctl notify and ask in panes fm-spawn
+# marks with FM_TASK_ID.
 # Every scaffold also carries the steering-inbox receive-and-ack section:
 # process state/<id>.inbox/*.msg in order and acknowledge each by moving it to
 # handled/ (record, doorbell, and ladder owned by bin/fm-task-inbox-lib.sh).
@@ -349,6 +353,18 @@ EOF
 HERDR_SECTION=${HERDR_SECTION%$'\n'}
 fi
 
+# Shared by the ship and scout scaffolds, including --herdr-lab. Quoted heredoc
+# so the backticks reach the brief as text. Secondmate charters are leads in
+# their own home and are not marked with FM_TASK_ID, so they do not carry this
+# worker rule.
+IFS= read -r -d '' CAPTAIN_CONTACT_RULE <<'EOF' || true
+8. Never contact the captain.
+   Do not run `sharkctl`, and do not use any other notification, email, chat, or phone tool.
+   Do not address the captain in a pull request or an issue.
+   Every question goes to firstmate as a keyed status line (`needs-decision [key=<slug>]: {the question}`), then stop.
+EOF
+CAPTAIN_CONTACT_RULE=${CAPTAIN_CONTACT_RULE%$'\n'}
+
 IFS= read -r -d '' TASK_SECTION <<'EOF' || true
 # Task
 ## Captain's intent
@@ -410,6 +426,8 @@ The report is the only thing that survives, so anything worth keeping must be in
    going. A drive-call error, timeout, slow read, or generic unreachability is NOT a daemon error:
    the daemon accepts \`respond\` immediately and runs the round in the background, so a killed or
    timed-out call was only waiting for a read while the run kept working.
+
+$CAPTAIN_CONTACT_RULE
 
 $INBOX_SECTION
 
@@ -501,6 +519,8 @@ $ASK_USER_BLOCK
    going. A drive-call error, timeout, slow read, or generic unreachability is NOT a daemon error:
    the daemon accepts \`respond\` immediately and runs the round in the background, so a killed or
    timed-out call was only waiting for a read while the run kept working.
+
+$CAPTAIN_CONTACT_RULE
 
 $INBOX_SECTION
 

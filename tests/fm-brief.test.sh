@@ -872,6 +872,39 @@ test_worker_role_scope() {
   pass "fm-brief: scaffolds leave the worker role scope to the launch boundary and keep the secondmate contract"
 }
 
+# Ship, scout, and herdr-lab scaffolds tell the worker not to contact the
+# captain. The wording is the instruction; bin/fm-sharkctl-guard.sh is the
+# PATH enforcement for panes marked with FM_TASK_ID.
+test_worker_never_contacts_the_captain() {
+  local home id brief spec
+  home="$TMP_ROOT/captain-contact-home"
+  mkdir -p "$home/data"
+  id=0
+  for spec in \
+    "ship plain|--mode no-mistakes" \
+    "scout plain|--scout" \
+    "ship herdr-lab|--mode no-mistakes --herdr-lab" \
+    "scout herdr-lab|--scout --herdr-lab"
+  do
+    id=$((id + 1))
+    # shellcheck disable=SC2086  # spec flags are an intentional word-split arg list
+    FM_HOME="$home" "$ROOT/bin/fm-brief.sh" "captain-contact-$id" sample ${spec#*|} >/dev/null \
+      || fail "fm-brief.sh ${spec%%|*} scaffold exited non-zero"
+    brief="$home/data/captain-contact-$id/brief.md"
+    assert_grep "Never contact the captain." "$brief" \
+      "${spec%%|*} brief did not forbid contacting the captain"
+    # shellcheck disable=SC2016  # The brief text is a fixed string, including its backticks.
+    assert_grep 'Do not run `sharkctl`, and do not use any other notification, email, chat, or phone tool.' "$brief" \
+      "${spec%%|*} brief did not forbid sharkctl and other notification tools"
+    assert_grep "Do not address the captain in a pull request or an issue." "$brief" \
+      "${spec%%|*} brief did not forbid addressing the captain in a pull request or issue"
+    # shellcheck disable=SC2016  # The brief text is a fixed string, including its backticks.
+    assert_grep 'Every question goes to firstmate as a keyed status line (`needs-decision [key=<slug>]: {the question}`), then stop.' "$brief" \
+      "${spec%%|*} brief did not route questions through a keyed status line"
+  done
+  pass "fm-brief.sh: ship, scout, and herdr-lab briefs forbid contacting the captain"
+}
+
 test_worker_role_scope
 test_script_parses
 test_no_heredoc_in_command_substitution
@@ -895,3 +928,4 @@ test_secondmate_directory_paths_are_absolute_and_output_is_stable
 test_pause_verb_override_renders_all_brief_scaffolds
 test_scout_and_secondmate_load_decision_hold_policy
 test_scout_and_secondmate_scaffold
+test_worker_never_contacts_the_captain
