@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Real shuvcode exit/relaunch through a real Treehouse nested login shell on
-# Herdr. Opt in with FM_CONTROL_HERDR_V2_LIVE=1 (submits diagnostic prompts).
+# Herdr. The nested shell is Herdr's configured pane shell ([terminal]
+# default_shell, else $SHELL, else the account shell), not a hardcoded zsh.
+# Opt in with FM_CONTROL_HERDR_V2_LIVE=1 (submits diagnostic prompts).
 # FM_HERDR_LAB_HELPER and FM_HERDR_LAB_LABEL select the guarded helper and lab label.
 # Every Herdr call uses the guarded named-session helper, including backend
 # calls routed through a lab-only CLI shim. XDG, mise approval, service and
@@ -111,7 +113,53 @@ chmod +x "$LAB/bin/herdr"
   PANE=$(sed -n 's/^herdr_pane_id=//p' "$HOME_DIR/state/nested.meta")
   "$ROOT/bin/fm-control.sh" nested exit > "$LAB/exit.log" 2>&1
   herdr pane process-info --pane "$PANE" --session "$HERDR_LAB_SESSION" > "$LAB/after-exit.json"
-  jq -e '.result.process_info | .foreground_process_group_id != .shell_pid and (.foreground_processes | length) == 1 and .foreground_processes[0].name == "zsh"' "$LAB/after-exit.json" >/dev/null
+  # Herdr login panes set SHELL from [terminal] default_shell when it is set,
+  # otherwise from the server's SHELL. Treehouse then opens that shell. Read
+  # the same config the running server loaded (the lab XDG override is for
+  # shuvcode, not Herdr) so a bash-login host is not required to be zsh.
+  herdr_shell_config=${HERDR_CONFIG_PATH:-$HOME/.config/herdr/config.toml}
+  configured_shell=
+  if [ -f "$herdr_shell_config" ]; then
+    configured_shell=$(awk '
+      /^[[:space:]]*#/ { next }
+      /^\[/ { section=$0; gsub(/[[:space:]]/, "", section); next }
+      section == "[terminal]" && $0 ~ /^[[:space:]]*default_shell[[:space:]]*=/ {
+        val=$0
+        sub(/^[^=]*=[[:space:]]*/, "", val)
+        gsub(/^["'\'']|[[:space:]"'\'']*$/, "", val)
+        print val
+        exit
+      }
+    ' "$herdr_shell_config")
+  fi
+  if [ -z "$configured_shell" ]; then
+    configured_shell=${SHELL:-}
+  fi
+  if [ -z "$configured_shell" ]; then
+    configured_shell=$(getent passwd "$(id -un)" | awk -F: 'NR==1 { print $NF }')
+  fi
+  if [ -z "$configured_shell" ]; then
+    configured_shell=/bin/sh
+  fi
+  configured_shell=${configured_shell##*/}
+  configured_shell=${configured_shell#-}
+  case "$configured_shell" in
+    sh|bash|zsh|dash|ksh|fish) ;;
+    *)
+      echo "not ok - configured shell '${configured_shell:-unset}' is not a recognized login shell" >&2
+      exit 1
+      ;;
+  esac
+  jq -e --arg shell "$configured_shell" '
+    .result.process_info
+    | .foreground_process_group_id != .shell_pid
+    and (.foreground_processes | length) == 1
+    and .foreground_processes[0].name == $shell
+  ' "$LAB/after-exit.json" >/dev/null || {
+    echo "not ok - after exit the sole nested foreground process was not $configured_shell" >&2
+    jq '.result.process_info' "$LAB/after-exit.json" >&2 || true
+    exit 1
+  }
   "$ROOT/bin/fm-control.sh" nested relaunch --note 'Continue the fixture: reply FIXTURE_DONE, no tools or changes.' > "$LAB/relaunch.log" 2>&1
   grep -q '^relaunched nested harness=opencode-v2 from=opencode-v2' "$LAB/relaunch.log"
   wait_idle
