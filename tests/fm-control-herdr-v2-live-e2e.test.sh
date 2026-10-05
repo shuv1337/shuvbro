@@ -16,7 +16,8 @@ LAB=$(cd "$LAB" && pwd -P)
 HERDR_LAB_HELPER=${FM_HERDR_LAB_HELPER:-"$ROOT/bin/fm-herdr-lab.sh"}
 HERDR_LAB_SESSION=$("$HERDR_LAB_HELPER" name "${FM_HERDR_LAB_LABEL:-control-v2-live}")
 ORIGINAL_PATH=$PATH
-export HERDR_LAB_HELPER HERDR_LAB_SESSION ORIGINAL_PATH
+HERDR_SHELL_CONFIG=${HERDR_CONFIG_PATH:-${XDG_CONFIG_HOME:-$HOME/.config}/herdr/config.toml}
+export HERDR_LAB_HELPER HERDR_LAB_SESSION ORIGINAL_PATH HERDR_SHELL_CONFIG
 cleanup_lab() {
   local status=$?
   "$HERDR_LAB_HELPER" teardown "$HERDR_LAB_SESSION" || status=1
@@ -115,22 +116,23 @@ chmod +x "$LAB/bin/herdr"
   herdr pane process-info --pane "$PANE" --session "$HERDR_LAB_SESSION" > "$LAB/after-exit.json"
   # Herdr resolves the pane shell from [terminal] default_shell when it is
   # set, otherwise from the server's SHELL, otherwise /bin/sh. Read
-  # the same config the running server loaded (the lab XDG override is for
-  # shuvcode, not Herdr) so a bash-login host is not required to be zsh.
-  herdr_shell_config=${HERDR_CONFIG_PATH:-$HOME/.config/herdr/config.toml}
+  # the same config the running server loaded (resolved before the lab XDG
+  # override, which is for shuvcode, not Herdr) so a bash-login host is not
+  # required to be zsh.
   configured_shell=
-  if [ -f "$herdr_shell_config" ]; then
+  if [ -f "$HERDR_SHELL_CONFIG" ]; then
     configured_shell=$(awk '
       /^[[:space:]]*#/ { next }
-      /^\[/ { section=$0; gsub(/[[:space:]]/, "", section); next }
+      /^[[:space:]]*\[/ { section=$0; sub(/#.*/, "", section); gsub(/[[:space:]]/, "", section); next }
       section == "[terminal]" && $0 ~ /^[[:space:]]*default_shell[[:space:]]*=/ {
         val=$0
         sub(/^[^=]*=[[:space:]]*/, "", val)
-        gsub(/^["'\'']|[[:space:]"'\'']*$/, "", val)
+        if (val ~ /^"/) { sub(/^"/, "", val); sub(/".*/, "", val) }
+        else if (val ~ /^\047/) { sub(/^\047/, "", val); sub(/\047.*/, "", val) }
         print val
         exit
       }
-    ' "$herdr_shell_config")
+    ' "$HERDR_SHELL_CONFIG")
   fi
   if [ -z "$configured_shell" ]; then
     configured_shell=${SHELL:-}
