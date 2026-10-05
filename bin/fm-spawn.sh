@@ -1238,7 +1238,23 @@ fi
 # locked harness resolution below, so configuration/record changes cannot evade
 # the gate. This reads the same selector precedence without adopting a task.
 V2_CAPABILITY_PROBED=0
-if [ "$KIND" != secondmate ]; then
+if [ "$KIND" = secondmate ]; then
+  capability_harness=${HARNESS_ARG:-}
+  if [ -z "$capability_harness" ]; then
+    if [ "$RELAUNCH" -eq 1 ]; then
+      capability_harness=$(fm_meta_get "$STATE/$ID.meta" harness)
+    else
+      case "${POS[1]:-}" in
+        opencode-v2) capability_harness=opencode-v2 ;;
+        *) capability_harness=${POS[2]:-$("$FM_ROOT/bin/fm-harness.sh" secondmate)} ;;
+      esac
+    fi
+  fi
+  if [ "$capability_harness" = opencode-v2 ]; then
+    node "$FM_ROOT/bin/fm-opencode-v2-capability.mjs" "$FM_ROOT" >/dev/null || exit 1
+    V2_CAPABILITY_PROBED=1
+  fi
+else
   if [ -n "$HARNESS_ARG" ]; then
     capability_harness=$HARNESS_ARG
   elif [ "$RELAUNCH" -eq 1 ]; then
@@ -1510,10 +1526,6 @@ launch_template() {
       ;;
     opencode) printf '%s' 'OPENCODE_CONFIG_CONTENT='\''{"permission":{"*":"allow"}}'\'' opencode __MODELFLAG__--prompt "$(__OPINPUT__ encode launch-brief < __BRIEF__)"' ;;
     opencode-v2)
-      if [ "$kind" = secondmate ]; then
-        echo "error: opencode-v2 secondmates are not qualified; refuse before creating a worker" >&2
-        return 1
-      fi
       printf '%s' 'shuvcode --standalone --auto --prompt "$(__OPINPUT__ encode launch-brief < __BRIEF__)"'
       ;;
     pi|pi-signed)
@@ -2245,6 +2257,23 @@ if [ "$KIND" = secondmate ]; then
     SECONDMATE_PROJECTS=$SECONDMATE_REGISTRY_MATCH_PROJECTS
   fi
   WT="$PROJ_ABS"
+  V2_RECOVER_SESSION=0
+  if [ "$RELAUNCH" -eq 0 ] && [ -f "$STATE/$ID.meta" ] \
+    && [ "$(fm_meta_get "$STATE/$ID.meta" harness)" = opencode-v2 ]; then
+    old_backend=$(fm_backend_of_meta "$STATE/$ID.meta")
+    old_target=$(fm_meta_get "$STATE/$ID.meta" window)
+    old_state=$(fm_backend_agent_state "$old_backend" "$old_target" opencode-v2)
+    case "$old_state" in
+      dead|missing) ;;
+      *) echo "error: V2 secondmate $ID endpoint reads '$old_state'; use bin/fm-control.sh $ID relaunch rather than creating another lead" >&2; exit 1 ;;
+    esac
+    old_execution=$(fm_control_v2_execution "$STATE" "$ID" "$WT")
+    [ "$old_execution" = idle ] || {
+      echo "error: V2 secondmate $ID's recorded native execution is '$old_execution'; reconcile that exact session before recovery, even when its endpoint is gone" >&2
+      exit 1
+    }
+    V2_RECOVER_SESSION=1
+  fi
   # Local-HEAD sync: before launch, fast-forward this secondmate's worktree to the
   # PRIMARY checkout's current default-branch commit, so a freshly spawned or
   # recovery-respawned secondmate always runs the primary's version (AGENTS.md
@@ -2270,6 +2299,9 @@ if [ "$KIND" = secondmate ]; then
     esac
   else
     echo "warning: secondmate $ID sync skipped before launch: primary default-branch commit cannot be resolved" >&2
+  fi
+  if [ "$HARNESS" = opencode-v2 ]; then
+    node "$FM_ROOT/bin/fm-opencode-v2-capability.mjs" "$PROJ_ABS" >/dev/null || exit 1
   fi
   mkdir -p "$PROJ_ABS/state" || {
     echo "error: could not create secondmate state directory for $PROJ_ABS" >&2
@@ -3153,6 +3185,10 @@ rovo_endpoint_cleanup() {
 # capture. Otherwise retain the prefill/Enter handshake for older releases.
 opencode_v2_turn_started() {
   local record
+  if [ "$KIND" = secondmate ]; then
+    node "$FM_ROOT/bin/fm-opencode-v2-session.mjs" started "$STATE_REAL/$ID.opencode-v2-session.json" "$WT" "$SPAWN_GEN" >/dev/null 2>&1
+    return $?
+  fi
   record=$(fm_busy_record_read "$STATE_REAL" "$ID") || return 1
   case "$record" in
     'busy opencode-plugin session-execution-started '*|\
@@ -4069,7 +4105,9 @@ EFFORTFLAG=$(effort_flag_for_harness "$HARNESS" "$EFFORT" "$MODEL") || exit 1
 # predates that incarnation's work.
 if [ "$HARNESS" = opencode-v2 ]; then
   V2_RESUMEFLAG=
-  [ "$RELAUNCH" -ne 1 ] || [ "$RELAUNCH_PRIOR_FAMILY" != opencode-v2 ] || V2_RESUMEFLAG='--resume '
+  [ "$KIND" != secondmate ] || V2_RESUMEFLAG='--secondmate '
+  [ "$RELAUNCH" -ne 1 ] || [ "$RELAUNCH_PRIOR_FAMILY" != opencode-v2 ] || V2_RESUMEFLAG="${V2_RESUMEFLAG}--resume "
+  [ "${V2_RECOVER_SESSION:-0}" != 1 ] || V2_RESUMEFLAG="${V2_RESUMEFLAG}--resume "
   case "$LAUNCH" in
     'shuvcode --standalone --auto --prompt '*)
       LAUNCH="env -u FM_V2_ACTIVATION $(shell_quote "$FM_ROOT/bin/fm-opencode-v2-launch.sh") --session-record $(shell_quote "$STATE_REAL/$ID.opencode-v2-session.json") ${V2_RESUMEFLAG}${MODELFLAG}${LAUNCH#shuvcode --standalone --auto }"

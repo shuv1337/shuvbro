@@ -298,6 +298,23 @@ test_activation_publishes_and_nudges_once_without_events() {
   pass "tui: activation registers the exact claim and marker and admits one steered startup nudge with no session events"
 }
 
+test_secondmate_activation_owns_only_its_home() {
+  v2_require_native secondmate-activation || return $?
+  tui_case secondmate-activation
+  printf 'mate\n' > "$HOME_DIR/.fm-secondmate-home"
+  local out="$CASE/out.json"
+  FM_V2_LAUNCH_PROMPT='secondmate fixture charter' v2_tui "$CASE" "$(spec '{"steps":[{"do":"wait","until":"admitted","match":"fm-session-start"},{"do":"registration"}]}')" "$out"
+  jq -e '.setup == "ok"' "$out" >/dev/null || fail "secondmate activation failed: $(jq -c '{setup, failures}' "$out")"
+  jq -e --arg h "$HOME_DIR" '.steps[1].record | .home==$h and .state==($h+"/state") and .config==($h+"/config")' "$out" >/dev/null \
+    || fail 'secondmate did not freeze its own home paths'
+  [ "$(startup_admissions "$out")" = 1 ] || fail 'secondmate did not admit its home-local startup nudge'
+  jq -e '.admitted[0] | .text=="secondmate fixture charter" and .delivery=="queue"' "$out" >/dev/null \
+    || fail 'secondmate did not admit its charter through the activated TUI'
+  jq -e 'all(.environmentPushes[]; (.keys | index("FM_V2_LAUNCH_PROMPT"))==null)' "$out" >/dev/null \
+    || fail 'secondmate launch prompt leaked into the helper environment'
+  pass 'tui: secondmate marker does not disable exact activation or home-local startup'
+}
+
 test_inactive_tui_stays_inert() {
   v2_require_native inactive || return $?
   tui_case inactive
@@ -836,6 +853,7 @@ v2_run_cases \
   test_notice_stale_startup_entry \
   test_notice_rebind_failure_immediate \
   test_activation_publishes_and_nudges_once_without_events \
+  test_secondmate_activation_owns_only_its_home \
   test_inactive_tui_stays_inert \
   test_copied_activation_is_inert_in_another_process \
   test_subdirectory_root_never_owns_or_drives_the_lead \

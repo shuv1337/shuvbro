@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Shared-service worker launcher behavior with a native CLI-shaped fixture.
+# shellcheck disable=SC2030,SC2031 # The secondmate subshell deliberately preserves the worker fixture environment.
 set -eu
 # shellcheck source=tests/fm-opencode-v2-acceptance-lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/fm-opencode-v2-acceptance-lib.sh"
@@ -72,6 +73,7 @@ case "$operation" in
     model=$(cat "$TEST_LOG.model" 2>/dev/null || echo '{"providerID":"fixture","id":"test-model","variant":"default"}')
     jq -cn --arg dir "$TEST_WORK" --argjson model "$model" '{data:{id:"ses_worker_exact",location:{directory:$dir},model:$model}}' ;;
   session.active) if [ "${TEST_ACTIVE:-}" = idle ] || [ -e "$TEST_LOG.cancelled" ]; then echo '{"data":{}}'; else echo '{"data":{"ses_worker_exact":{"type":"running"}}}'; fi ;;
+  session.message.list) if [ -n "${TEST_MESSAGES:-}" ]; then printf '%s\n' "$TEST_MESSAGES"; else echo '{"data":[]}'; fi ;;
   session.interrupt) : > "$TEST_LOG.cancelled"; echo '{"interrupted":true}' ;;
   *) exit 96 ;;
 esac
@@ -195,6 +197,70 @@ for model in default explicit variant configured configured-object; do
   jq -e --arg variant "$expected" '.sessionID=="ses_worker_exact" and .model.variant==$variant' "$TEST_RECORD" >/dev/null || fail "incorrect $model variant record"
   pass "$model worker shares service, records exact session/model, strips activation and admits before attachment"
 done
+
+# The persistent-role launch shares session/model creation, but delegates
+# charter admission to the child's activated primary rather than the worker
+# attach path. The fixture primary observes only its public argv/environment.
+(
+  own="$TMP_ROOT/secondmate"
+  mkdir -p "$own/bin"
+  cp "$ROOT/bin/fm-opencode-v2-launch.sh" "$ROOT/bin/fm-shuvcode-lib.sh" "$ROOT/bin/fm-secondmate-parent-lib.sh" "$own/bin/"
+  cp "$ROOT/bin/fm-opencode-v2-owner.mjs" "$own/bin/fm-opencode-v2-owner.mjs"
+  printf '%s\n' 'process.exit(0)' > "$own/bin/fm-opencode-v2-capability.mjs"
+  cat > "$own/bin/fm-opencode-v2-primary.sh" <<'SH'
+#!/usr/bin/env bash
+set -eu
+[ -z "${FM_V2_ACTIVATION:-}" ] && [ -z "${OPENCODE_SESSION_ID:-}" ] || exit 91
+[ "$FM_HOME" = "$TEST_WORK" ] && [ "$FM_ROOT_OVERRIDE" = "$TEST_WORK" ] || exit 92
+printf '%s\n' "$@" > "$TEST_LOG.primary-args"
+echo activated >> "$TEST_LOG"
+SH
+  chmod +x "$own/bin/fm-opencode-v2-primary.sh"
+  export TEST_WORK="$own" TEST_RECORD="$TMP_ROOT/mate.opencode-v2-session.json" FM_HOME="$own" FM_OPENCODE_V2_BIN
+  FM_OPENCODE_V2_BIN=$(type -P true)
+  printf 'kind=secondmate\nspawn_gen=s1.2.3\n' > "$TMP_ROOT/mate.meta"
+  printf 'mate\n' > "$own/.fm-secondmate-home"
+  : > "$TEST_LOG"
+  if (cd "$own" && "$own/bin/fm-opencode-v2-launch.sh" --secondmate --prompt 'exact worker brief' --session-record "$TEST_RECORD") 2> "$TMP_ROOT/mate-refusal"; then
+    fail 'secondmate launch accepted a marker without a parent binding'
+  fi
+  grep -q 'valid parent binding' "$TMP_ROOT/mate-refusal" || fail 'secondmate refusal lost its missing-parent requirement'
+  [ ! -s "$TEST_LOG" ] || fail 'invalid secondmate created or admitted a native session'
+  printf 'schema=fm-secondmate-parent.v1\nroute=local\nparent_home=%s\n' "$TMP_ROOT" > "$own/.fm-secondmate-parent"
+  (cd "$own" && "$own/bin/fm-opencode-v2-launch.sh" --secondmate --model fixture/test-model --prompt 'exact worker brief' --session-record "$TEST_RECORD") \
+    || fail 'qualified secondmate did not activate its own primary'
+  [ "$(cat "$TEST_LOG")" = $'created\nactivated' ] || fail 'secondmate used worker prompt/attach instead of primary activation'
+  grep -Fx -- --auto "$TEST_LOG.primary-args" >/dev/null || fail 'secondmate lost unattended approval'
+  grep -Fx -- --prompt "$TEST_LOG.primary-args" >/dev/null || fail 'secondmate did not carry charter into activation'
+  jq -e 'has("launchAfterMessageID") and .launchAfterMessageID==null' "$TEST_RECORD" >/dev/null || fail 'secondmate submission was not bound to this launch'
+  export TEST_ACTIVE=idle
+  started() { env -u FM_V2_ACTIVATION -u OPENCODE_SESSION_ID node "$ROOT/bin/fm-opencode-v2-session.mjs" started "$TEST_RECORD" "$TEST_WORK" "${1:-s1.2.3}"; }
+  if started > /dev/null 2>&1; then fail 'empty native history falsely proved secondmate submission'; fi
+  export TEST_MESSAGES='{"data":[{"id":"msg_new","type":"user"}]}'
+  if started > /dev/null 2>&1; then fail 'queued charter alone falsely proved execution started'; fi
+  export TEST_MESSAGES='{"data":[{"id":"msg_new","type":"assistant"}]}'
+  started > /dev/null || fail 'a new assistant turn should prove secondmate submission'
+  if started s1.2.4 > /dev/null 2>&1; then fail 'an earlier spawn generation falsely proved a new launch'; fi
+  export TEST_ACTIVE=running
+  if started s1.2.4 > /dev/null 2>&1; then fail 'an earlier running generation falsely proved a new launch'; fi
+  started > /dev/null || fail 'current-generation active execution should prove submission'
+  export TEST_ACTIVE=idle
+  jq '.launchAfterMessageID="msg_new"' "$TEST_RECORD" > "$TEST_RECORD.tmp"
+  chmod 600 "$TEST_RECORD.tmp"
+  mv "$TEST_RECORD.tmp" "$TEST_RECORD"
+  if started > /dev/null 2>&1; then fail 'an earlier resumed turn falsely proved the new launch started'; fi
+  printf 'kind=secondmate\nspawn_gen=s1.2.4\n' > "$TMP_ROOT/mate.meta"
+  : > "$TEST_LOG"
+  (cd "$own" && "$own/bin/fm-opencode-v2-launch.sh" --secondmate --resume --model fixture/test-model --prompt 'exact worker brief' --session-record "$TEST_RECORD") \
+    || fail 'secondmate relaunch could not preserve a non-null message baseline'
+  jq -e '.sessionID=="ses_worker_exact" and .launchAfterMessageID=="msg_new" and .spawnGeneration=="s1.2.4"' "$TEST_RECORD" >/dev/null \
+    || fail 'secondmate relaunch lost its exact session, message baseline or new generation'
+  [ "$(cat "$TEST_LOG")" = activated ] || fail 'secondmate relaunch created a new session or bypassed activation'
+  if started s1.2.4 > /dev/null 2>&1; then fail 'secondmate relaunch counted the old assistant message as new submission'; fi
+  export TEST_MESSAGES='{"data":[{"id":"msg_next","type":"assistant"}]}'
+  started s1.2.4 > /dev/null || fail 'secondmate resumed assistant turn did not prove submission'
+  pass 'secondmate launcher validates its parent, freezes its own root and delegates charter admission to native primary activation'
+)
 
 # --resume (fm-spawn --relaunch) continues the exact recorded session instead
 # of creating one: same session, same binding, the brief admitted as a queued

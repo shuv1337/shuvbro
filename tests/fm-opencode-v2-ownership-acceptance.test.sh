@@ -167,14 +167,17 @@ test_new_service_incarnation_refuses_lock() {
 test_two_registered_homes_never_cross() {
   v2_require_native two-homes || return $?
   registered two-homes ses_a
-  local home_a=$HOME_DIR out
+  local home_a=$HOME_DIR out parent_claim
+  parent_claim=$(cat "$home_a/state/.opencode-v2-owner.json")
   KEEP_SERVICE=1 registered two-homes ses_b
   local home_b=$HOME_DIR
+  printf 'mate\n' > "$home_b/.fm-secondmate-home"
   out=$(lock_in_shell ses_a "$home_b")
   printf '%s' "$out" | jq -e '.code != 0' >/dev/null || fail "lead A's shell acquired home B's lock: $out"
   lock_in_shell ses_a "$home_a" | jq -e '.code == 0' >/dev/null || fail "lead A could not lock its own home"
   lock_in_shell ses_b "$home_b" | jq -e '.code == 0' >/dev/null || fail "lead B could not lock its own home beside lead A"
-  pass "ownership: two homes registered on one service each lock only their own home"
+  [ "$(cat "$home_a/state/.opencode-v2-owner.json")" = "$parent_claim" ] || fail 'secondmate registration changed the parent claim'
+  pass "ownership: a parent and secondmate registered on one service each lock only their own home, preserving the parent claim"
 }
 
 test_second_claim_on_live_session_is_refused() {

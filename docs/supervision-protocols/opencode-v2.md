@@ -63,4 +63,4 @@ The periodic reconciliation is the turn-end backstop: restore the one watcher me
 It also bounds event-stream gaps; the adapter does not depend on stream reconnection for continuity.
 Only Linux process-birth qualification is implemented.
 The fixed user registry ignores XDG relocation; disposable probes must use an explicit token-only namespace and the owner's `cleanup-test-namespace` command, never the operator's default namespace.
-V2 secondmates are not qualified; refuse that launch before creating a worker.
+V2 secondmates use this same exact-home native protocol; [the adapter reference](../../.agents/skills/harness-adapters/references/harness/opencode-v2.md) owns their dispatch boundary.

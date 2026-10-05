@@ -1705,6 +1705,31 @@ The installed root TUI rejects `--model`; its `mini --model` path did not honor
 the requested model in the live probe and lacks the root's `--auto` contract.
 The current `bin/fm-opencode-v2-launch.sh` creates an exact model-bound session on the registered shared service; `tests/fm-opencode-v2-launch.test.sh` exercises its credential-free catalog, session binding, variant refusal and record-before-admission behavior.
 
+### Home-local secondmate lifecycle
+
+Verified on 2026-10-04 at 22:31 PDT on Linux with shuvcode v2.0.22-shuv.2, Node v26.10.0, Herdr client/server 0.9.1-shuv.6+9059819d8043 and Treehouse 2.0.0, using `opencode/space-bunny-free#low`:
+
+```sh
+FM_CONTROL_HERDR_V2_LIVE=1 bin/fm-test-run.sh tests/fm-control-herdr-v2-live-e2e.test.sh
+```
+
+The run used the isolated-task helper override described above, a disposable parent home and a separate seeded child clone, never an actual persistent domain secondmate.
+
+```text
+ok - shuvcode v2.0.22-shuv.2: real Herdr/Treehouse nested-shell exit, in-place relaunch and second exit
+ok - shuvcode v2.0.22-shuv.2: V2 secondmate owns its home, runs startup, delivers parent status, resumes its session/profile and retires cleanly
+FM_TEST_SUMMARY total=1 failed=0 skipped_gate=0 duration_ms=120740
+```
+
+The child acquired its own home lock with its exact TUI owner PID and published an active claim bound to that child root, home and state directory.
+Its charter executed the real session-start command and appended parent-channel status; the parent's monitoring and drain observed that status and produced a generation-bound acknowledgement, which the fixture acknowledged before relaunch.
+Relaunch processed the charter again, appended a second parent status, and retained the exact native session plus the configured `opencode-v2` harness, model and `low` effort pin.
+Exit confirmed `native-session=idle`; ordinary retirement removed the child home and parent task record, and the guarded lab cleanup confirmed the default Herdr session was unchanged.
+The isolated XDG service and non-default ownership namespace were stopped and retired by the fixture's cleanup owner.
+Portable regressions cover launcher capability and parent-binding refusal, current-generation submission proof including fast completed turns and non-null resume baselines, home-local activation and charter admission, profile resolution, and parent/child claim isolation.
+An earlier native turn cannot satisfy the new launch's submission check, even if its session is still active.
+This qualifies home-local Linux secondmate launch and relaunch on the capability-qualified build; it does not extend the separate combined shared-service or cross-host matrix below.
+
 ### Native shared-service qualification status
 
 The native route is implemented but is not yet qualified for the combined issue #1 matrix.
@@ -1774,4 +1799,4 @@ not ok - 2 live qualification check(s) failed
 
 That 19:51 guard exited 1 solely because its two capability-probe checks rejected the installed v2.0.22-shuv.2 under the v2.0.22-shuv.1 allowlist; the complete 21:05:47 run above supersedes those version-probe failures.
 That 19:51 run used an explicit override to select the installed Linux glibc build because the guard's then-default glob selected a musl build that could not run on this host; the shared dispatch resolver above replaces that glob.
-No upstream `opencode2`, cross-host split or V2 secondmate qualification is claimed.
+No upstream `opencode2` or cross-host split qualification is claimed; the home-local V2 secondmate evidence above is separate from this combined matrix.

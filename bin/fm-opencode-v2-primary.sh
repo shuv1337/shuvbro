@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Explicit native V2 lead activation on the normal shared service.
-# Usage: --session ID --native-binary PATH [--server URL]
+# Usage: --session ID --native-binary PATH [--server URL] [--auto] [--prompt TEXT]
+# --prompt is admitted by the native TUI plugin only after exact activation and
+# environment publication. --auto enables unattended approval for secondmates.
 # PATH must be the installed native executable, not its forking npm wrapper:
 # exec preserves the activation's exact PID/start token. Linked copies require
 # this explicit activation; ordinary shuvcode/observer clients remain inert.
@@ -8,14 +10,15 @@
 # Existing live claims refuse replacement; restarting a dead owner is explicit.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-session='' binary='' server=''
+session='' binary='' server='' prompt='' auto=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --session|--native-binary|--server)
+    --session|--native-binary|--server|--prompt)
       [ "$#" -ge 2 ] || exit 2
-      case "$1" in --session) session=$2 ;; --native-binary) binary=$2 ;; --server) server=$2 ;; esac
+      case "$1" in --session) session=$2 ;; --native-binary) binary=$2 ;; --server) server=$2 ;; --prompt) prompt=$2 ;; esac
       shift 2 ;;
-    --help|-h) echo 'Usage: fm-opencode-v2-primary.sh --session ID --native-binary PATH [--server URL]'; exit 0 ;;
+    --auto) auto=1; shift ;;
+    --help|-h) echo 'Usage: fm-opencode-v2-primary.sh --session ID --native-binary PATH [--server URL] [--auto] [--prompt TEXT]'; exit 0 ;;
     *) exit 2 ;;
   esac
 done
@@ -42,5 +45,9 @@ FM_V2_ACTIVATION=$(jq -cn --arg session "$session" --arg claim "$claim" --arg ro
   '{version:1,sessionID:$session,claimID:$claim,root:$root,home:$home,state:$state,config:$config,ownerPID:$owner.pid,ownerStart:$owner.start,hostBootID:$owner.boot,servicePID:$service.servicePID,serviceStart:$service.serviceStart,serviceURL:$service.serviceURL,lifecycle:"claimed"}')
 export FM_V2_ACTIVATION FM_HOME="$home" FM_ROOT_OVERRIDE="$root" FM_STATE_OVERRIDE="$state" FM_CONFIG_OVERRIDE="$config"
 unset OPENCODE_SESSION_ID
+unset FM_V2_LAUNCH_PROMPT
+[ -z "$prompt" ] || export FM_V2_LAUNCH_PROMPT="$prompt"
 cd "$root"
-exec "$binary" --server "$server" --session "$session"
+args=(--server "$server" --session "$session")
+[ "$auto" -eq 0 ] || args+=(--auto)
+exec "$binary" "${args[@]}"

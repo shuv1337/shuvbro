@@ -966,7 +966,7 @@ test_opencode_v2_adapter_contract() {
   fm_control_harness_supports_kind opencode-v2 ship || fail "opencode-v2 must run a ship task"
   fm_control_harness_supports_kind opencode-v2 scout || fail "opencode-v2 must run a scout task"
   fm_control_harness_supports_kind opencode-v2 secondmate \
-    && fail "opencode-v2 secondmates are not qualified and must be refused before any stop"
+    || fail "opencode-v2 must run a qualified home-local secondmate"
   [ "$(fm_control_interrupt_ack_source opencode-v2)" = native-session ] \
     || fail "opencode-v2 must confirm interrupts from its exact native session"
   [ -z "$(fm_control_interrupt_key opencode-v2)" ] && [ "$(fm_control_interrupt_repeat opencode-v2)" = 0 ] \

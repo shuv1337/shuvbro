@@ -241,7 +241,8 @@ v2_start_service() {  # <dir>
   fi
   V2_SERVICE_URL=$(cat "$V2_NATIVE_STATE/.endpoint")
   export V2_SERVICE_URL
-  V2_SOCKET="$dir/svc-$RANDOM.sock"
+  # Keep below sockaddr_un's path limit even under the runner's nested TMPDIR.
+  V2_SOCKET="$V2_STATE_DIR/svc-$RANDOM.sock"
   "$V2_SERVICE_EXEC" "$V2_HARNESS" service "$V2_CODE_ROOT" "$V2_SOCKET" "$dir/sessions.json" --service > "$dir/service.out" 2>&1 &
   V2_SERVICE_PID=$!
   v2_track "$V2_SERVICE_PID"

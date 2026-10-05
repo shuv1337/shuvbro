@@ -72,7 +72,7 @@ export async function supervisionNeeded(record, env = helperEnvironment(record))
 export function helperEnvironment(record) {
   const env = { ...process.env, FM_HOME: record.home, FM_ROOT_OVERRIDE: record.root, FM_STATE_OVERRIDE: record.state, FM_CONFIG_OVERRIDE: record.config,
     FM_V2_REGISTRY_NAMESPACE: process.env.FM_V2_REGISTRY_NAMESPACE || "default", FM_V2_SERVICE_URL: serviceURL(record.serviceURL) };
-  for (const key of ["FM_V2_ACTIVATION", "OPENCODE_PASSWORD", "OPENCODE_SERVER_PASSWORD", "OPENCODE_SESSION_ID"]) delete env[key];
+  for (const key of ["FM_V2_ACTIVATION", "FM_V2_LAUNCH_PROMPT", "OPENCODE_PASSWORD", "OPENCODE_SERVER_PASSWORD", "OPENCODE_SESSION_ID"]) delete env[key];
   return env;
 }
 
@@ -92,7 +92,6 @@ export async function activate(ctx, activation) {
   const record = schema(activation);
   const own = identity(process.pid);
   if (record.ownerPID !== own.pid || record.ownerStart !== own.start || record.hostBootID !== own.boot) throw new Error("V2 activation is not for this exact TUI process");
-  if (existsSync(`${record.home}/.fm-secondmate-home`) || existsSync(`${record.root}/.fm-secondmate-home`)) throw new Error("V2 secondmate activation is unsupported");
   const info = await ctx.client.session.get({ sessionID: record.sessionID });
   if (info.id !== record.sessionID || info.parentID || info.location?.directory !== record.root) throw new Error("V2 activation session is not this exact root");
   const service = identity((await ctx.client.server.info()).pid);
@@ -187,9 +186,14 @@ export default { id: "firstmate.native.v2", async setup(ctx) {
      return null;
    } });
     if (stopped) return cleanup; // render failure already scheduled disposal
-   record = await activate(ctx, activation);
-   if (stopped) { retireClaim(); return cleanup; }
-   process.once("exit", exitFallback);
+    record = await activate(ctx, activation);
+    if (stopped) { retireClaim(); return cleanup; }
+    process.once("exit", exitFallback);
+    // A persistent secondmate is a lead in its own home. Never admit its
+    // charter before activation has installed the exact guard and environment.
+    const launchPrompt = process.env.FM_V2_LAUNCH_PROMPT;
+    delete process.env.FM_V2_LAUNCH_PROMPT;
+    if (launchPrompt) await ctx.client.session.prompt({ sessionID: record.sessionID, text: launchPrompt, delivery: "queue" });
    const paths = { root: record.root, home: record.home, state: record.state, config: record.config };
   let reconcileInFlight, held = false, nudged = false;
   let lastFailure = "";

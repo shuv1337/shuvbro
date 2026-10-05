@@ -264,9 +264,9 @@ test_opencode_v2_secondmate_home_reports_inactive_supervision() {
   printf 'mate1\n' > "$home/.fm-secondmate-home"
   out=$("$home/bin/fm-supervision-instructions.sh" --harness opencode-v2)
   assert_not_contains "$out" "plugin already owns watcher continuity" "secondmate home still claims the inert plugin owns continuity"
-  assert_contains "$out" "OpenCode V2 secondmates are not qualified" "secondmate home lacks the qualification reason"
+  assert_contains "$out" "No exact native TUI ownership proof" "unactivated secondmate must require exact activation"
   out=$("$home/bin/fm-supervision-instructions.sh" --harness opencode-v2 --repair-line)
-  assert_contains "$out" "inactive in a secondmate home" "secondmate repair line does not state inactivity"
+  assert_contains "$out" "inactive without exact activation" "secondmate repair line does not state missing activation"
   pass "opencode-v2 supervision instructions report inactive automatic supervision in a secondmate home"
 }
 

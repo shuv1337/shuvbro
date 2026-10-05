@@ -1,4 +1,6 @@
-// Exact shared-worker execution reconciliation. CLI: status|interrupt|teardown|discard RECORD WORKTREE.
+// Exact shared-session reconciliation. CLI: status|interrupt|teardown|discard|started RECORD WORKTREE.
+// started RECORD WORKTREE GENERATION verifies a secondmate launch against its
+// current spawn generation and pre-launch last-message ID, never a prior launch.
 // session.get establishes placement/model; session.active is the native execution
 // owner (session.get has no execution-status field on the qualified fork).
 // The sidecar is published before prompt admission; busy evidence contradicts
@@ -182,6 +184,20 @@ export async function reconcileWorker(action, file, worktree) {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  try { console.log(JSON.stringify(await reconcileWorker(...process.argv.slice(2)))); }
+  try {
+    const [action, file, worktree, generation] = process.argv.slice(2);
+    if (action === "started") {
+      const snapshot = workerSnapshot(file, worktree);
+      if (!snapshot.recorded || snapshot.incarnation !== "original" || !Object.hasOwn(snapshot.record, "launchAfterMessageID")) throw new Error("secondmate launch has no current submission binding");
+      if (!/^s[0-9]+\.[0-9]+\.[0-9]+$/.test(generation || "") || snapshot.record.spawnGeneration !== generation) throw new Error("secondmate submission belongs to an earlier spawn generation");
+      if (snapshot.record.launchAfterMessageID !== null && typeof snapshot.record.launchAfterMessageID !== "string") throw new Error("invalid secondmate launch message binding");
+      if (!snapshot.executing) {
+        const messages = nativeAPI(snapshot.binding, "session.message.list", [...snapshot.args, "--param", "order=desc", "--param", "limit=1"]).data;
+        const latest = messages?.[0];
+        if (!Array.isArray(messages) || !latest?.id || latest.id === snapshot.record.launchAfterMessageID || !["assistant", "idle"].includes(latest.type)) throw new Error("secondmate launch has not started execution");
+      }
+      console.log("started");
+    } else console.log(JSON.stringify(await reconcileWorker(action, file, worktree)));
+  }
   catch (error) { console.error(error.message); process.exitCode = 1; }
 }
