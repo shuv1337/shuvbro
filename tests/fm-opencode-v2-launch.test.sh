@@ -86,7 +86,7 @@ printf '%s\n' task-fixture > "$TMP_ROOT/worker.meta"
 # Read-only target/runtime probe: only help/version calls and local package reads.
 ROOT="$ROOT" LAB="$TMP_ROOT/capability" node --input-type=module <<'JS'
 import * as fs from 'node:fs'; import assert from 'node:assert/strict'; import {pathToFileURL} from 'node:url';
-const {probeCapabilities}=await import(pathToFileURL(process.env.ROOT+'/bin/fm-opencode-v2-capability.mjs'));
+const {probeCapabilities,knownBad}=await import(pathToFileURL(process.env.ROOT+'/bin/fm-opencode-v2-capability.mjs'));
 const {installPackage}=await import(pathToFileURL(process.env.ROOT+'/tests/assets/fm-opencode-v2-capability-fixture.mjs'));
 const lab=process.env.LAB,runtime=lab+'/.opencode/plugins';fs.mkdirSync(runtime,{recursive:true});
 const binary=lab+'/shuvcode',log=lab+'/calls';
@@ -105,7 +105,7 @@ for (const flags of ['--session --auto','--serverish --session --auto']) {
 }
 delete process.env.PROBE_FLAGS;
 process.env.PROBE_API_FLAGS='--server --data';await assert.rejects(probeCapabilities(lab,binary),/missing native --param/);delete process.env.PROBE_API_FLAGS;
-await assert.rejects(probeCapabilities(lab,binary),/no matching shuvcode package.*reinstall/);
+await assert.rejects(probeCapabilities(lab,binary),/npm ci/);
 installPackage(binary);
 await assert.rejects(probeCapabilities(lab,binary),/npm ci/);
 function makeRuntime(root, version='4.0.0-rc.112', code='export const Data={TaggedError(){}}; export const Effect={void:{},gen(){},promise(){},tryPromise(){},runPromise(){},flatMap(){},fail(){}};') {
@@ -118,9 +118,13 @@ function makeRuntime(root, version='4.0.0-rc.112', code='export const Data={Tagg
 makeRuntime(lab);
 for (const version of ['2.0.22-shuv.2','2.0.22-shuv.3','2.0.23-shuv.1','2.0.23-shuv.1+build.1','2.0.100-shuv.12','2.1.0-shuv.1']) {
   process.env.PROBE_VERSION='shuvcode v'+version;
-  installPackage(binary,version);
+  installPackage(binary,version.split('+')[0]);
   assert.deepEqual(await probeCapabilities(lab,binary),{version:'shuvcode v'+version,runtime:'effect',qualified:true});
 }
+process.env.PROBE_VERSION='shuvcode v2.0.23-shuv.1+build.1';installPackage(binary);
+knownBad.set('2.0.23-shuv.1','fixture regression');
+await assert.rejects(probeCapabilities(lab,binary),/known-incompatible shuvcode v2\.0\.23-shuv\.1\+build\.1: fixture regression; install a fixed build/);
+knownBad.clear();
 delete process.env.PROBE_VERSION;
 installPackage(binary);
 process.env.PROBE_LEGACY_MESSAGE='1';await probeCapabilities(lab,binary);delete process.env.PROBE_LEGACY_MESSAGE;
@@ -154,9 +158,14 @@ for (const layout of ['nested','hoisted']) {
   fs.symlinkSync(native+'/bin/shuvcode',lab+'/'+layout+'-entry');
   await probeCapabilities(lab,lab+'/'+layout+'-entry');
 }
+const standalone=lab+'-standalone/bin/shuvcode';
+fs.mkdirSync(lab+'-standalone/bin',{recursive:true});fs.copyFileSync(binary,standalone);
+assert.deepEqual(await probeCapabilities(lab,standalone),{version:'shuvcode v2.0.23-shuv.1',runtime:'effect',qualified:true});
+process.env.PROBE_FLAGS='--session --auto';await assert.rejects(probeCapabilities(lab,standalone),/missing native --server/);delete process.env.PROBE_FLAGS;
+process.env.PROBE_VERSION='shuvcode v2.0.22-shuv.1';await assert.rejects(probeCapabilities(lab,standalone),/below the supported floor/);delete process.env.PROBE_VERSION;
 assert.ok(fs.readFileSync(log,'utf8').trim().split('\n').every(line=>['--version','--help','api --help'].includes(line)),'probe accessed service or dispatch');
 JS
-pass 'capability probe admits compatible newer forks and refuses V1, old builds, missing CLI/API/events and mismatched runtime without service access'
+pass 'capability probe admits compatible newer forks and standalone native builds and refuses V1, old or known-bad builds, missing CLI/API/events and mismatched runtime without service access'
 # The live guard must use dispatch's own native choice in its CPU/libc order
 # independently of locale, and fail when that choice cannot run instead of
 # moving to another variant or the node launcher.

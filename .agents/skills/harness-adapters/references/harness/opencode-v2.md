@@ -38,7 +38,7 @@ A project plugin cannot import shuvcode's own `Tool.Error` class; shuvcode match
 
 ## Dispatch
 
-Before dispatch publishes task runtime state or acquires an isolated copy, `bin/fm-opencode-v2-capability.mjs` owns the compatibility floor, known-bad exclusions, native launch/API flags, matching installed client contract and pinned Effect guard runtime checks.
+Before dispatch publishes task runtime state or acquires an isolated copy, `bin/fm-opencode-v2-capability.mjs` owns the compatibility floor, known-bad exclusions, native launch/API flags, matching installed npm client contract (CLI checks only for a standalone native executable) and pinned Effect guard runtime checks.
 Compatible newer stable shuvcode V2 releases pass without updating an exact-version allowlist; missing capabilities or mismatched/incomplete npm installations refuse with an actionable diagnostic.
 The probe runs only CLI help/version and an in-memory client transport, never service discovery or startup.
 Offline admission does not prove server behavior or plugin event emission; refresh the isolated live guards in [runtime verification](../../../../../docs/verification/runtime-backends.md#shuvcode-explicit-model-worker) after an upgrade.

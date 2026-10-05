@@ -1,8 +1,10 @@
 // Read-only pre-dispatch probe. CLI: ROOT. Only --version/--help execute;
 // never call api, debug paths, service discovery, or a managed/private server.
 // Accept stable shuvcode V2 builds at/above the last qualified contract floor,
-// subject to native CLI flags, the matching distribution's offline client
-// contract, and the code root's pinned Effect guard runtime. No V1 fallback.
+// subject to native CLI flags, the matching npm distribution's offline client
+// contract when one is installed, and the code root's pinned Effect guard
+// runtime. A standalone native executable without a shuvcode npm package gets
+// the CLI checks only. No V1 fallback.
 // The bundled client is exercised with an in-memory transport, not a server.
 // Plugin event declarations are checked too. These are admission checks, not
 // live behavioral qualification: permissions, hooks, restart settlement and
@@ -18,10 +20,10 @@ const floor = [2, 0, 22, 2];
 const floorVersion = "2.0.22-shuv.2";
 // Add exclusions only for demonstrated regressions, with the evidence/reason.
 // None above the floor are currently known bad; a release bump is not a veto.
-const knownBad = new Map();
+export const knownBad = new Map();
 const prefix = "opencode-v2 capability probe: ";
 
-function installedPackage(executable, version) {
+function installedPackage(executable, release) {
   const candidates = executable.includes("/") ? [resolve(executable)] :
     (process.env.PATH || "").split(delimiter).map(dir => resolve(dir, executable));
   let binary;
@@ -34,19 +36,18 @@ function installedPackage(executable, version) {
     let pkg;
     try { pkg = JSON.parse(readFileSync(join(dir, "package.json"), "utf8")); } catch {}
     if (pkg?.name === "shuvcode") {
-      if (pkg.version !== version) throw new Error("executable and bundled client versions differ");
+      if (pkg.version !== release) throw new Error("executable and bundled client versions differ");
       return dir;
     }
     if (/^shuvcode-(linux|darwin|windows)-/.test(pkg?.name || "")) {
-      if (pkg.version !== version) throw new Error("native package and executable versions differ");
+      if (pkg.version !== release) throw new Error("native package and executable versions differ");
       const sibling = join(dirname(dir), "shuvcode");
       let owner;
       try { owner = JSON.parse(readFileSync(join(sibling, "package.json"), "utf8")); } catch {}
-      if (owner?.name === "shuvcode" && owner.version === version && owner.optionalDependencies?.[pkg.name] === version) return sibling;
+      if (owner?.name === "shuvcode" && owner.version === release && owner.optionalDependencies?.[pkg.name] === release) return sibling;
     }
-    if (dirname(dir) === dir) break;
+    if (dirname(dir) === dir) return undefined;
   }
-  throw new Error("the executable has no matching shuvcode package with an offline client");
 }
 
 async function probeClient(packageRoot) {
@@ -112,8 +113,7 @@ export async function probeCapabilities(root, executable = "shuvcode") {
   if (numbers.some(number => !Number.isSafeInteger(number)) || differing >= 0 && numbers[differing] < floor[differing]) {
     throw new Error(prefix + version + " is below the supported floor shuvcode v" + floorVersion + "; upgrade shuvcode before dispatch");
   }
-  const build = version.slice("shuvcode v".length);
-  const release = build.split("+")[0];
+  const release = version.slice("shuvcode v".length).split("+")[0];
   if (knownBad.has(release)) throw new Error(prefix + "known-incompatible " + version + ": " + knownBad.get(release) + "; install a fixed build before dispatch");
   function flags(help, required) {
     for (const flag of required) if (!new RegExp("(?:^|\\s)" + flag + "(?:[\\s,=]|$)").test(help)) {
@@ -122,7 +122,10 @@ export async function probeCapabilities(root, executable = "shuvcode") {
   }
   flags(cli(["--help"]), ["--server", "--session", "--auto"]);
   flags(cli(["api", "--help"]), ["--server", "--param", "--data"]);
-  try { await probeClient(installedPackage(executable, build)); }
+  try {
+    const packageRoot = installedPackage(executable, release);
+    if (packageRoot) await probeClient(packageRoot);
+  }
   catch (error) { throw new Error(prefix + error.message + "; reinstall the complete matching shuvcode npm package (including its client), or use a compatible build; no service was contacted"); }
   const runtimeRoot = join(resolve(root), ".opencode/plugins");
   try {
