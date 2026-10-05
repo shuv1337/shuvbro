@@ -39,6 +39,7 @@ case "$operation" in
     else echo '[]'; fi ;;
   model.list|model.default)
     [ "$param" = "location[directory]=$TEST_WORK" ] || exit 94
+    [ "${TEST_ACTIVATE_AFTER_MODEL:-0}" != 1 ] || : > "$TEST_LOG.became-active"
     if [ "$operation" = model.default ]; then
       if [ -n "${TEST_CONFIGURED:-}" ]; then echo '{"data":{"id":"external-fallback","providerID":"other-provider","variants":[]}}'; exit 0; fi
       echo '{"data":{"id":"test-model","providerID":"fixture","variants":[{"id":"high"}]}}'
@@ -72,7 +73,7 @@ case "$operation" in
     [ -z "$session_param" ] || [ "$session_param" = sessionID=ses_worker_exact ] || exit 95
     model=$(cat "$TEST_LOG.model" 2>/dev/null || echo '{"providerID":"fixture","id":"test-model","variant":"default"}')
     jq -cn --arg dir "$TEST_WORK" --argjson model "$model" '{data:{id:"ses_worker_exact",location:{directory:$dir},model:$model}}' ;;
-  session.active) if [ "${TEST_ACTIVE:-}" = idle ] || [ -e "$TEST_LOG.cancelled" ]; then echo '{"data":{}}'; else echo '{"data":{"ses_worker_exact":{"type":"running"}}}'; fi ;;
+  session.active) if [ -e "$TEST_LOG.became-active" ]; then echo '{"data":{"ses_worker_exact":{"type":"running"}}}'; elif [ "${TEST_ACTIVE:-}" = idle ] || [ -e "$TEST_LOG.cancelled" ]; then echo '{"data":{}}'; else echo '{"data":{"ses_worker_exact":{"type":"running"}}}'; fi ;;
   session.message.list) if [ -n "${TEST_MESSAGES:-}" ]; then printf '%s\n' "$TEST_MESSAGES"; else echo '{"data":[]}'; fi ;;
   session.interrupt) : > "$TEST_LOG.cancelled"; echo '{"interrupted":true}' ;;
   *) exit 96 ;;
@@ -232,6 +233,7 @@ SH
   [ "$(cat "$TEST_LOG")" = $'created\nactivated' ] || fail 'secondmate used worker prompt/attach instead of primary activation'
   grep -Fx -- --auto "$TEST_LOG.primary-args" >/dev/null || fail 'secondmate lost unattended approval'
   grep -Fx -- --prompt "$TEST_LOG.primary-args" >/dev/null || fail 'secondmate did not carry charter into activation'
+  grep -Fx -- --prompt-id "$TEST_LOG.primary-args" >/dev/null || fail 'secondmate did not bind native charter admission to its exact message ID'
   jq -e 'has("launchAfterMessageID") and .launchAfterMessageID==null' "$TEST_RECORD" >/dev/null || fail 'secondmate submission was not bound to this launch'
   export TEST_ACTIVE=idle
   started() { env -u FM_V2_ACTIVATION -u OPENCODE_SESSION_ID node "$ROOT/bin/fm-opencode-v2-session.mjs" started "$TEST_RECORD" "$TEST_WORK" "${1:-s1.2.3}"; }
@@ -239,6 +241,16 @@ SH
   export TEST_MESSAGES='{"data":[{"id":"msg_new","type":"user"}]}'
   if started > /dev/null 2>&1; then fail 'queued charter alone falsely proved execution started'; fi
   export TEST_MESSAGES='{"data":[{"id":"msg_new","type":"assistant"}]}'
+  if started > /dev/null 2>&1; then fail 'an unrelated new assistant turn falsely proved charter execution'; fi
+  TEST_MESSAGES=$(jq -cn --arg charter "$(jq -r .launchMessageID "$TEST_RECORD")" '{data:[{id:"msg_new",type:"assistant"},{id:$charter,type:"user"}]}')
+  completed_messages=$TEST_MESSAGES
+  TEST_MESSAGES=$(jq -cn --arg charter "$(jq -r .launchMessageID "$TEST_RECORD")" '{data:[{id:$charter,type:"user"}]}')
+  if started > /dev/null 2>&1; then fail 'queued charter without execution falsely proved submission'; fi
+  TEST_MESSAGES=$(jq -cn --arg charter "$(jq -r .launchMessageID "$TEST_RECORD")" '{data:[{id:"msg_other_reply",type:"assistant"},{id:"msg_other_user",type:"user"},{id:$charter,type:"user"}]}')
+  if started > /dev/null 2>&1; then fail 'another user turn after charter falsely proved charter execution'; fi
+  TEST_MESSAGES=$(jq -cn --arg charter "$(jq -r .launchMessageID "$TEST_RECORD")" '{data:[{id:"msg_other_reply",type:"assistant"},{id:"msg_other_user",type:"user"},{id:"msg_charter_reply",type:"assistant"},{id:$charter,type:"user"}]}')
+  started > /dev/null || fail 'subsequent startup nudge erased completed charter execution proof'
+  TEST_MESSAGES=$completed_messages
   started > /dev/null || fail 'a new assistant turn should prove secondmate submission'
   if started s1.2.4 > /dev/null 2>&1; then fail 'an earlier spawn generation falsely proved a new launch'; fi
   export TEST_ACTIVE=running
@@ -249,6 +261,9 @@ SH
   chmod 600 "$TEST_RECORD.tmp"
   mv "$TEST_RECORD.tmp" "$TEST_RECORD"
   if started > /dev/null 2>&1; then fail 'an earlier resumed turn falsely proved the new launch started'; fi
+  export TEST_ACTIVE=running
+  if started > /dev/null 2>&1; then fail 'current-generation active execution bypassed the pre-launch message baseline'; fi
+  export TEST_ACTIVE=idle
   printf 'kind=secondmate\nspawn_gen=s1.2.4\n' > "$TMP_ROOT/mate.meta"
   : > "$TEST_LOG"
   (cd "$own" && "$own/bin/fm-opencode-v2-launch.sh" --secondmate --resume --model fixture/test-model --prompt 'exact worker brief' --session-record "$TEST_RECORD") \
@@ -257,8 +272,15 @@ SH
     || fail 'secondmate relaunch lost its exact session, message baseline or new generation'
   [ "$(cat "$TEST_LOG")" = activated ] || fail 'secondmate relaunch created a new session or bypassed activation'
   if started s1.2.4 > /dev/null 2>&1; then fail 'secondmate relaunch counted the old assistant message as new submission'; fi
-  export TEST_MESSAGES='{"data":[{"id":"msg_next","type":"assistant"}]}'
+  TEST_MESSAGES=$(jq -cn --arg charter "$(jq -r .launchMessageID "$TEST_RECORD")" '{data:[{id:"msg_next",type:"assistant"},{id:$charter,type:"user"}]}')
   started s1.2.4 > /dev/null || fail 'secondmate resumed assistant turn did not prove submission'
+  : > "$TEST_LOG"
+  if (cd "$own" && TEST_ACTIVATE_AFTER_MODEL=1 "$own/bin/fm-opencode-v2-launch.sh" --secondmate --resume --model fixture/test-model --prompt 'exact worker brief' --session-record "$TEST_RECORD") 2> "$TMP_ROOT/mate-race.err"; then
+    fail 'secondmate resume accepted execution that began during catalog selection'
+  fi
+  assert_contains "$(cat "$TMP_ROOT/mate-race.err")" 'became active before charter admission' 'secondmate catalog race lost its refusal diagnostic'
+  [ ! -s "$TEST_LOG" ] || fail 'secondmate activated after the resumed session became active'
+  rm -f "$TEST_LOG.became-active"
   pass 'secondmate launcher validates its parent, freezes its own root and delegates charter admission to native primary activation'
 )
 

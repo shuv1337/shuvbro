@@ -4,6 +4,8 @@
 # --secondmate activates a home-local lead TUI, not a worker: its own native
 # plugin admits TEXT only after claiming that home and freezing its environment.
 # The parent-owned FILE still supplies exact-session lifecycle reconciliation.
+# For a secondmate it also binds the spawn generation, prior last-message ID
+# and deterministic charter message ID admitted by that exact home-local TUI.
 # An exact recorded session is created before prompt admission; no private
 # server/stdin lease is started or killed. --auto applies to this worker TUI.
 # FILE is the home-owned task session sidecar passed by fm-spawn, not an RPC
@@ -36,7 +38,7 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 [ "$have_prompt" -eq 1 ] && [ -n "$record" ] || exit 2
-unset FM_V2_ACTIVATION OPENCODE_SESSION_ID
+unset FM_V2_ACTIVATION OPENCODE_SESSION_ID FM_V2_LAUNCH_PROMPT FM_V2_LAUNCH_MESSAGE_ID
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 case "$record" in *.opencode-v2-session.json) ;; *) echo 'error: native worker requires a task-bound session sidecar' >&2; exit 1 ;; esac
 meta=${record%.opencode-v2-session.json}.meta
@@ -172,10 +174,16 @@ if [ "$secondmate" -eq 1 ]; then
   # Bind the submission readback to this launch, never an earlier resumed turn.
   messages=$(api session.message.list --param "sessionID=$session" --param "location[directory]=$directory" --param order=desc --param limit=1)
   prior=$(jq -c '.data | if type=="array" then (.[0].id // null) else error("invalid messages") end' <<< "$messages")
+  if [ "$resumed" -eq 1 ]; then
+    api session.active > "$catalog"
+    jq -e --arg id "$session" '(.data | type) == "object" and (.data | has($id) | not)' "$catalog" >/dev/null \
+      || { echo 'error: recorded native secondmate became active before charter admission; refusing to resume it' >&2; exit 1; }
+  fi
   temporary=$(mktemp "${record}.XXXXXX")
   generation=$(sed -n 's/^spawn_gen=//p' "$meta")
   [[ "$generation" =~ ^s[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'error: native secondmate requires a current spawn generation' >&2; exit 1; }
-  jq --argjson prior "$prior" --arg generation "$generation" '.launchAfterMessageID=$prior | .spawnGeneration=$generation' "$record" > "$temporary"
+  prompt_id=$(node -e 'console.log("msg_"+require("node:crypto").createHash("sha256").update(process.argv[1]+"\0"+process.argv[2]).digest("hex"))' "$session" "$generation")
+  jq --argjson prior "$prior" --arg generation "$generation" --arg prompt_id "$prompt_id" '.launchAfterMessageID=$prior | .spawnGeneration=$generation | .launchMessageID=$prompt_id' "$record" > "$temporary"
   mv "$temporary" "$record"
   [ -f "$meta" ] && [ ! -L "$meta" ] && [ "$(cat "$meta")" = "$meta_before" ] \
     || { echo 'error: native secondmate metadata changed before activation' >&2; exit 1; }
@@ -184,7 +192,7 @@ if [ "$secondmate" -eq 1 ]; then
   binary=$(fm_shuvcode_native_binary) || { echo 'error: native secondmate executable is unavailable' >&2; exit 1; }
   rm -f "$catalog"
   trap - EXIT
-  FM_ROOT_OVERRIDE="$directory" exec "$SCRIPT_DIR/fm-opencode-v2-primary.sh" --session "$session" --native-binary "$binary" --server "$(jq -er .serviceURL <<< "$service")" --auto --prompt "$prompt"
+  FM_ROOT_OVERRIDE="$directory" exec "$SCRIPT_DIR/fm-opencode-v2-primary.sh" --session "$session" --native-binary "$binary" --server "$(jq -er .serviceURL <<< "$service")" --auto --prompt "$prompt" --prompt-id "$prompt_id"
 fi
 # Explicit-endpoint TUIs do not perform the managed client's environment push.
 # Preserve worker caller routing before admission, without parent activation or

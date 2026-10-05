@@ -303,14 +303,14 @@ test_secondmate_activation_owns_only_its_home() {
   tui_case secondmate-activation
   printf 'mate\n' > "$HOME_DIR/.fm-secondmate-home"
   local out="$CASE/out.json"
-  FM_V2_LAUNCH_PROMPT='secondmate fixture charter' v2_tui "$CASE" "$(spec '{"steps":[{"do":"wait","until":"admitted","match":"fm-session-start"},{"do":"registration"}]}')" "$out"
+  FM_V2_LAUNCH_PROMPT='secondmate fixture charter' FM_V2_LAUNCH_MESSAGE_ID="msg_$(printf '%064d' 1)" v2_tui "$CASE" "$(spec '{"steps":[{"do":"wait","until":"admitted","match":"fm-session-start"},{"do":"registration"}]}')" "$out"
   jq -e '.setup == "ok"' "$out" >/dev/null || fail "secondmate activation failed: $(jq -c '{setup, failures}' "$out")"
   jq -e --arg h "$HOME_DIR" '.steps[1].record | .home==$h and .state==($h+"/state") and .config==($h+"/config")' "$out" >/dev/null \
     || fail 'secondmate did not freeze its own home paths'
   [ "$(startup_admissions "$out")" = 1 ] || fail 'secondmate did not admit its home-local startup nudge'
-  jq -e '.admitted[0] | .text=="secondmate fixture charter" and .delivery=="queue"' "$out" >/dev/null \
+  jq -e --arg id "msg_$(printf '%064d' 1)" '.admitted[0] | .id==$id and .text=="secondmate fixture charter" and .delivery=="queue"' "$out" >/dev/null \
     || fail 'secondmate did not admit its charter through the activated TUI'
-  jq -e 'all(.environmentPushes[]; (.keys | index("FM_V2_LAUNCH_PROMPT"))==null)' "$out" >/dev/null \
+  jq -e 'all(.environmentPushes[]; (.keys | index("FM_V2_LAUNCH_PROMPT"))==null and (.keys | index("FM_V2_LAUNCH_MESSAGE_ID"))==null)' "$out" >/dev/null \
     || fail 'secondmate launch prompt leaked into the helper environment'
   pass 'tui: secondmate marker does not disable exact activation or home-local startup'
 }

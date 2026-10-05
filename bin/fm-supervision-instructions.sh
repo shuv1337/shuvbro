@@ -168,7 +168,11 @@ repair_line() {
       ;;
     opencode-v2)
       if [ -n "$V2_INACTIVE" ]; then
-        printf '%s%s\n' "$prefix" 'automatic OpenCode V2 supervision is inactive without exact activation; relaunch the lead with bin/fm-opencode-v2-lead.sh (or bin/fm-opencode-v2-primary.sh --session ID --native-binary PATH) on the execution host, or keep the generic bounded foreground wait over bin/fm-watch.sh, never shell &.'
+        if [ -f "$FM_HOME/.fm-secondmate-home" ]; then
+          printf '%s%s\n' "$prefix" 'automatic OpenCode V2 supervision is inactive without exact activation; ask the parent to relaunch this secondmate with bin/fm-control.sh <secondmate-id> relaunch in the parent home, which preserves the recorded native session; until then keep the generic bounded foreground wait over bin/fm-watch.sh, never shell &.'
+        else
+          printf '%s%s\n' "$prefix" 'automatic OpenCode V2 supervision is inactive without exact activation; relaunch the lead with bin/fm-opencode-v2-lead.sh (or bin/fm-opencode-v2-primary.sh --session ID --native-binary PATH) on the execution host, or keep the generic bounded foreground wait over bin/fm-watch.sh, never shell &.'
+        fi
       else
         printf '%s%s\n' "$prefix" 'repair missing watcher supervision by letting the OpenCode TUI plugin arm after idle; use bin/fm-watch-arm.sh only as a manual recovery probe if the plugin reports failure.'
       fi
@@ -228,7 +232,11 @@ v2_inactive_notice() {
   [ -n "$V2_INACTIVE" ] || return 0
   printf '%s\n' 'OpenCode V2 automatic supervision: INACTIVE in this checkout.'
   printf '%s\n' 'No exact native TUI ownership proof is available here, so no plugin owns automatic watcher continuity.'
-  printf '%s\n' 'Activate the exact lead on its execution host by relaunching it with bin/fm-opencode-v2-lead.sh, which resolves the session and native executable for bin/fm-opencode-v2-primary.sh --session ID --native-binary PATH.'
+  if [ -f "$FM_HOME/.fm-secondmate-home" ]; then
+    printf '%s\n' 'Ask the parent to relaunch this secondmate with bin/fm-control.sh <secondmate-id> relaunch in the parent home; that path resolves the exact parent-owned native session for bin/fm-opencode-v2-primary.sh --session ID --native-binary PATH.'
+  else
+    printf '%s\n' 'Activate the exact lead on its execution host by relaunching it with bin/fm-opencode-v2-lead.sh, which resolves the session and native executable for bin/fm-opencode-v2-primary.sh --session ID --native-binary PATH.'
+  fi
   printf '%s\n' 'Plain and linked copies, including external homes, both require this explicit activation; opening a tab never transfers ownership.'
   printf '%s\n' 'Until then this session has no verified wake adapter, so the unknown-harness fallback below applies.'
   printf '\n'

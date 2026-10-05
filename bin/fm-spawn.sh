@@ -3193,7 +3193,7 @@ opencode_v2_wait_for_prefill() {
   while [ "$i" -lt "$max" ]; do
     opencode_v2_turn_started && return 0
     pane=$(fm_backend_capture "$BACKEND" "$T" 120 "$W" 2>/dev/null || true)
-    if printf '%s\n' "$pane" | grep -Fq -- "$ready_marker"; then
+    if [ "$KIND" != secondmate ] && printf '%s\n' "$pane" | grep -Fq -- "$ready_marker"; then
       state=$(opencode_v2_composer_state)
       case "$state" in
         pending|pending-unproven) return 0 ;;
@@ -4311,10 +4311,14 @@ fi
 # Both model-bound and default launches retain the root submission contract.
 if [ "$HARNESS" = opencode-v2 ]; then
   if ! opencode_v2_wait_for_prefill; then
-    opencode_v2_spawn_fail "shuvcode did not show its pre-filled launch brief in window $T"
+    if [ "$KIND" = secondmate ]; then
+      opencode_v2_spawn_fail "shuvcode secondmate did not prove its exact charter started in window $T"
+    else
+      opencode_v2_spawn_fail "shuvcode did not show its pre-filled launch brief in window $T"
+    fi
     exit 1
   fi
-  if ! opencode_v2_turn_started && ! opencode_v2_submit_prefill; then
+  if [ "$KIND" != secondmate ] && ! opencode_v2_turn_started && ! opencode_v2_submit_prefill; then
     opencode_v2_spawn_fail "shuvcode pre-filled launch brief could not be submitted in window $T"
     exit 1
   fi

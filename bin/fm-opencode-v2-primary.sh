@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Explicit native V2 lead activation on the normal shared service.
-# Usage: --session ID --native-binary PATH [--server URL] [--auto] [--prompt TEXT]
+# Usage: --session ID --native-binary PATH [--server URL] [--auto] [--prompt TEXT [--prompt-id ID]]
 # --prompt is admitted by the native TUI plugin only after exact activation and
 # environment publication. --auto enables unattended approval for secondmates.
 # PATH must be the installed native executable, not its forking npm wrapper:
@@ -10,18 +10,19 @@
 # Existing live claims refuse replacement; restarting a dead owner is explicit.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-session='' binary='' server='' prompt='' auto=0
+session='' binary='' server='' prompt='' prompt_id='' auto=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --session|--native-binary|--server|--prompt)
+    --session|--native-binary|--server|--prompt|--prompt-id)
       [ "$#" -ge 2 ] || exit 2
-      case "$1" in --session) session=$2 ;; --native-binary) binary=$2 ;; --server) server=$2 ;; --prompt) prompt=$2 ;; esac
+      case "$1" in --session) session=$2 ;; --native-binary) binary=$2 ;; --server) server=$2 ;; --prompt) prompt=$2 ;; --prompt-id) prompt_id=$2 ;; esac
       shift 2 ;;
     --auto) auto=1; shift ;;
-    --help|-h) echo 'Usage: fm-opencode-v2-primary.sh --session ID --native-binary PATH [--server URL] [--auto] [--prompt TEXT]'; exit 0 ;;
+    --help|-h) echo 'Usage: fm-opencode-v2-primary.sh --session ID --native-binary PATH [--server URL] [--auto] [--prompt TEXT [--prompt-id ID]]'; exit 0 ;;
     *) exit 2 ;;
   esac
 done
+[ -z "$prompt_id" ] || { [ -n "$prompt" ] && [[ "$prompt_id" =~ ^msg_[a-f0-9]{64}$ ]]; } || { echo 'error: prompt ID requires a launch prompt and exact native message ID' >&2; exit 2; }
 [[ "$session" =~ ^ses_[A-Za-z0-9_-]+$ ]] || { echo 'error: exact native session ID required' >&2; exit 2; }
 [ -x "$binary" ] || { echo 'error: installed native V2 executable required' >&2; exit 2; }
 # A script/npm wrapper forks a different execution PID and cannot be activated.
@@ -45,8 +46,9 @@ FM_V2_ACTIVATION=$(jq -cn --arg session "$session" --arg claim "$claim" --arg ro
   '{version:1,sessionID:$session,claimID:$claim,root:$root,home:$home,state:$state,config:$config,ownerPID:$owner.pid,ownerStart:$owner.start,hostBootID:$owner.boot,servicePID:$service.servicePID,serviceStart:$service.serviceStart,serviceURL:$service.serviceURL,lifecycle:"claimed"}')
 export FM_V2_ACTIVATION FM_HOME="$home" FM_ROOT_OVERRIDE="$root" FM_STATE_OVERRIDE="$state" FM_CONFIG_OVERRIDE="$config"
 unset OPENCODE_SESSION_ID
-unset FM_V2_LAUNCH_PROMPT
+unset FM_V2_LAUNCH_PROMPT FM_V2_LAUNCH_MESSAGE_ID
 [ -z "$prompt" ] || export FM_V2_LAUNCH_PROMPT="$prompt"
+[ -z "$prompt_id" ] || export FM_V2_LAUNCH_MESSAGE_ID="$prompt_id"
 cd "$root"
 args=(--server "$server" --session "$session")
 [ "$auto" -eq 0 ] || args+=(--auto)

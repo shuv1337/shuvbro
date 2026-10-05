@@ -1726,8 +1726,23 @@ Its charter executed the real session-start command and appended parent-channel 
 Relaunch processed the charter again, appended a second parent status, and retained the exact native session plus the configured `opencode-v2` harness, model and `low` effort pin.
 Exit confirmed `native-session=idle`; ordinary retirement removed the child home and parent task record, and the guarded lab cleanup confirmed the default Herdr session was unchanged.
 The isolated XDG service and non-default ownership namespace were stopped and retired by the fixture's cleanup owner.
-Portable regressions cover launcher capability and parent-binding refusal, current-generation submission proof including fast completed turns and non-null resume baselines, home-local activation and charter admission, profile resolution, and parent/child claim isolation.
-An earlier native turn cannot satisfy the new launch's submission check, even if its session is still active.
+Portable regressions cover launcher capability and parent-binding refusal, exact charter execution proof including active and fast completed turns, non-null resume baselines and catalog-window races, home-local activation and charter admission, profile resolution, and parent/child claim isolation.
+`tests/fm-spawn-dispatch-profile.test.sh` also exercises a secondmate through the actual spawn handshake: a worker-style pending composer never triggers Enter or substitutes for exact charter execution, and missing proof cancels that exact session before closing its endpoint.
+`tests/fm-supervision-instructions.test.sh` verifies that an unactivated secondmate's repair instruction uses the parent-owned relaunch path, never the newest lead-session resolver.
+The submission contract is owned by `bin/fm-opencode-v2-session.mjs`'s `started` interface; an earlier or unrelated native turn cannot satisfy it even when the recorded session is active.
+On 2026-10-05 at 00:03:33 PDT, the isolated lifecycle guard passed again on shuvcode v2.0.22-shuv.2 with exact charter IDs enabled:
+
+```sh
+SHELL=/usr/bin/zsh FM_CONTROL_HERDR_V2_LIVE=1 FM_HERDR_LAB_HELPER=/home/shuv/repos/shuvbro/bin/fm-herdr-lab.sh bin/fm-test-run.sh tests/fm-control-herdr-v2-live-e2e.test.sh
+```
+
+```text
+ok - shuvcode v2.0.22-shuv.2: real Herdr/Treehouse nested-shell exit, in-place relaunch and second exit
+ok - shuvcode v2.0.22-shuv.2: V2 secondmate owns its home, runs startup, delivers parent status, resumes its session/profile and retires cleanly
+FM_TEST_SUMMARY total=1 failed=0 skipped_gate=0 duration_ms=134072
+```
+
+The command pins zsh because the guard's pre-existing nested-shell assertion expects that shell.
 This qualifies home-local Linux secondmate launch and relaunch on the capability-qualified build; it does not extend the separate combined shared-service or cross-host matrix below.
 
 ### Native shared-service qualification status

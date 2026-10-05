@@ -72,7 +72,7 @@ export async function supervisionNeeded(record, env = helperEnvironment(record))
 export function helperEnvironment(record) {
   const env = { ...process.env, FM_HOME: record.home, FM_ROOT_OVERRIDE: record.root, FM_STATE_OVERRIDE: record.state, FM_CONFIG_OVERRIDE: record.config,
     FM_V2_REGISTRY_NAMESPACE: process.env.FM_V2_REGISTRY_NAMESPACE || "default", FM_V2_SERVICE_URL: serviceURL(record.serviceURL) };
-  for (const key of ["FM_V2_ACTIVATION", "FM_V2_LAUNCH_PROMPT", "OPENCODE_PASSWORD", "OPENCODE_SERVER_PASSWORD", "OPENCODE_SESSION_ID"]) delete env[key];
+  for (const key of ["FM_V2_ACTIVATION", "FM_V2_LAUNCH_PROMPT", "FM_V2_LAUNCH_MESSAGE_ID", "OPENCODE_PASSWORD", "OPENCODE_SERVER_PASSWORD", "OPENCODE_SESSION_ID"]) delete env[key];
   return env;
 }
 
@@ -192,8 +192,14 @@ export default { id: "firstmate.native.v2", async setup(ctx) {
     // A persistent secondmate is a lead in its own home. Never admit its
     // charter before activation has installed the exact guard and environment.
     const launchPrompt = process.env.FM_V2_LAUNCH_PROMPT;
+    const launchMessageID = process.env.FM_V2_LAUNCH_MESSAGE_ID;
     delete process.env.FM_V2_LAUNCH_PROMPT;
-    if (launchPrompt) await ctx.client.session.prompt({ sessionID: record.sessionID, text: launchPrompt, delivery: "queue" });
+    delete process.env.FM_V2_LAUNCH_MESSAGE_ID;
+    if (launchMessageID && (!launchPrompt || !/^msg_[a-f0-9]{64}$/.test(launchMessageID))) throw new Error("invalid exact launch message ID");
+    if (launchPrompt) {
+      const admitted = await ctx.client.session.prompt({ sessionID: record.sessionID, ...(launchMessageID ? { id: launchMessageID } : {}), text: launchPrompt, delivery: "queue" });
+      if (launchMessageID && admitted?.id !== launchMessageID) throw new Error("native charter admission did not acknowledge the exact launch message ID");
+    }
    const paths = { root: record.root, home: record.home, state: record.state, config: record.config };
   let reconcileInFlight, held = false, nudged = false;
   let lastFailure = "";
