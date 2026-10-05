@@ -131,6 +131,7 @@ free_port() {
 }
 
 SC=$(v2_resolve_live_binary) || fail 'no runnable shuvcode for the live guard; no service command was run'
+printf 'note: native shuvcode binary %s\n' "$SC"
 mkdir -p "$LAB/xdg/config/shuvcode" "$LAB/xdg/state" "$LAB/xdg/data" "$LAB/xdg/cache"
 paths=$(cd "$LAB" && isolated "$SC" debug paths 2>/dev/null)
 for kind in config state data; do

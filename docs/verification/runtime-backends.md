@@ -1678,7 +1678,8 @@ The current `bin/fm-opencode-v2-launch.sh` creates an exact model-bound session 
 The native route is implemented but is not yet qualified for the combined issue #1 matrix.
 On 2026-10-02, isolated Linux probes with installed shuvcode v2.0.22-shuv.1 demonstrated native package loading, exact TUI-owned lock and pathless binding RPC, a real typed cd-guard refusal, unrelated-root execution, observer environment recovery, ordinary session-ID spoof refusal, one durable queued wake and shared-worker attachment, plus natural TUI retirement with the shared service surviving.
 Those probes used a deterministic local provider, not a paid/vendor model, and did not qualify the actual two-home/two-worker/Herdr, busy-and-idle delivery or restarted-service positive matrix.
-On 2026-10-04 at 18:35 PDT on Linux with installed shuvcode v2.0.22-shuv.2, Node v26.10.0 and termctrl 0.6.0, the isolated shared-service guard exited 0 for all requested legs A/B/C/D/E/G/H:
+On 2026-10-04 at 20:11:16 PDT on Linux with installed shuvcode v2.0.22-shuv.2, Node v26.10.0 and termctrl 0.6.0, the isolated shared-service guard exited 0 for all requested legs A/B/C/D/E/G/H.
+The guard used the dispatch-selected AVX2 executable `/home/shuv/.npm-global/lib/node_modules/shuvcode/node_modules/shuvcode-linux-x64/bin/shuvcode`, recorded in its output before service startup:
 
 ```sh
 FM_OPENCODE_V2_SHARED_LIVE=1 FM_V2_LIVE_LEGS=ABCDEGH bash tests/fm-opencode-v2-shared-service-live.test.sh
@@ -1695,7 +1696,7 @@ ok - live leg H: after the confirmed successor cancellation ordinary teardown re
 ```
 
 The run also passed package inventory, typed guard refusals, exact TUI-owned lock, owner rebind after service restart, interruption of the successor's resumed worker, and bounded settlement for workers that finished after or before restart.
-On the same host at 18:38 PDT, the complete succession guard exited 0 with its default ten cycles and private-server case enabled:
+On the same host at 20:13:57 PDT, the complete succession guard exited 0 using the same AVX2 executable, with its default ten cycles and private-server case enabled:
 
 ```sh
 FM_OPENCODE_V2_SUCCESSION_LIVE=1 bash tests/fm-opencode-v2-succession-live.test.sh
@@ -1719,7 +1720,8 @@ ok - a lead against a private server is refused at activation
 ```
 
 Both guards use a local deterministic provider, isolated XDG services, private termctrl PTYs and disposable non-default ownership namespaces retired through `cleanup-test-namespace`.
-Their shared resolver probes installed package variants with read-only `--version` calls, skipping incompatible loader variants rather than selecting by glob order; the portable launcher regression covers that failure and explicit-override refusal.
+Their shared resolver uses the CPU/libc package preference order owned by `fm_shuvcode_platform_package_names` in `bin/fm-shuvcode-lib.sh`, probes candidates with read-only `--version` calls and skips incompatible loaders.
+The portable launcher regression exercises the four real x64 package names under both `C` and `en_US.UTF-8`, asserting AVX2, non-AVX2 and libc preferences, loader-failure fallback and explicit-override refusal.
 The direct Herdr detach/attach leg F was excluded because its interactive client bypasses the named-session helper required by this qualification's isolation contract.
 The separate real Herdr/Treehouse worker lifecycle guard above passed, but does not qualify that primary detach/attach leg.
 The real-model evidence remains the single-worker free-model guard above; a real-model two-home/two-worker combined Herdr matrix remains pending, so these results qualify worker dispatch on shuv.2 without claiming the complete native shared-service matrix.

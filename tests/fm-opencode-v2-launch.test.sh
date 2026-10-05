@@ -102,53 +102,75 @@ assert.deepEqual(await probeCapabilities(lab,binary),{version:'shuvcode v2.0.22-
 assert.ok(fs.readFileSync(log,'utf8').trim().split('\n').every(line=>['--version','--help'].includes(line)),'probe accessed service or dispatch');
 JS
 pass 'capability probe refuses unqualified version, missing CLI and runtime; qualified stand-in is read-only'
-# The live guard's installed-package resolver must skip an executable musl
-# package whose loader fails on a glibc host, without calling any service API.
+# The live guard must follow dispatch's CPU/libc preference order independently
+# of locale, then skip a candidate whose loader fails without a service call.
 # shellcheck source=tests/fm-opencode-v2-live-binary-lib.sh
 . "$ROOT/tests/fm-opencode-v2-live-binary-lib.sh"
 (
   unset FM_OPENCODE_V2_BIN
   resolver="$TMP_ROOT/resolver"
-  mkdir -p "$resolver/bin" "$resolver/node_modules/shuvcode-a-musl/bin" "$resolver/node_modules/shuvcode-b-glibc/bin"
+  mkdir -p "$resolver/bin"
   export RESOLVER_LOG="$resolver/calls"
   cat > "$resolver/bin/shuvcode" <<'SH'
 #!/usr/bin/env bash
-printf 'launcher:%s\n' "$*" >> "$RESOLVER_LOG"
+name=$(basename "$(dirname "$(dirname "$0")")")
+printf '%s:%s\n' "$name" "$*" >> "$RESOLVER_LOG"
 [ "$*" = --version ] || exit 99
+[ "$name" != "${RESOLVER_FAIL:-}" ] || exit 127
 echo 'shuvcode fixture'
 SH
-  cat > "$resolver/node_modules/shuvcode-a-musl/bin/shuvcode" <<'SH'
-#!/usr/bin/env bash
-printf 'musl:%s\n' "$*" >> "$RESOLVER_LOG"
-echo 'fixture incompatible loader' >&2
-exit 127
-SH
-  cat > "$resolver/node_modules/shuvcode-b-glibc/bin/shuvcode" <<'SH'
-#!/usr/bin/env bash
-printf 'glibc:%s\n' "$*" >> "$RESOLVER_LOG"
-[ "$*" = --version ] || exit 99
-echo 'shuvcode fixture'
-SH
+  for name in shuvcode-linux-x64 shuvcode-linux-x64-baseline shuvcode-linux-x64-baseline-musl shuvcode-linux-x64-musl; do
+    mkdir -p "$resolver/node_modules/$name/bin"
+    cp "$resolver/bin/shuvcode" "$resolver/node_modules/$name/bin/shuvcode"
+  done
   chmod +x "$resolver/bin/shuvcode" "$resolver"/node_modules/*/bin/shuvcode
+  # These host probes are consumed by the production package-order helper.
+  # shellcheck disable=SC2329
+  uname() { case "$*" in -s) printf '%s\n' Linux ;; -m) printf '%s\n' x86_64 ;; *) command uname "$@" ;; esac; }
+  # shellcheck disable=SC2329
+  ldd() {
+    if [ "${RESOLVER_MUSL:-0}" = 1 ]; then printf '%s\n' 'ldd (musl libc) fixture';
+    else printf '%s\n' 'ldd (GNU libc) fixture'; fi
+  }
+  # shellcheck disable=SC2329
+  grep() {
+    case "$*" in
+      */proc/cpuinfo) [ "${RESOLVER_AVX2:-0}" = 1 ] ;;
+      *) command grep "$@" ;;
+    esac
+  }
   resolver_call() { PATH="$resolver/bin:$PATH" v2_resolve_live_binary; }
-  good="$resolver/node_modules/shuvcode-b-glibc/bin/shuvcode"
-  bad="$resolver/node_modules/shuvcode-a-musl/bin/shuvcode"
-  [ "$(resolver_call)" = "$good" ] || fail 'live resolver selected an incompatible package'
-  [ "$(cat "$RESOLVER_LOG")" = $'musl:--version\nglibc:--version' ] || fail 'resolver did not probe and skip the failing variant read-only'
+  for lang in C en_US.UTF-8; do
+    for avx2 in 0 1; do
+      for musl in 0 1; do
+        expected=shuvcode-linux-x64-baseline
+        [ "$avx2" = 0 ] || expected=shuvcode-linux-x64
+        [ "$musl" = 0 ] || expected="$expected-musl"
+        : > "$RESOLVER_LOG"
+        got=$(LC_ALL="$lang" RESOLVER_AVX2="$avx2" RESOLVER_MUSL="$musl" resolver_call) || fail "$lang AVX2=$avx2 musl=$musl resolver failed"
+        [ "$got" = "$resolver/node_modules/$expected/bin/shuvcode" ] || fail "$lang AVX2=$avx2 musl=$musl selected $got instead of $expected"
+        [ "$(cat "$RESOLVER_LOG")" = "$expected:--version" ] || fail "$lang AVX2=$avx2 musl=$musl probed outside dispatch's first candidate"
+      done
+    done
+  done
+  good="$resolver/node_modules/shuvcode-linux-x64-baseline/bin/shuvcode"
+  bad="$resolver/node_modules/shuvcode-linux-x64/bin/shuvcode"
+  : > "$RESOLVER_LOG"
+  [ "$(RESOLVER_AVX2=1 RESOLVER_FAIL=shuvcode-linux-x64 resolver_call)" = "$good" ] || fail 'live resolver selected an incompatible package'
+  [ "$(cat "$RESOLVER_LOG")" = $'shuvcode-linux-x64:--version\nshuvcode-linux-x64-baseline:--version' ] || fail 'resolver did not probe and skip the failing variant read-only'
   [ "$(FM_OPENCODE_V2_BIN="$good" resolver_call)" = "$good" ] || fail 'working binary override was ignored'
-  if FM_OPENCODE_V2_BIN="$bad" resolver_call > "$resolver/out" 2> "$resolver/err"; then
+  if FM_OPENCODE_V2_BIN="$bad" RESOLVER_FAIL=shuvcode-linux-x64 resolver_call > "$resolver/out" 2> "$resolver/err"; then
     fail 'invalid explicit binary override silently fell back'
   fi
   grep -q 'cannot run explicit shuvcode binary' "$resolver/err" || fail 'invalid binary override lost its diagnostic'
-  rm "$good"
+  rm -rf "$resolver/node_modules"
   [ "$(resolver_call)" = "$resolver/bin/shuvcode" ] || fail 'runnable launcher fallback was lost'
-  rm "$resolver/bin/shuvcode"
-  ln -s "$bad" "$resolver/bin/shuvcode"
+  printf '#!/usr/bin/env bash\nexit 127\n' > "$resolver/bin/shuvcode"
   if resolver_call > "$resolver/out" 2> "$resolver/err"; then
     fail 'resolver accepted an installation with no runnable binary'
   fi
 )
-pass 'live binary resolver skips incompatible installed variants and refuses a broken explicit override'
+pass 'live binary resolver follows dispatch CPU/libc order in both locales, skips incompatible variants and refuses a broken override'
 export PATH="$TMP_ROOT/bin:$PATH"
 export TEST_NATIVE_STATE="$TMP_ROOT/native-state" TEST_SERVICE_PID=$$
 mkdir -p "$TEST_NATIVE_STATE"
