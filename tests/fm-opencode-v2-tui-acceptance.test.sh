@@ -66,20 +66,16 @@ helper_step() { jq -nc --argjson p "{\"PATH\":\"$PATH\"}" '{do: "shell", command
 owned_and_armed() {  # <lock-step-json>: steps until the owner holds .lock and a watcher is live
   jq -nc --argjson l "$1" '[{do: "wait", until: "admitted", match: "fm-session-start"}, $l, {do: "wait", until: "lock"}, {do: "wait", until: "watcher"}]'
 }
-# Count fm-watch.sh processes serving this home (singleton evidence). A forked
-# command-substitution subshell of a watcher shares its cmdline and environ,
-# so a process whose parent has the identical cmdline is not a watcher.
+# Count fm-watch.sh processes serving this home (singleton evidence).
+# tests/assets/fm-watch-count.mjs owns the subshell-exclusion and stable-rescan rules.
 watchers_step() {
-  local cmd
-  # shellcheck disable=SC2016 # expanded by the lead model shell, not here
-  cmd='n=0; for p in $(pgrep -f "/bin/fm-watch\.sh( |$)"); do
-  tr "\0" "\n" < /proc/$p/environ 2>/dev/null | grep -qx "FM_STATE_OVERRIDE=$1" || continue
-  pp=$(sed "s/.*) //" /proc/$p/stat 2>/dev/null | cut -d" " -f2)
-  [ -n "$pp" ] && [ "$(tr "\0" " " < /proc/$p/cmdline 2>/dev/null)" = "$(tr "\0" " " < /proc/$pp/cmdline 2>/dev/null)" ] && continue
-  n=$((n+1))
-done; echo watchers=$n'
-  jq -nc --arg c "$cmd" --arg s "$HOME_DIR/state" '{do: "shell", command: ("set -- " + ($s | @sh) + "; " + $c)}'
+  jq -nc --arg n "$V2_NODE_BIN" --arg h "$ROOT/tests/assets/fm-watch-count.mjs" --arg s "$HOME_DIR/state" \
+    '{do: "shell", command: ([$n, $h, $s] | map(@sh) | join(" "))}'
 }
+
+# Deterministic /proc race regressions exercise the same counting interface the
+# model shell invokes.
+"$V2_NODE_BIN" "$ROOT/tests/assets/fm-watch-count-regression.mjs" || fail "watcher-count regressions"
 
 startup_admissions() { jq '[.admitted[] | select(.text | test("fm-session-start"))] | length' "$1"; }
 wake_admissions() { jq --arg w "$WAKE" '[.admitted[] | select(.text | test($w))] | length' "$1"; }
