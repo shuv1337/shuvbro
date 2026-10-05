@@ -703,7 +703,13 @@ fm_backend_capture() {  # <backend> <target> <lines> [expected-label]
   fm_backend_source "$backend" || return 1
   case "$backend" in
     tmux) fm_backend_tmux_capture "$@" ;;
-    herdr) fm_backend_herdr_capture "$@" ;;
+    herdr)
+      # One ensure in front of supervision and peek reads. Send and doorbell
+      # call fm_backend_herdr_capture directly and must not start a server.
+      fm_backend_herdr_parse_target "$1" || return 1
+      fm_backend_herdr_server_ensure "$FM_BACKEND_HERDR_SESSION" || return 1
+      fm_backend_herdr_capture "$@"
+      ;;
     zellij) fm_backend_zellij_capture "$@" ;;
     orca) fm_backend_orca_capture "$@" ;;
     cmux) fm_backend_cmux_capture "$@" ;;
