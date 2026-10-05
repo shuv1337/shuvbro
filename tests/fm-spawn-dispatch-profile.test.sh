@@ -1416,6 +1416,34 @@ SH
   pass "an explicit non-V2 secondmate proceeds despite an unqualified pinned V2 build"
 }
 
+test_explicit_v2_secondmate_refuses_unqualified_build_before_state() {
+  local rec id sm out status
+  id=profile-secondmate-v2-unqualified
+  rec=$(make_spawn_case profile-secondmate-v2-unqualified codex "$id")
+  read_case_record "$rec"
+  cat > "$FAKEBIN_DIR/shuvcode" <<'SH'
+#!/usr/bin/env bash
+echo 'shuvcode v2.0.22-shuv.1'
+SH
+  chmod +x "$FAKEBIN_DIR/shuvcode"
+  sm="$CASE_DIR/secondmate-home"
+  make_seeded_secondmate_home "$sm" "$id"
+  sm=$(cd "$sm" && pwd -P)
+  printf -- '- %s - unqualified V2 fixture (home: %s; scope: test; projects: ; added 2026-10-04)\n' "$id" "$sm" \
+    > "$HOME_DIR/data/secondmates.md"
+
+  out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" opencode-v2 --secondmate)
+  status=$?
+  [ "$status" -ne 0 ] || fail "an explicit opencode-v2 secondmate spawned on an unqualified build"$'\n'"$out"
+  assert_contains "$out" "unqualified target shuvcode v2.0.22-shuv.1" "unqualified V2 secondmate was not refused by the capability probe"
+  assert_not_contains "$out" "spawned $id" "unqualified V2 secondmate reported a spawn"
+  assert_absent "$HOME_DIR/state/$id.meta" "unqualified V2 secondmate published task metadata"
+  assert_absent "$HOME_DIR/state/$id.opencode-v2-session.json" "unqualified V2 secondmate published a session record"
+  assert_absent "$sm/state" "unqualified V2 secondmate created child home state"
+  [ ! -s "$LAUNCH_LOG" ] || fail "unqualified V2 secondmate launched an endpoint"$'\n'"$(cat "$LAUNCH_LOG")"
+  pass "an explicit opencode-v2 secondmate refuses an unqualified build before publishing state"
+}
+
 test_active_dispatch_profile_does_not_block_secondmate_launch() {
   local rec id sm out status
   id=profile-secondmate-z16
@@ -1767,5 +1795,6 @@ test_claude_crewmate_launch_carries_the_attribution_policy
 test_claude_secondmate_launch_carries_the_attribution_policy
 test_active_dispatch_profile_does_not_block_secondmate_launch
 test_explicit_secondmate_harness_skips_pinned_v2_probe
+test_explicit_v2_secondmate_refuses_unqualified_build_before_state
 
 echo "# all fm-spawn-dispatch-profile tests passed"
