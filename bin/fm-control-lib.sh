@@ -236,11 +236,11 @@ fm_control_exit_command() {  # <harness>
 }
 
 # The named key sent after the exit command is typed and before each submit
-# Enter, or nothing when the adapter needs none. Codex opens a slash popup on
-# an exact `/quit` draft and that popup consumes Enter, leaving the draft and
-# the `/quit  exit Codex` row in place. Escape dismisses the popup and leaves
-# the draft unchanged, so the following Enter runs the bare command. Checked
-# against the Codex TUI composer (openai/codex slash popup handling, 2026-10-04).
+# Enter, or nothing when the adapter needs none. On codex-cli 0.160.0
+# (2026-10-04 PDT), Escape dismissed the /quit popup without editing the draft
+# and Enter then exited. Enter alone also exited: this proves compatibility,
+# not the reported swallow on other versions. The adapter reference and
+# docs/verification/runtime-backends.md own the empirical scope.
 # A harness with no verified mechanics returns nonzero, matching the tables
 # above. fm-control omits the key when the backend cannot deliver it.
 fm_control_exit_dismiss_key() {  # <harness>

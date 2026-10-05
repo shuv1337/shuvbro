@@ -105,9 +105,9 @@ case "${1:-}" in
     payload=${1:-}
     if [ "$literal" = 1 ]; then
       printf '%s\n' "$payload" >> "$D/literal"
-      # Codex keeps a slash popup open on an exact /quit draft. Enter is
-      # consumed until Escape closes it. The agent stops only on Enter after
-      # that dismiss.
+      # Model the reported historical swallow, not codex-cli 0.160.0, whose
+      # Enter-only probe also exited. In this fixture Enter is consumed until
+      # Escape closes the popup, then the next Enter stops the agent.
       if [ -n "${FM_FAKE_CODEX_POPUP:-}" ] \
          && { [ "$payload" = /exit ] || [ "$payload" = /quit ]; }; then
         printf 'open\n' > "$D/popup"

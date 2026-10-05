@@ -7,7 +7,7 @@ Verified on 2026-06-11 with codex-cli 0.139.0 unless a fact gives a newer versio
 | Fact | Value |
 |---|---|
 | Busy state | Unknown until a semantic source is live-verified: the app-server turn lifecycle is unreachable for a pane worker, and project lifecycle hooks did not fire for a Firstmate-launched worker. |
-| Exit command | `/quit`, after Escape dismisses the slash popup that appears about one second after the command is typed. |
+| Exit command | `/quit`; the control path sends Escape then Enter after a 1.2-second settle, live-verified with codex-cli 0.160.0 on 2026-10-04 PDT (see Exit popup). |
 | Interrupt | Single Escape. |
 | Skill invocation | `$<skill>`, for example `$no-mistakes`; `/<skill>` is Claude-only and Codex rejects it as "Unrecognized command". |
 | Resume | `codex resume <session-id>`, using the id printed on quit. |
@@ -21,13 +21,14 @@ The decision persists for the repository, so later worktrees of the same project
 
 ## Exit popup
 
-An exact `/quit` draft opens the slash popup on the row `/quit` with the description `exit Codex`.
-Enter while that popup is open is consumed by the completion row.
-The composer keeps `/quit` and the row stays visible, so the process keeps running.
-Escape dismisses the popup and leaves the draft unchanged.
-The following Enter runs the bare `/quit` command.
-`bin/fm-control.sh` waits about one second after typing, then sends Escape before each submit Enter (`fm_control_exit_dismiss_key` in `bin/fm-control-lib.sh`).
-Checked against the Codex TUI composer on 2026-10-04: `handle_key_event_with_slash_popup` dismisses on Escape without editing the draft, and a bare `/quit` plus Enter dispatches quit once the popup is gone.
+On 2026-10-04 PDT, codex-cli 0.160.0 in an idle TUI on a private tmux 3.7c socket displayed `/quit  exit Codex` above the `/quit` draft.
+Escape removed that popup without changing `/quit`, and the following Enter exited with status 0.
+The actual `bin/fm-control.sh <task-id> exit` path also stopped the disposable agent, with the backend classifier changing from `alive` to `dead` while its shell endpoint remained.
+Enter alone while the popup was visible also exited successfully in this version, so the reported Enter-swallowing failure was not reproduced.
+Do not infer that all Codex versions swallow Enter or require Escape from this compatibility probe.
+The control path sends Escape before each submit Enter when the backend supports it (`fm_control_exit_dismiss_key` in `bin/fm-control-lib.sh`); Orca retains Enter-only delivery.
+The live probe covered idle Codex on tmux, not busy interruption, Herdr, or other backend TUIs.
+[Runtime backend verification](../../../../../docs/verification/runtime-backends.md#codex-exit-popup-compatibility) records the commands and observed output.
 
 ## Skill popup
 

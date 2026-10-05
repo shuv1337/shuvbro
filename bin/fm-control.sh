@@ -102,8 +102,8 @@
 #   FM_CONTROL_LAUNCH_WAIT       dead->alive wait after a relaunch (90)
 #   FM_CONTROL_EXIT_RETRIES      Enter retries for the exit command (3)
 #   FM_CONTROL_EXIT_SETTLE       pause after typing the exit command, before
-#                                its dismiss key and Enter (1.2). Codex needs
-#                                the slash popup to exist before Escape.
+#                                its dismiss key and Enter (1.2), allowing
+#                                the slash popup to settle before Escape.
 set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -538,9 +538,9 @@ do_exit() {
   # legitimately report anything. Only a hard transport failure aborts; the
   # authoritative proof is the agent-state wait below. The retried Enter still
   # matters, because a slash command opens a completion popup on some TUIs that
-  # swallows the first Enter. Codex's popup keeps swallowing every Enter while
-  # it is open, so FM_CONTROL_EXIT_DISMISS_KEY is sent before each of those
-  # Enters (fm_control_exit_dismiss_key).
+  # swallows Enter. FM_CONTROL_EXIT_DISMISS_KEY dismisses Codex's popup
+  # before each Enter; current-version compatibility, rather than a universal
+  # swallow claim, is recorded by fm_control_exit_dismiss_key.
   verdict=$(FM_CONTROL_EXIT_DISMISS_KEY=$dismiss \
     fm_backend_send_text_submit "$BACKEND" "$T" "$cmd" "$EXIT_RETRIES" "$POLL" "$EXIT_SETTLE" "$LABEL") \
     || die "the exit command could not be sent to task $ID on $BACKEND"

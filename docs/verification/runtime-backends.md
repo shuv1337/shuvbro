@@ -30,6 +30,38 @@ zsh
 A persistent parent shell waiting for a child remained reported as the parent process, while a shell that directly execed a simple command changed identity with the process itself.
 Pi and pi-signed 0.82.0 were reverified on 2026-07-27 through real isolated `fm-spawn.sh` launches.
 
+### Codex exit popup compatibility
+
+Verified on 2026-10-04 PDT with codex-cli 0.160.0 and tmux 3.7c on Linux.
+The probe used a private tmux socket, a disposable directory and `FM_HOME`, and an idle Codex TUI launched with `codex --no-daemon --no-alt-screen -C "$scratch"`.
+Folder trust was accepted and untrusted hooks were skipped before probing the ready composer; no model prompt was submitted.
+A PATH wrapper forwarded every control-path tmux call to `tmux -L "$socket"`, so the default server was never targeted.
+
+The Enter-only comparison used:
+
+```sh
+tmux -L "$socket" send-keys -t "$target" -l /quit
+sleep 2
+tmux -L "$socket" capture-pane -p -t "$target"
+tmux -L "$socket" send-keys -t "$target" Enter
+```
+
+Before Enter, the visible popup read `/quit  exit Codex` and the composer read `/quit`.
+Enter exited with `CODEX_EXIT_STATUS=0` from the launch wrapper; the reported swallowing failure was not reproduced in this version.
+In a separate ready TUI, Escape removed the popup and preserved the `/quit` draft; the following Enter also exited with status 0.
+
+The actual control path used a disposable task metadata record identifying the same endpoint and `harness=codex`:
+
+```sh
+FM_HOME="$probe_home" PATH="$socket_wrapper_dir:$PATH" bin/fm-control.sh probe exit
+```
+
+Observed key transport was literal `/quit`, Escape, then Enter.
+The backend's `fm_backend_agent_state tmux "$target" codex` returned `alive` before control and `dead` afterward.
+Control returned `stopped probe harness=codex backend=tmux`; the TUI exited with status 0 and `ps` on its terminal showed only the preserved shells, with no Codex process.
+These observations establish idle-tmux compatibility for Escape then Enter, not that Escape is necessary in every version, nor live verification of Herdr or busy interruption.
+Portable regressions for delivery ordering remain `tests/fm-control.test.sh` and `tests/fm-backend-herdr.test.sh`; their simulated swallowing case is not empirical evidence for this Codex version.
+
 ### Agent liveness name sources
 
 The earlier record that every harness is observed under its own `#{pane_current_command}` no longer holds and has been replaced by the per-harness evidence below.

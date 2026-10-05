@@ -4049,8 +4049,8 @@ test_send_text_submit_detects_swallowed_enter() {
   pass "fm_backend_herdr_send_text_submit: reports 'pending' when agent_status stays idle and the composer still holds unsent text after retried Enters (swallowed)"
 }
 
-# Codex exit sets FM_CONTROL_EXIT_DISMISS_KEY=Escape. The popup consumes Enter
-# until that key is delivered, so the dismiss must precede the submit Enter.
+# Codex exit sets FM_CONTROL_EXIT_DISMISS_KEY=Escape. This fixture pins the
+# reported swallowing scenario, not the current-version live TUI behavior.
 test_send_text_submit_codex_exit_dismisses_before_enter() {
   local dir log resp fb out
   dir="$TMP_ROOT/submit-codex-dismiss"; mkdir -p "$dir/responses"; log="$dir/log"; resp="$dir/responses"; : > "$log"
