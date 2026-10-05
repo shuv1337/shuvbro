@@ -1,0 +1,21 @@
+## real /proc: one busy watcher (subshell churn) + one other-home watcher
+ps tree:
+    PID    PPID STAT COMMAND
+3373837 3373834 S    bash /home/shuv/.cache/agent-ws/fmwatch-3373824/bin/fm-watch.sh
+3373838 3373834 S    bash /home/shuv/.cache/agent-ws/fmwatch-3373824/bin/fm-watch.sh
+3374121 3373838 S    bash /home/shuv/.cache/agent-ws/fmwatch-3373824/bin/fm-watch.sh
+40 counts for this home:
+      1 
+     40 watchers=1
+## second genuine watcher for same home
+      1 
+     20 watchers=2
+## orphaned watcher reparented to subreaper/init (parent killed)
+orphan ppid=   1727
+      1 
+     20 watchers=1
+## no watchers
+watchers=0
+## missing state arg
+watcher state directory is required
+exit=1

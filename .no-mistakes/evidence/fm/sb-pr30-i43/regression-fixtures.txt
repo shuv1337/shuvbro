@@ -1,0 +1,11 @@
+ok - watcher count: a stable watcher excludes its subshell and another home
+ok - watcher count: another home's vanished candidate cannot destabilize this home
+ok - watcher count: two genuine watchers remain two
+ok - watcher count: a parent exiting mid-read triggers a stable rescan
+ok - watcher count: a parent vanishing on every scan never counts its subshell as a root
+ok - watcher count: a vanished candidate is tolerated
+ok - watcher count: run-state changes keep a stable identity
+ok - watcher count: an inaccessible reparenting parent still counts its watcher
+ok - watcher count: PID reuse during a read invalidates the identity
+ok - watcher count: a reused parent cannot hide an older child
+ok - watcher count: continuous churn exhausts the bound instead of reporting singleton success
