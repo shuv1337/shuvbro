@@ -7,15 +7,14 @@
 # that the watcher's handle_push_transition lands a stale record in a scratch
 # state/.wake-queue. Skips cleanly when herdr, jq, or python3 is missing.
 #
-# Safety (2026-07-02 incident, tests/herdr-test-safety.sh): cleanup uses ONLY
-# herdr_safe_stop_and_delete on a private fm-lab-* session, never a bare/ambient
-# `herdr server stop`. Every lifecycle op goes through bin/fm-herdr-lab.sh, which
-# refuses the default session and verifies the fleet-state tripwire.
+# Safety: every Herdr CLI call, including those from the watcher subprocess,
+# goes through the lab helper on a private fm-lab-* session. Its lifecycle
+# operations refuse default and verify the fleet-state tripwire.
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-fail() { printf 'not ok - %s\n' "$1" >&2; cleanup_all; exit 1; }
+fail() { printf 'not ok - %s\n' "$1" >&2; exit 1; }
 pass() { printf 'ok - %s\n' "$1"; }
 
 command -v herdr >/dev/null 2>&1 || { echo "skip: herdr not found"; exit 0; }
@@ -30,15 +29,34 @@ command -v python3 >/dev/null 2>&1 || { echo "skip: python3 not found (required 
 # as a cross-session parent identity (tests/herdr-test-safety.sh).
 herdr_forget_inherited_pane
 
-SESSION="fm-lab-eventwait-smoke-$$"
+HERDR_LAB_HELPER=${HERDR_LAB_HELPER:-$ROOT/bin/fm-herdr-lab.sh}
+HERDR_LAB_SESSION=$("$HERDR_LAB_HELPER" name sb-herdr-wait-term) || exit 1
+SESSION="$HERDR_LAB_SESSION"
 export HERDR_SESSION="$SESSION"
 SCRATCH=
+FM_HERDR_SMOKE_ORIGINAL_PATH=$PATH
 cleanup_all() {
-  [ -n "$SCRATCH" ] && rm -rf "$SCRATCH"
-  herdr_safe_stop_and_delete "$SESSION"
+  PATH="$FM_HERDR_SMOKE_ORIGINAL_PATH" "$HERDR_LAB_HELPER" teardown "$HERDR_LAB_SESSION" || return 1
+  [ -z "$SCRATCH" ] || rm -rf "$SCRATCH"
 }
-trap cleanup_all EXIT
-fm_herdr_lab_prepare "$SESSION" || fail "could not prepare the isolated Herdr lab session"
+trap 'cleanup_all || exit 1' EXIT
+"$HERDR_LAB_HELPER" provision "$HERDR_LAB_SESSION" || fail "could not provision the isolated Herdr lab session"
+SCRATCH=$(mktemp -d "${TMPDIR:-/tmp}/fm-evwait.XXXXXX") || fail "could not create scratch state"
+mkdir "$SCRATCH/guarded-bin"
+cat > "$SCRATCH/guarded-bin/herdr" <<'SH'
+#!/usr/bin/env bash
+set -u
+args=("$@")
+n=${#args[@]}
+if [ "$n" -ge 2 ] && [ "${args[n-2]}" = --session ]; then
+  [ "${args[n-1]}" = "$HERDR_LAB_SESSION" ] || exit 1
+  args=("${args[@]:0:n-2}")
+fi
+PATH="$FM_HERDR_SMOKE_ORIGINAL_PATH" "$HERDR_LAB_HELPER" run "$HERDR_LAB_SESSION" "${args[@]}"
+SH
+chmod 0700 "$SCRATCH/guarded-bin/herdr"
+export HERDR_LAB_HELPER HERDR_LAB_SESSION FM_HERDR_SMOKE_ORIGINAL_PATH
+export PATH="$SCRATCH/guarded-bin:$PATH"
 
 # The dispatcher is a separately linted production boundary. Its dynamic
 # adapter source edges stop at each independently linted canonical adapter.
@@ -46,13 +64,13 @@ fm_herdr_lab_prepare "$SESSION" || fail "could not prepare the isolated Herdr la
 . "$ROOT/bin/fm-backend.sh"
 fm_backend_source herdr || fail "fm_backend_source herdr failed"
 
-HERDR_VERSION=$(herdr --version 2>/dev/null | head -1)
+HERDR_VERSION=$(herdr status --json 2>/dev/null | jq -r '.client.version // "unknown"')
 
 # --- real capability gate ----------------------------------------------------
 
 if ! fm_backend_herdr_events_capable "$SESSION"; then
   echo "skip: this herdr build is below the events.subscribe capability (protocol < 16 or events surface absent)"
-  cleanup_all
+  cleanup_all || exit 1
   trap - EXIT
   exit 0
 fi
@@ -71,7 +89,6 @@ EOF
 TARGET="$SESSION:$PANE_ID"
 
 # scratch firstmate state so window_to_task and the wake queue resolve
-SCRATCH=$(mktemp -d "${TMPDIR:-/tmp}/fm-evwait.XXXXXX")
 STATE="$SCRATCH/state"; mkdir -p "$STATE"
 cat > "$STATE/evwait1.meta" <<EOF
 window=$TARGET
@@ -132,5 +149,67 @@ grep -q "$TARGET" "$STATE/.wake-queue" || fail "the stale record must name the t
 grep -q 'herdr: agent blocked' "$STATE/.wake-queue" || fail "the stale payload must name the herdr-blocked cause"
 pass "real herdr: the watcher fast-path enqueues a stale wake naming the task window from the live blocked transition"
 
-cleanup_all
+# --- retire a real watcher while its socket subscriber is waiting ------------
+fm_herdr_lab_cli "$SESSION" pane report-agent "$PANE_ID" --source fm-evwait-test --agent claude --state idle >/dev/null 2>&1 \
+  || fail "could not restore the isolated pane's idle baseline"
+python3 - "$ROOT" "$SCRATCH" "$TARGET" "$SOCK" <<'PY' || fail "live watcher event-wait TERM retirement failed"
+import os
+from pathlib import Path
+import signal
+import subprocess
+import sys
+import time
+
+root, scratch, target, sock = sys.argv[1:]
+home = Path(scratch) / "retire"
+state = home / "state"
+state.mkdir(parents=True)
+(home / "config").mkdir()
+(state / "retire.meta").write_text(f"window={target}\nbackend=herdr\nkind=ship\n")
+env = dict(os.environ, FM_HOME=str(home), FM_ROOT_OVERRIDE=root,
+           FM_STATE_OVERRIDE=str(state), FM_CONFIG_OVERRIDE=str(home / "config"),
+           FM_POLL="60", FM_CHECK_INTERVAL="999999", FM_HEARTBEAT="999999",
+           TMPDIR=str(home))
+watcher = subprocess.Popen(["bash", f"{root}/bin/fm-watch.sh"], env=env,
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+reader_pid = None
+try:
+    # The socket path identifies only this isolated lab's subscriber. A live
+    # reader plus its FIFO proves that retirement actually interrupts a wait.
+    for _ in range(150):
+        rows = subprocess.check_output(["ps", "-axo", "pid=,args="], text=True)
+        for row in rows.splitlines():
+            pid, args = row.strip().split(None, 1)
+            if "herdr-eventwait.py" in args and sock in args and " 60 " in args:
+                reader_pid = int(pid)
+                break
+        if reader_pid is not None and list(home.glob("fm-herdr-eventwait.*")):
+            break
+        assert watcher.poll() is None, "watcher exited before the event wait"
+        time.sleep(0.1)
+    assert reader_pid is not None, "watcher never started its live socket subscriber"
+    time.sleep(0.1)
+    started = time.monotonic()
+    watcher.send_signal(signal.SIGTERM)
+    out, err = watcher.communicate(timeout=1)
+    elapsed = time.monotonic() - started
+    assert watcher.returncode == 1, (out, err)
+    assert not list(state.glob(".watch-event-output.*")), "captured record survived"
+    assert not list(home.glob("fm-herdr-eventwait.*")), "reader FIFO survived"
+    pids = subprocess.check_output(["ps", "-axo", "pid="], text=True).split()
+    assert str(reader_pid) not in pids, "socket reader survived"
+    assert not (state / ".watch.lock" / "pid").exists(), "watcher lock survived"
+    print(f"ok - real herdr: watcher TERM retires the socket reader, output pipes and temporary files in {elapsed:.3f}s")
+finally:
+    if reader_pid is not None:
+        try:
+            os.kill(reader_pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+    if watcher.poll() is None:
+        watcher.kill()
+    watcher.communicate(timeout=3)
+PY
+
+cleanup_all || exit 1
 trap - EXIT

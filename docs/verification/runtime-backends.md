@@ -1004,6 +1004,45 @@ ok - real herdr: the watcher fast-path enqueues a stale wake naming the task win
 
 Polling remained active and is covered as the fallback for capability, connect, subscribe, and repeated reader failure.
 
+On 2026-10-04 PDT, the real watcher, Herdr adapter, and Python socket reader were exercised against a private fake Unix socket on Linux x86_64 with Bash 5.3.20 and Python 3.14.7, without a live Herdr session:
+
+```sh
+python3 tests/fm-backend-herdr-eventwait.test.py
+```
+
+Observed output:
+
+```text
+Ran 7 tests in 41.925s
+OK
+watcher SIGTERM shutdown: 0.026s, pipes closed and reader/FIFO/output removed
+watcher SIGHUP shutdown: 0.021s, pipes closed and reader/FIFO/output removed
+watcher SIGINT shutdown: 0.025s, pipes closed and reader/FIFO/output removed
+watcher SIGTERM shutdown: 0.025s, pipes closed and reader/FIFO/output removed
+```
+
+The final case interrupts the subscription acknowledgement wait; the first three interrupt the subscribed stream wait with a 60-second poll budget.
+The regression verifies a mode-0600 captured record, output-pipe EOF within one second, removal of the watcher lock and temporary files, and absence of every captured reader-tree PID.
+`tests/fm-supervision-events.test.sh` runs this portable fixture and separately checks transition handling, clean-budget waits, capability memoization, and repeated-failure polling fallback.
+
+The live event-wait smoke was also refreshed on 2026-10-04 PDT with Herdr `0.9.1-shuv.6+9059819d8043`, Bash 5.3.20, and Python 3.14.7 in a generated non-default lab session:
+
+```sh
+HERDR_LAB_HELPER=bin/fm-herdr-lab.sh \
+  bash tests/fm-backend-herdr-eventwait-smoke.test.sh
+```
+
+Observed output:
+
+```text
+ok - real herdr (0.9.1-shuv.6+9059819d8043): events.subscribe capability gate passes (protocol >= 16, events surface present in api schema)
+ok - real herdr (0.9.1-shuv.6+9059819d8043): a driven idle->blocked transition returns the blocked record in 0.048s (pane w1:p2)
+ok - real herdr: the watcher fast-path enqueues a stale wake naming the task window from the live blocked transition
+ok - real herdr: watcher TERM retires the socket reader, output pipes and temporary files in 0.023s
+```
+
+The smoke routes every CLI call, including watcher subprocess calls, through the lab helper and completed teardown with the default-session fleet-state tripwire unchanged.
+
 ### Agent lifecycle control
 
 Herdr is one of the two backends whose recovery-grade agent-state classifier the control plane may trust ([agent-control.md](../agent-control.md)), so its lifecycle gating is measured against the real binary; reverified 2026-08-08 on Herdr 0.8.0, and first measured 2026-08-02 on Herdr 0.7.5 with identical results:

@@ -300,8 +300,9 @@ The watcher maps the pane back to the task and skips secondmate endpoints, decla
 The push path only shortens latency.
 Polling runs every cycle and remains the permanent fallback when protocol 16, the event schema, Python, connection, subscription, or repeated reader execution is unavailable.
 There is still one watcher process; the event reader is a bounded child of that watcher.
+HUP, INT, and TERM interrupt the event wait promptly; watcher cleanup terminates its private reader process group and removes the captured record, while the backend reaps the socket reader and removes its FIFO.
 
-`tests/fm-backend-herdr-eventwait-smoke.test.sh`, `tests/fm-transition-lib.test.sh`, and `tests/fm-supervision-events.test.sh` cover capability, subscribe-then-reconcile ordering, dedupe, exemptions, and polling fallback.
+`tests/fm-backend-herdr-eventwait-smoke.test.sh`, `tests/fm-transition-lib.test.sh`, and `tests/fm-supervision-events.test.sh` cover capability, subscribe-then-reconcile ordering, dedupe, exemptions, polling fallback, and signal shutdown through the portable socket fixture in `tests/fm-backend-herdr-eventwait.test.py`.
 
 ## Away-mode supervisor support
 

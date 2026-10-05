@@ -3576,7 +3576,7 @@ fm_backend_herdr_clear_transition() {  # <state_dir> <window>
 # and 2 when the event path is unusable (not capable, socket unresolved, reader
 # failed to run/subscribe - the caller sleeps the budget itself, the fail-closed
 # backstop). See the header block above for the full contract.
-fm_backend_herdr_wait_transition() {  # <session> <timeout_secs> <state_dir> <pane_window...>
+fm_backend_herdr_wait_transition() (  # <session> <timeout_secs> <state_dir> <pane_window...>
   local session=$1 timeout=$2 state=$3
   shift 3
   local windows=("$@")
@@ -3609,19 +3609,23 @@ fm_backend_herdr_wait_transition() {  # <session> <timeout_secs> <state_dir> <pa
   done < <(fm_backend_herdr_event_reader_cmd)
   [ "${#reader[@]}" -gt 0 ] || return 2
 
-  local fifo_dir fifo reader_pid line ws status agent raw record hit rc=1 reader_rc=0
+  local fifo_dir='' fifo reader_pid='' line ws status agent raw record hit rc=1 reader_rc=0
+  # Keep traps local to this wait. The watcher terminates the entire reader
+  # group; this shell reaps its direct reader and removes the FIFO on signals
+  # as well as ordinary returns, without replacing its caller's EXIT trap.
+  trap '[ -z "$reader_pid" ] || kill "$reader_pid" 2>/dev/null || true
+        [ -z "$reader_pid" ] || wait "$reader_pid" 2>/dev/null || true
+        exec 9<&-
+        [ -z "$fifo_dir" ] || rm -rf "$fifo_dir"' EXIT
+  trap 'exit 2' HUP INT TERM
   fifo_dir=$(mktemp -d "${TMPDIR:-/tmp}/fm-herdr-eventwait.XXXXXX") || return 2
   fifo="$fifo_dir/events"
   if ! mkfifo "$fifo" 2>/dev/null; then
-    rm -rf "$fifo_dir" 2>/dev/null || true
     return 2
   fi
   "${reader[@]}" "$sock" "$timeout" "${pane_ids[@]}" > "$fifo" 2>/dev/null &
   reader_pid=$!
   if ! exec 9< "$fifo"; then
-    kill "$reader_pid" 2>/dev/null || true
-    wait "$reader_pid" 2>/dev/null || true
-    rm -rf "$fifo_dir" 2>/dev/null || true
     return 2
   fi
   if ! IFS= read -r -u 9 line || [ "$line" != "@subscribed" ]; then
@@ -3681,10 +3685,9 @@ fm_backend_herdr_wait_transition() {  # <session> <timeout_secs> <state_dir> <pa
   # failure, exit non-zero -> return 2, caller sleeps and counts toward the
   # runtime-disable threshold).
   wait "$reader_pid" 2>/dev/null || reader_rc=$?
-  exec 9<&-
-  rm -rf "$fifo_dir" 2>/dev/null || true
+  reader_pid=
   [ "$rc" -eq 0 ] && return 0
   [ "$rc" -eq 2 ] && return 2
   [ "$reader_rc" -eq 0 ] && return 1
   return 2
-}
+)
