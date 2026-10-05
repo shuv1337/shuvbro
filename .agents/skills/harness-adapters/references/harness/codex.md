@@ -7,7 +7,7 @@ Verified on 2026-06-11 with codex-cli 0.139.0 unless a fact gives a newer versio
 | Fact | Value |
 |---|---|
 | Busy state | Unknown until a semantic source is live-verified: the app-server turn lifecycle is unreachable for a pane worker, and project lifecycle hooks did not fire for a Firstmate-launched worker. |
-| Exit command | `/quit`; its slash popup needs about one second between text and Enter, which the shared submit path used by the control plane handles. |
+| Exit command | `/quit`; the control path sends Escape then Enter after a 1.2-second settle, live-verified with codex-cli 0.160.0 on 2026-10-04 PDT (see Exit popup). |
 | Interrupt | Single Escape. |
 | Skill invocation | `$<skill>`, for example `$no-mistakes`; `/<skill>` is Claude-only and Codex rejects it as "Unrecognized command". |
 | Resume | `codex resume <session-id>`, using the id printed on quit. |
@@ -18,6 +18,17 @@ Verified on 2026-06-11 with codex-cli 0.139.0 unless a fact gives a newer versio
 A directory trust dialog appears on the first run for a repository root: "Do you trust the contents of this directory?"
 Accept it with Enter and verify the instructions begin processing.
 The decision persists for the repository, so later worktrees of the same project skip it.
+
+## Exit popup
+
+On 2026-10-04 PDT, codex-cli 0.160.0 in an idle TUI on a private tmux 3.7c socket displayed `/quit  exit Codex` above the `/quit` draft.
+Escape removed that popup without changing `/quit`, and the following Enter exited with status 0.
+The actual `bin/fm-control.sh <task-id> exit` path also stopped the disposable agent, with the backend classifier changing from `alive` to `dead` while its shell endpoint remained.
+Enter alone while the popup was visible also exited successfully in this version, so the reported Enter-swallowing failure was not reproduced.
+Do not infer that all Codex versions swallow Enter or require Escape from this compatibility probe.
+The control path sends Escape before each submit Enter when the backend supports it (`fm_control_exit_dismiss_key` in `bin/fm-control-lib.sh`); Orca retains Enter-only delivery.
+The live probe covered idle Codex on tmux, not busy interruption, Herdr, or other backend TUIs.
+[Runtime backend verification](../../../../../docs/verification/runtime-backends.md#codex-exit-popup-compatibility) records the commands and observed output.
 
 ## Skill popup
 

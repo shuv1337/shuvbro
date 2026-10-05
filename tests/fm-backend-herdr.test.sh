@@ -4049,6 +4049,34 @@ test_send_text_submit_detects_swallowed_enter() {
   pass "fm_backend_herdr_send_text_submit: reports 'pending' when agent_status stays idle and the composer still holds unsent text after retried Enters (swallowed)"
 }
 
+# Codex exit sets FM_CONTROL_EXIT_DISMISS_KEY=Escape. This fixture pins the
+# reported swallowing scenario, not the current-version live TUI behavior.
+test_send_text_submit_codex_exit_dismisses_before_enter() {
+  local dir log resp fb out
+  dir="$TMP_ROOT/submit-codex-dismiss"; mkdir -p "$dir/responses"; log="$dir/log"; resp="$dir/responses"; : > "$log"
+  # 1: send-text "/quit"
+  # 2: agent get - pre-Enter baseline is idle
+  # 3: send-keys escape
+  # 4: send-keys enter
+  # 5: agent get -> working
+  printf '{"result":{"agent":{"agent_status":"idle"}}}\n' > "$resp/2.out"
+  printf '{"result":{"agent":{"agent_status":"working"}}}\n' > "$resp/5.out"
+  fb=$(make_herdr_fakebin "$dir")
+  out=$( PATH="$fb:$PATH" FM_HERDR_LOG="$log" FM_HERDR_RESPONSES="$resp" FM_BACKEND_HERDR_SUBMIT_POLLS=1 \
+    FM_CONTROL_EXIT_DISMISS_KEY=Escape \
+    bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_send_text_submit default:w1:p2 "/quit" 3 0.01 0.01' "$ROOT" )
+  [ "$out" = empty ] || fail "codex exit submit should report empty once the dismissed Enter starts a turn, got '$out'"
+  # The log is one invocation per line. Escape must appear before Enter, and
+  # Enter must appear exactly once.
+  # Herdr appends --session after the key, so the key is the field after the pane id.
+  awk -F '\x1f' '
+    $2 == "pane" && $3 == "send-keys" && $5 == "escape" { if (enter) bad=1; esc=1 }
+    $2 == "pane" && $3 == "send-keys" && $5 == "enter" { enter++; if (!esc) bad=1 }
+    END { exit (bad || enter != 1 || !esc) ? 1 : 0 }
+  ' "$log" || fail "codex exit submit should send escape once before the single enter: $(cat "$log")"
+  pass "fm_backend_herdr_send_text_submit: Codex exit dismisses the slash popup before Enter"
+}
+
 # Regression coverage for the 2026-07-03 incident using the NEW mechanism: a
 # slash command's first Enter can close a completion popup and fill an
 # argument-hint placeholder WITHOUT submitting. In the idle-baseline path,
@@ -5160,6 +5188,7 @@ test_wait_for_working_returns_unknown_when_never_readable
 test_wait_for_working_treats_blocked_as_submit_active
 test_send_text_submit_detects_landed_send
 test_send_text_submit_detects_swallowed_enter
+test_send_text_submit_codex_exit_dismisses_before_enter
 test_send_text_submit_popup_autocomplete_requires_second_enter
 test_send_text_submit_confirms_blocked_after_enter
 test_send_text_submit_preexisting_working_pending_is_queued_enter

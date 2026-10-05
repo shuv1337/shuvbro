@@ -1358,7 +1358,13 @@ EOF
 # fm_composer_queued_enter_verdict; no shape knowledge lives in any loop.
 fm_composer_submit_retry_core() {  # <send-key-fn> <state-fn> <target> <retries> <enter-sleep> [expected-label]
   local send_key_fn=$1 state_fn=$2 target=$3 retries=$4 sleep_s=$5 expected_label=${6:-} i=0 state
+  local dismiss=${FM_CONTROL_EXIT_DISMISS_KEY:-}
   while :; do
+    # Codex exit: dismiss the slash popup before Enter. See
+    # fm_control_exit_dismiss_key. Unset for every other submission.
+    if [ -n "$dismiss" ]; then
+      "$send_key_fn" "$target" "$dismiss" "$expected_label" || true
+    fi
     "$send_key_fn" "$target" Enter "$expected_label" || true
     sleep "$sleep_s"
     state=$("$state_fn" "$target" "$expected_label")

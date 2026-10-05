@@ -3101,6 +3101,11 @@ fm_backend_herdr_send_text_submit() {  # <target> <text> <retries> <enter-sleep>
     footer_baseline=$(fm_backend_herdr_rendered_busy_state "$target")
   fi
   while :; do
+    # Codex exit: dismiss the slash popup before Enter. See
+    # fm_control_exit_dismiss_key. Unset for every other submission.
+    if [ -n "${FM_CONTROL_EXIT_DISMISS_KEY:-}" ]; then
+      fm_backend_herdr_send_key "$target" "$FM_CONTROL_EXIT_DISMISS_KEY" || true
+    fi
     if fm_backend_herdr_send_key "$target" Enter; then
       enter_sent=1
     elif [ "$enter_sent" -eq 0 ]; then
