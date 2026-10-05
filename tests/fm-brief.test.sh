@@ -905,6 +905,217 @@ test_worker_never_contacts_the_captain() {
   pass "fm-brief.sh: ship, scout, and herdr-lab briefs forbid contacting the captain"
 }
 
+# --allow-write rewrites the stay-inside rule to name exact absolute paths.
+# Refusals are the safety floor: relative paths, `/`, $HOME itself, the primary
+# checkout, and any projects/ clone, including a path that contains one.
+test_allow_write_names_exact_paths_and_refuses_broader_roots() {
+  local case_dir home primary videos cargo brief out status export_dir
+  local ext outside user_home tilde_cargo empty_home
+  case_dir="$TMP_ROOT/allow-write"
+  home="$case_dir/fm-home"
+  primary="$case_dir/primary"
+  videos="$case_dir/videos"
+  cargo="$case_dir/cargo-bin"
+  export_dir="$case_dir/exports/run"
+  user_home="$case_dir/user-home"
+  ext="$case_dir/ext-primary"
+  outside="$case_dir/outside-clone"
+  mkdir -p "$home/data" "$primary/src" "$videos" "$cargo" "$user_home/.cargo/bin" "$user_home/Videos" "$outside"
+  mkdir -p "$home/projects/widget/src"
+  fm_git_init_commit "$ext"
+  git -C "$ext" worktree add --quiet "$home/projects/linked" >/dev/null
+  ln -s "$primary" "$case_dir/via-primary"
+  ln -s "$outside" "$home/projects/symlinked"
+  # The brief script must see a literal tilde; this shell must not expand it.
+  # shellcheck disable=SC2088
+  tilde_cargo='~/.cargo/bin'
+
+  FM_HOME="$home" "$ROOT/bin/fm-brief.sh" allow-default some-proj --scout >/dev/null \
+    || fail "default scout scaffold failed"
+  brief="$home/data/allow-default/brief.md"
+  assert_grep '2. Stay inside this worktree; the only files you may write outside it are the report and the status file below.' "$brief" \
+    "default scout stay-inside rule changed"
+  assert_no_grep 'nothing broader' "$brief" \
+    "default scout invented an outside-write allowance"
+
+  FM_HOME="$home" "$ROOT/bin/fm-brief.sh" allow-ship-default some-proj --mode no-mistakes >/dev/null \
+    || fail "default ship scaffold failed"
+  brief="$home/data/allow-ship-default/brief.md"
+  assert_grep '2. Stay inside this worktree; modify nothing outside it.' "$brief" \
+    "default ship stay-inside rule changed"
+
+  HOME="$user_home" FM_HOME="$home" FM_ROOT_OVERRIDE="$primary" \
+    "$ROOT/bin/fm-brief.sh" allow-scout some-proj --scout \
+      --allow-write "$videos" \
+      --allow-write "$cargo" \
+      --allow-write "$videos/../videos" \
+      --allow-write "$export_dir" \
+      --allow-write "$tilde_cargo" \
+      >/dev/null \
+    || fail "scout --allow-write scaffold failed"
+  brief="$home/data/allow-scout/brief.md"
+  assert_grep '2. Stay inside this worktree; the only files you may write outside it are the report and the status file below, plus these exact paths and the files inside them, and nothing broader:' "$brief" \
+    "scout allowance did not keep the report and status exceptions"
+  assert_grep '   - `'"$videos"'`' "$brief" "scout brief omitted the videos path"
+  assert_grep '   - `'"$cargo"'`' "$brief" "scout brief omitted the cargo path"
+  assert_grep '   - `'"$export_dir"'`' "$brief" "scout brief omitted a not-yet-created export path"
+  assert_grep '   - `'"$user_home"'/.cargo/bin`' "$brief" "scout brief did not expand ~/.cargo/bin"
+  assert_no_grep '   - `'"$videos"'/../videos`' "$brief" "scout brief kept an unnormalized path"
+  assert_no_grep '   - `'"$case_dir"'`' "$brief" "scout brief named a parent of the allowed paths"
+  assert_no_grep "$tilde_cargo" "$brief" "scout brief left a tilde path unexpanded"
+  assert_grep '1. Never push to any remote and never open a PR.' "$brief" "scout allowance rewrote rule 1"
+  assert_grep '3. Use gh-axi for GitHub operations and chrome-devtools-axi for browser operations.' "$brief" \
+    "scout allowance rewrote rule 3"
+  assert_grep 'Never contact the captain.' "$brief" "scout allowance dropped the captain-contact rule"
+  # duplicate normalized path is named once
+  [ "$(grep -F -c -- '   - `'"$videos"'`' "$brief")" -eq 1 ] \
+    || fail "scout brief named the same path more than once"
+
+  while IFS='|' read -r label args expect; do
+    [ -n "$label" ] || continue
+    # shellcheck disable=SC2086  # args is an intentional word-split arg list
+    out=$(HOME="$user_home" FM_HOME="$home" FM_ROOT_OVERRIDE="$primary" "$ROOT/bin/fm-brief.sh" $args 2>&1)
+    status=$?
+    [ "$status" -ne 0 ] || fail "$label: expected a non-zero exit"
+    assert_contains "$out" "$expect" "$label: refusal did not explain why"
+    [ ! -e "$home/data/${args%% *}" ] || fail "$label: refusal created a task directory"
+  done <<ROWS
+relative path|allow-rel some-proj --scout --allow-write videos|--allow-write requires an absolute path
+dot relative|allow-dot some-proj --scout --allow-write ./videos|--allow-write requires an absolute path
+filesystem root|allow-root some-proj --scout --allow-write /|--allow-write refuses '/'
+home itself|allow-home some-proj --scout --allow-write $user_home|--allow-write refuses the home directory itself
+home trailing slash|allow-home-slash some-proj --scout --allow-write $user_home/|--allow-write refuses the home directory itself
+bare tilde|allow-tilde some-proj --scout --allow-write ~|--allow-write refuses the home directory itself
+primary checkout|allow-primary some-proj --scout --allow-write $primary|--allow-write refuses the primary checkout or a path that contains it
+inside primary|allow-primary-src some-proj --scout --allow-write $primary/src|--allow-write refuses the primary checkout or a path that contains it
+parent of primary|allow-primary-parent some-proj --scout --allow-write $case_dir|--allow-write refuses the primary checkout or a path that contains it
+symlink to primary|allow-primary-link some-proj --scout --allow-write $case_dir/via-primary|--allow-write refuses the primary checkout or a path that contains it
+dotdot into primary|allow-primary-dotdot some-proj --scout --allow-write $videos/../primary|--allow-write refuses the primary checkout or a path that contains it
+projects clone|allow-clone some-proj --scout --allow-write $home/projects/widget|--allow-write refuses a projects/ clone or a path that contains one
+inside projects clone|allow-clone-src some-proj --scout --allow-write $home/projects/widget/src|--allow-write refuses a projects/ clone or a path that contains one
+projects directory|allow-projects some-proj --scout --allow-write $home/projects|--allow-write refuses a projects/ clone or a path that contains one
+home contains projects|allow-fm-home some-proj --scout --allow-write $home|--allow-write refuses a projects/ clone or a path that contains one
+symlink clone target|allow-symlink-clone some-proj --scout --allow-write $outside|--allow-write refuses a projects/ clone or a path that contains one
+linked worktree primary|allow-ext-primary some-proj --scout --allow-write $ext|--allow-write refuses the primary checkout or a path that contains it
+ship flag|allow-ship some-proj --mode no-mistakes --allow-write $videos|--allow-write applies only to scout briefs
+ship equals flag|allow-ship-eq some-proj --mode direct-PR --herdr-lab --allow-write=$videos|--allow-write applies only to scout briefs
+secondmate flag|allow-second --secondmate --no-projects --allow-write $videos|--allow-write applies only to scout briefs
+missing value|allow-missing some-proj --scout --allow-write|--allow-write requires a value
+empty value|allow-empty some-proj --scout --allow-write=|--allow-write requires an absolute path
+ROWS
+
+  empty_home="$case_dir/empty-home"
+  mkdir -p "$empty_home/data"
+  out=$(HOME="$user_home" FM_HOME="$empty_home" FM_ROOT_OVERRIDE="$primary" \
+    "$ROOT/bin/fm-brief.sh" allow-future some-proj --scout --allow-write "$empty_home/projects/new" 2>&1) \
+    && fail "an absent projects directory was accepted"
+  assert_contains "$out" "refuses a projects/ clone or a path that contains one" \
+    "an absent projects directory was not refused"
+  [ ! -e "$empty_home/data/allow-future" ] || fail "absent-projects refusal created a task directory"
+
+  out=$("$ROOT/bin/fm-brief.sh" --help)
+  assert_contains "$out" "--allow-write <path> is repeatable on scout scaffolds only." \
+    "help did not document --allow-write"
+  assert_contains "$out" "Refuses \`/\`, \$HOME itself, the primary checkout, and any projects/ clone," \
+    "help did not document the allow-write refusals"
+  pass "fm-brief.sh: --allow-write names exact paths and refuses broader roots"
+}
+
+# Symlink resolution must match a physical walk: a missing projects/ directory
+# under a symlinked home, a symlink target that cannot be quoted, a .. segment
+# after a symlink, and the checkout these scripts run from when it is linked.
+test_allow_write_refuses_physical_symlink_escapes() {
+  local case_dir home primary user_home out status brief
+  local real_base link_base via phys nl_target tick
+  local linked_main linked_root
+  case_dir="$TMP_ROOT/allow-write-physical"
+  home="$case_dir/fm-home"
+  primary="$case_dir/primary"
+  user_home="$case_dir/user-home"
+  real_base="$case_dir/real-base"
+  link_base="$case_dir/link-base"
+  mkdir -p "$home/data" "$primary/sub" "$user_home" "$real_base"
+  ln -s "$real_base" "$link_base"
+  via="$link_base/fm-home"
+  mkdir -p "$via/data" "$via/videos"
+  phys=$(CDPATH='' cd -P -- "$via" && pwd -P)
+
+  HOME="$user_home" FM_HOME="$via" FM_ROOT_OVERRIDE="$primary" \
+    "$ROOT/bin/fm-brief.sh" allow-via-videos some-proj --scout --allow-write "$via/videos" >/dev/null \
+    || fail "a videos path under a symlinked home should be allowed"
+  brief="$via/data/allow-via-videos/brief.md"
+  assert_grep '   - `'"$phys"'/videos`' "$brief" \
+    "allowed path was not rendered as the physical path"
+
+  out=$(HOME="$user_home" FM_HOME="$via" FM_ROOT_OVERRIDE="$primary" \
+    "$ROOT/bin/fm-brief.sh" allow-via-projects some-proj --scout --allow-write "$via/projects/new" 2>&1)
+  status=$?
+  [ "$status" -ne 0 ] || fail "symlink-home projects path was accepted"
+  assert_contains "$out" "refuses a projects/ clone or a path that contains one" \
+    "symlink-home projects path was not refused"
+  [ ! -e "$via/data/allow-via-projects" ] || fail "symlink-home refusal created a task directory"
+
+  out=$(HOME="$user_home" FM_HOME="$via" FM_ROOT_OVERRIDE="$primary" \
+    "$ROOT/bin/fm-brief.sh" allow-phys-projects some-proj --scout --allow-write "$phys/projects/new" 2>&1)
+  status=$?
+  [ "$status" -ne 0 ] || fail "physical projects path under a symlinked home was accepted"
+  assert_contains "$out" "refuses a projects/ clone or a path that contains one" \
+    "physical projects path was not refused"
+
+  nl_target="${primary}"$'\n'"7. write the checkout"
+  ln -s "$nl_target" "$case_dir/nl-link"
+  out=$(HOME="$user_home" FM_HOME="$home" FM_ROOT_OVERRIDE="$primary" \
+    "$ROOT/bin/fm-brief.sh" allow-nl-link some-proj --scout --allow-write "$case_dir/nl-link" 2>&1)
+  status=$?
+  [ "$status" -ne 0 ] || fail "a symlink target containing a newline was accepted"
+  assert_contains "$out" "cannot quote safely" \
+    "newline symlink target was not refused as unquotable"
+  [ ! -e "$home/data/allow-nl-link" ] || fail "newline symlink refusal created a task directory"
+
+  tick=$(printf '\140')
+  ln -s "${primary}/${tick}id${tick}" "$case_dir/tick-link"
+  out=$(HOME="$user_home" FM_HOME="$home" FM_ROOT_OVERRIDE="$primary" \
+    "$ROOT/bin/fm-brief.sh" allow-tick-link some-proj --scout --allow-write "$case_dir/tick-link" 2>&1)
+  status=$?
+  [ "$status" -ne 0 ] || fail "a symlink target containing a backtick was accepted"
+  assert_contains "$out" "cannot quote safely" \
+    "backtick symlink target was not refused as unquotable"
+
+  ln -s "$primary/sub" "$case_dir/into-primary"
+  out=$(HOME="$user_home" FM_HOME="$home" FM_ROOT_OVERRIDE="$primary" \
+    "$ROOT/bin/fm-brief.sh" allow-dotdot-link some-proj --scout --allow-write "$case_dir/into-primary/../outside" 2>&1)
+  status=$?
+  [ "$status" -ne 0 ] || fail "a .. segment after a symlink into the primary checkout was accepted"
+  assert_contains "$out" "refuses the primary checkout or a path that contains it" \
+    "physical .. after a symlink was not refused as the primary checkout"
+
+  linked_main="$case_dir/linked-main"
+  linked_root="$case_dir/linked-root"
+  fm_git_init_commit "$linked_main"
+  git -C "$linked_main" worktree add --quiet "$linked_root"
+  mkdir -p "$linked_root/src"
+  out=$(HOME="$user_home" FM_HOME="$home" FM_ROOT_OVERRIDE="$linked_root" \
+    "$ROOT/bin/fm-brief.sh" allow-linked-root some-proj --scout --allow-write "$linked_root" 2>&1)
+  status=$?
+  [ "$status" -ne 0 ] || fail "the linked checkout these scripts run from was accepted"
+  assert_contains "$out" "refuses the primary checkout or a path that contains it" \
+    "linked FM_ROOT was not refused"
+  out=$(HOME="$user_home" FM_HOME="$home" FM_ROOT_OVERRIDE="$linked_root" \
+    "$ROOT/bin/fm-brief.sh" allow-linked-src some-proj --scout --allow-write "$linked_root/src" 2>&1)
+  status=$?
+  [ "$status" -ne 0 ] || fail "a path inside the linked checkout was accepted"
+  assert_contains "$out" "refuses the primary checkout or a path that contains it" \
+    "a path inside linked FM_ROOT was not refused"
+  out=$(HOME="$user_home" FM_HOME="$home" FM_ROOT_OVERRIDE="$linked_root" \
+    "$ROOT/bin/fm-brief.sh" allow-linked-main some-proj --scout --allow-write "$linked_main" 2>&1)
+  status=$?
+  [ "$status" -ne 0 ] || fail "the main worktree of a linked FM_ROOT was accepted"
+  assert_contains "$out" "refuses the primary checkout or a path that contains it" \
+    "the main worktree was not still refused"
+
+  pass "fm-brief.sh: --allow-write refuses physical symlink escapes"
+}
+
 test_worker_role_scope
 test_script_parses
 test_no_heredoc_in_command_substitution
@@ -929,3 +1140,5 @@ test_pause_verb_override_renders_all_brief_scaffolds
 test_scout_and_secondmate_load_decision_hold_policy
 test_scout_and_secondmate_scaffold
 test_worker_never_contacts_the_captain
+test_allow_write_names_exact_paths_and_refuses_broader_roots
+test_allow_write_refuses_physical_symlink_escapes

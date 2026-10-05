@@ -12,7 +12,8 @@
 # escalation rule and --yes ban. The instructions also carry `# Task` with
 # `## Captain's intent` preserved from the scout brief and promotion's ship-time
 # instructions under `## Firstmate spec`; the scout-time spec remains context but
-# is not relabeled as the ship spec. Promotion refuses leftover `{TASK}` /
+# is not relabeled as the ship spec. A scout brief's --allow-write outside-write
+# allowance is scout-only, so promotion revokes it in the ship instructions. Promotion refuses leftover `{TASK}` /
 # `{FIRSTMATE_SPEC}` placeholders (bin/fm-dod-lib.sh). A pre-subsection scout
 # brief contributes only Task lines explicitly marked as captain words to intent.
 # A scout records no delivery posture, so promotion is where this task's delivery
@@ -163,6 +164,10 @@ PROMOTION_ASK_USER_BLOCK=
 if [ "$MODE" = no-mistakes ]; then
   PROMOTION_ASK_USER_BLOCK=$(fm_ask_user_escalation_block "$DATA" "$ID")
 fi
+PROMOTION_ALLOW_WRITE_BLOCK=
+if fm_brief_allow_write_present "$SCOUT_BRIEF"; then
+  PROMOTION_ALLOW_WRITE_BLOCK="Your scout brief allowed writes to named paths outside the worktree. That allowance was scout-only and is revoked now: stay inside this worktree; modify nothing outside it."
+fi
 mkdir -p "$DATA/$ID"
 [ ! -d "$INSTRUCTIONS" ] || { echo "error: ship instructions path is a directory: $INSTRUCTIONS" >&2; exit 1; }
 TMP="$DATA/$ID/.ship-instructions.md.${BASHPID:-$$}"
@@ -183,6 +188,9 @@ EOF
 4. Carry over only the intended fix changes. Leave scratch commits, debug edits, and experiment files behind.
 5. If you reproduced a bug, turn that reproduction into a regression test.
 6. These ship instructions supersede the scout delivery rules and report-based Definition of done. Everything else in your original instructions carries over unchanged: the status protocol; the instruction inbox and its acknowledgement; the escalation rules, including ask-user; and every safety rule.
+EOF
+  [ -z "$PROMOTION_ALLOW_WRITE_BLOCK" ] || printf '%s\n' "$PROMOTION_ALLOW_WRITE_BLOCK"
+  cat <<EOF
 $PROMOTION_ASK_USER_BLOCK
 7. Treat the scout-time Firstmate spec and any unmarked legacy \`# Task\` text as investigation context, not captain intent or ship-time instructions.
 EOF
