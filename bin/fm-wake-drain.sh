@@ -611,10 +611,11 @@ print_status_presentation() {  # [<deduped-raw-rows>]
 }
 
 # Main's presentation durably advances a monotonic drain sequence with the
-# recovery generation it presented. A lead doorbell admitted before that
-# sequence was handled by this drain, whether or not rows remain queued.
+# recovery generation and highest row sequence it presented. A lead doorbell
+# admitted before that sequence was handled by this drain, whether or not rows
+# remain queued, and so were wakes whose rows it presented.
 # Runs under the queue lock; a write failure only leaves doorbells outstanding.
-record_presentation_locked() {  # <recovery-token>
+record_presentation_locked() {  # <recovery-token> <presented-through>
   local previous=0 line tmp
   [ "$ACTOR" = main ] || return 0
   if [ -f "$DRAIN_RECORD" ] && [ ! -L "$DRAIN_RECORD" ] && IFS= read -r line < "$DRAIN_RECORD"; then
@@ -622,7 +623,7 @@ record_presentation_locked() {  # <recovery-token>
   fi
   if tmp=$(mktemp "$DRAIN_RECORD.tmp.XXXXXX") \
     && chmod 0600 "$tmp" \
-    && printf '%s\t%s\n' "$((previous + 1))" "${1##*:}" > "$tmp" \
+    && printf '%s\t%s\t%s\n' "$((previous + 1))" "${1##*:}" "$2" > "$tmp" \
     && _fm_atomic_replace "$tmp" "$DRAIN_RECORD"; then
     return 0
   fi
@@ -796,7 +797,7 @@ if [ ! -s "$FM_WAKE_QUEUE" ]; then
       ;;
     pending:handling:*|announced:handling:*) RECOVERY_ACK_REQUIRED=true ;;
   esac
-  record_presentation_locked "$RECOVERY_MARKER_TOKEN"
+  record_presentation_locked "$RECOVERY_MARKER_TOKEN" 0
   fm_lock_release "$FM_WAKE_QUEUE_LOCK"
   DRAIN_LOCK_HELD=false
   (print_status_presentation) || true
@@ -819,7 +820,7 @@ if [ "$ACTOR" = main ]; then
     # lost wake, and leaves the caller with no idea who owns what is queued.
     print_branch_held_notice
     fm_recovery_marker_snapshot "$RECOVERY_MARKER" || true
-    record_presentation_locked "$FM_RECOVERY_MARKER_TOKEN"
+    record_presentation_locked "$FM_RECOVERY_MARKER_TOKEN" 0
     fm_lock_release "$FM_WAKE_QUEUE_LOCK"
     DRAIN_LOCK_HELD=false
     (print_status_presentation) || true
@@ -879,7 +880,7 @@ case "$RECOVERY_MARKER_TOKEN" in
   pending:*|announced:*|acked:*) ;;
   *) echo "wake drain: durable wakes have no recovery generation" >&2; exit 1 ;;
 esac
-record_presentation_locked "$RECOVERY_MARKER_TOKEN"
+record_presentation_locked "$RECOVERY_MARKER_TOKEN" "$ACK_THROUGH"
 fm_lock_release "$FM_WAKE_QUEUE_LOCK"
 DRAIN_LOCK_HELD=false
 printf 'WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through %s --recovery-generation %s\n' \

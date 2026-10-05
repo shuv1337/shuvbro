@@ -127,9 +127,11 @@ test_notice_episodes() {
 }
 
 # A wake parked behind a doorbell the lead has not drained is healthy
-# coalescing: no WATCHER FAILURE however long the turn. A drain admits it. Only
-# a drain that cannot be proven to follow the blocking admission (forced here
-# by stripping the blocker's drain receipt) makes a still-parked wake stall.
+# coalescing: no WATCHER FAILURE however long the turn. A drain that presented
+# the parked rows covers them without another doorbell; a row arriving after
+# it gets exactly one. Only a drain that cannot be proven to follow the
+# blocking admission (forced here by stripping the blocker's drain receipt)
+# makes a still-parked wake stall.
 test_notice_parked_wake_only_when_stuck() {
   tui_case notice-parked 1
   local out="$CASE/out.json" steps state="$HOME_DIR/state"
@@ -143,13 +145,17 @@ test_notice_parked_wake_only_when_stuck() {
       {do:"sleep",ms:5000},
       {do:"advance-notice-clock",ms:31000},{do:"sleep",ms:5000},{do:"notice-count"},
       {do:"shell",command:"bin/fm-wake-drain.sh >/dev/null 2>&1; echo drained",extraEnv:$e},
-      {do:"wait",until:"admitted",match:"WATCHER FIRED",count:2,timeoutMs:20000},
+      {do:"sleep",ms:5000},
       {do:"advance-notice-clock",ms:31000},{do:"sleep",ms:5000},{do:"notice-count"},
       {do:"write",path:($s+"/gamma.status"),text:"done: gamma finished\n"},
-      {do:"wait",until:"shell-ok",command:("grep -q gamma " + $s + "/.wake-queue"),timeoutMs:20000},
+      {do:"wait",until:"admitted",match:"WATCHER FIRED",count:2,timeoutMs:20000},
+      {do:"write",path:($s+"/delta.status"),text:"done: delta finished\n"},
+      {do:"wait",until:"shell-ok",command:("grep -q delta " + $s + "/.wake-queue"),timeoutMs:20000},
       {do:"sleep",ms:5000},
       {do:"shell",command:$strip},
       {do:"shell",command:"bin/fm-wake-drain.sh >/dev/null 2>&1; echo drained",extraEnv:$e},
+      {do:"write",path:($s+"/epsilon.status"),text:"done: epsilon finished\n"},
+      {do:"wait",until:"shell-ok",command:("grep -q epsilon " + $s + "/.wake-queue"),timeoutMs:20000},
       {do:"wait",until:"diagnostic",match:"undelivered",timeoutMs:20000},
       {do:"advance-notice-clock",ms:31000},
       {do:"wait",until:"admitted",match:"WATCHER FAILURE",count:1,timeoutMs:10000}]')
@@ -157,13 +163,15 @@ test_notice_parked_wake_only_when_stuck() {
   step_ok "$out" 5 "positive control: the first doorbell was not admitted"
   step_ok "$out" 7 "fixture: the second wake never became durable"
   jq -e '.steps[11].count == 0' "$out" >/dev/null || fail "a wake parked behind an undrained doorbell raised WATCHER FAILURE: $(jq -c '{admitted: [.admitted[].text[0:60]], failures}' "$out")"
-  step_ok "$out" 13 "the lead drain did not admit the parked wake"
   jq -e '.steps[16].count == 0' "$out" >/dev/null || fail "a normal drain left a failure notice: $(jq -c .failures "$out")"
-  jq -e '.steps[20].stdout | test("stripped")' "$out" >/dev/null || fail "fixture: no admitted blocker to force: $(jq -c '.steps[20]' "$out")"
-  step_ok "$out" 22 "a wake still parked after a later drain was hidden from the stall diagnostic"
-  step_ok "$out" 24 "a stuck parked wake did not raise WATCHER FAILURE after the bound"
-  [ "$(wake_admissions "$out")" = 2 ] || fail "expected two doorbells: $(jq -c '[.admitted[].text[0:60]]' "$out")"
-  pass "tui: a wake parked behind an undrained doorbell stays silent, a drain admits it, and only a provably stuck parked wake raises WATCHER FAILURE"
+  jq -e --argjson at "$(jq '.steps[17].at' "$out")" '[.admitted[] | select(.text | contains("WATCHER FIRED")) | select(.at < $at)] | length == 1' "$out" >/dev/null \
+    || fail "the drain that presented the parked rows still admitted a second doorbell: $(jq -c '[.admitted[].text[0:60]]' "$out")"
+  step_ok "$out" 18 "a row arriving after the drain did not get its own doorbell"
+  jq -e '.steps[22].stdout | test("stripped")' "$out" >/dev/null || fail "fixture: no admitted blocker to force: $(jq -c '.steps[22]' "$out")"
+  step_ok "$out" 26 "a wake still parked after a later drain was hidden from the stall diagnostic"
+  step_ok "$out" 28 "a stuck parked wake did not raise WATCHER FAILURE after the bound"
+  [ "$(wake_admissions "$out")" = 2 ] || fail "expected one initial and one post-drain doorbell: $(jq -c '[.admitted[].text[0:60]]' "$out")"
+  pass "tui: a parked wake stays silent, a drain covers its presented rows, a post-drain row gets one doorbell, and only a provably stuck parked wake raises WATCHER FAILURE"
 }
 
 test_notice_permanent_after_stall() {

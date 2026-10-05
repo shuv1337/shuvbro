@@ -221,12 +221,37 @@ for (const forced of [false,true]) {
     const path=f.queue.replace('/.wake-queue','/.opencode-v2-admissions/')+fs.readdirSync(f.queue.replace('/.wake-queue','/.opencode-v2-admissions'))[0]+'/'+first.id+'.json';
     const {drain,...legacy}=JSON.parse(fs.readFileSync(path,'utf8'));fs.writeFileSync(path,JSON.stringify(legacy));
   }
-  fs.writeFileSync(drained,'2\tG\n');
+  // The forced drain presented only row 1, so the parked row 2 stays owed.
+  fs.writeFileSync(drained,forced?'2\tG\t1\n':'2\tG\t2\n');
   assert.equal(f.reload().parked(later),forced);
   assert.equal(f.reload().stalled(later),forced,'a drain after the blocker admission must expose a still-parked wake');
-  await f.reload().deliver(later);
-  assert.equal(f.calls.length,forced?1:2);
+  assert.equal(await f.reload().deliver(later),!forced);
+  assert.equal(f.calls.length,1,'a drain that presented every parked row covers it without a second doorbell');
+  if(!forced)assert.equal(f.phase(later),'acknowledged');
   assert.equal(fs.readFileSync(f.queue,'utf8'),row+'101\t2\tsignal\ttask\tnext\n','drain retirement never consumes rows');
+}
+// A row arriving after the drain gets exactly one doorbell of its own; the
+// older parked wake that drain covered cannot absorb it.
+{
+  const f=fixture('post-drain-row');
+  const drained=f.queue.replace('/.wake-queue','/.wake-drain-presented');
+  fs.writeFileSync(drained,'1\tG\t0\n');
+  fs.writeFileSync(f.queue,row);
+  const first=f.journal.confirm(f.journal.prepare('first row'));await f.journal.deliver(first);
+  fs.writeFileSync(f.queue,row+'101\t2\tsignal\ttask\tnext\n');
+  const parked=f.journal.prepare('parked rows');
+  assert.equal(f.journal.parked(parked),true);
+  fs.writeFileSync(drained,'2\tG\t2\n');
+  fs.appendFileSync(f.queue,'102\t3\tsignal\ttask\tafter\n');
+  const after=f.reload().prepare('after drain');
+  assert.notEqual(after.id,parked.id,'a covered parked wake swallowed a post-drain row');
+  assert.deepEqual(after.rows,['102\t3']);
+  assert.equal(f.reload().acknowledged(parked),true);
+  const journal=f.reload();
+  assert.equal(await journal.deliver(journal.confirm(after)),true);
+  assert.deepEqual(f.calls.map(call=>call.id),[first.id,after.id]);
+  assert.equal(f.reload().pending().length,0);
+  assert.equal(fs.readFileSync(f.queue,'utf8').split('\n').filter(Boolean).length,3,'admission never consumes rows');
 }
 // An in-flight no-row admission owns the slot before its native receipt.
 {

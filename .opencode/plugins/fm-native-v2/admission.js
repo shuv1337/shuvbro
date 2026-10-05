@@ -17,12 +17,16 @@ export function createAdmissionJournal(paths, sessionID, admit, report = console
     if (value.version !== 1 || value.sessionID !== sessionID || !/^msg_[a-f0-9]{64}$/.test(value.id) || typeof value.kind !== "string" || typeof value.text !== "string" || value.text.length > 12000 || !Array.isArray(value.rows) || value.rows.some(row => typeof row !== "string" || !/^[0-9]+\t[0-9]+$/.test(row)) || !["prepared", "confirmed", "admitted", "acknowledged"].includes(value.phase)) throw new Error("invalid V2 admission record");
     return value;
   }
-  // The canonical drain advances this sequence on every main presentation.
-  // Missing means no drain yet; malformed state cannot prove a later drain.
-  function drainSequence() {
-    try { const match = readFileSync(join(paths.state, ".wake-drain-presented"), "utf8").match(/^([0-9]{1,15})\t[A-Za-z0-9._-]{0,200}\n?$/); return match ? Number(match[1]) : null; }
-    catch (error) { return error.code === "ENOENT" ? 0 : null; }
+  // The canonical drain advances this sequence on every main presentation and
+  // names the highest row sequence it presented. Missing means no drain yet;
+  // malformed state cannot prove a later drain or a presented row.
+  function drainReceipt() {
+    try {
+      const match = readFileSync(join(paths.state, ".wake-drain-presented"), "utf8").match(/^([0-9]{1,15})\t[A-Za-z0-9._-]{0,200}(?:\t([0-9]{1,15}))?\n?$/);
+      return match ? { sequence: Number(match[1]), presented: match[2] === undefined ? null : Number(match[2]) } : { sequence: null, presented: null };
+    } catch (error) { return { sequence: error.code === "ENOENT" ? 0 : null, presented: null }; }
   }
+  function drainSequence() { return drainReceipt().sequence; }
   function save(value) { writePrivate(join(dir, value.id + ".json"), validate(value)); return value; }
   function prepare(text, kind = "wake", context = {}) {
     let logical = kind;
@@ -39,6 +43,11 @@ export function createAdmissionJournal(paths, sessionID, admit, report = console
         if (typeof generation !== "string" || !/^[A-Za-z0-9._-]{1,200}$/.test(generation)) throw new Error("actionable close has neither durable wake rows nor recovery generation");
         logical += ":recovery:" + generation;
       } else {
+        // Rows a drain already presented are covered by it; a later wake is
+        // the doorbell for the rows that arrived after that drain.
+        const { presented } = drainReceipt();
+        const later = Number.isInteger(presented) ? identities.filter(row => Number(row.split("\t")[1]) > presented) : [];
+        if (later.length) identities = later;
         const prior = pending().find(value => value.rows.some(row => identities.includes(row)));
         if (prior) return prior;
         logical += ":" + identities.join("\n");
@@ -63,6 +72,15 @@ export function createAdmissionJournal(paths, sessionID, admit, report = console
     if (value.kind === "wake" && value.phase === "admitted" && drainedSince(value)) {
       save({ ...value, phase: "acknowledged" });
       return true;
+    }
+    // An unadmitted row wake whose every row a later drain presented is
+    // covered by that drain and retires without its own doorbell.
+    if (value.kind === "wake" && value.rows.length && drainedSince(value)) {
+      const { presented } = drainReceipt();
+      if (Number.isInteger(presented) && value.rows.every(row => Number(row.split("\t")[1]) <= presented)) {
+        save({ ...value, phase: "acknowledged" });
+        return true;
+      }
     }
     if (!value.rows.length) {
       // Recovery has no row identities. A drain presented after preparation
