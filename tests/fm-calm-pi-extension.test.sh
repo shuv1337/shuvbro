@@ -35,6 +35,12 @@ cleanup() {
   fm_test_cleanup
 }
 trap cleanup EXIT
+# Keep the private server alive between sessions: the restart cases kill the only
+# session and immediately start a new one, which otherwise races the exiting server
+# ("server exited unexpectedly"). cleanup kills the server.
+if command -v tmux >/dev/null 2>&1; then
+  tmux -L "$TMUX_SOCKET" start-server \; set-option -g exit-empty off
+fi
 
 wait_for_text() {
   local file=$1 text=$2 i=0

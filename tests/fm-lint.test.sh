@@ -178,6 +178,74 @@ test_list_files_reports_the_shell_inventory() {
   pass "fm-lint.sh --list-files reports the complete shell inventory"
 }
 
+test_ci_partitions_cover_every_root_exactly_once() {
+  local tmp count shard listed expected union dups
+  tmp=$(fm_test_tmproot fm-lint-ci-partition)
+  expected=$(CI=true "$LINT" --list-files | LC_ALL=C sort)
+  # Exercise the CI count and other counts so the generic i/N selector cannot
+  # accidentally rely on the workflow's matrix or ambient changed-file mode.
+  for count in 1 3 5 6; do
+    union=""
+    shard=1
+    while [ "$shard" -le "$count" ]; do
+      listed=$(GITHUB_ACTIONS='' CI='' FM_LINT_JOBS=1 FM_LINT_ONE_FILE=1 \
+        "$LINT" --shard "$shard/$count" --list-files) || fail "partition listing failed"
+      [ -n "$listed" ] || fail "CI partition $shard/$count is empty"
+      [ "$listed" = "$(GITHUB_ACTIONS='' CI='' FM_LINT_JOBS=1 FM_LINT_ONE_FILE=1 \
+        "$LINT" --shard "$shard/$count" --list-files)" ] || fail "partition is nondeterministic"
+      union=$(printf '%s\n%s' "$union" "$listed")
+      shard=$((shard + 1))
+    done
+    printf '%s\n' "$union" | sed '/^$/d' | LC_ALL=C sort > "$tmp/union"
+    dups=$(uniq -d "$tmp/union")
+    [ -z "$dups" ] || fail "CI partitions duplicate roots: $dups"
+    [ "$(cat "$tmp/union")" = "$expected" ] || fail "CI partitions drop canonical roots"
+  done
+  pass "CI lint partitions deterministically cover every canonical root exactly once"
+}
+
+test_ci_partition_rejects_unsafe_or_malformed_selectors() {
+  local shard out rc
+  for shard in '' 0/6 1/0 7/6 1/65 01/6 1/06 999999999999999/6 1/6/2 nope; do
+    rc=0
+    out=$(FM_LINT_JOBS=1 "$LINT" --shard "$shard" --list-files 2>&1) || rc=$?
+    [ "$rc" -eq 2 ] || fail "invalid partition '$shard' exited $rc: $out"
+  done
+  rc=0
+  out=$(FM_LINT_JOBS=1 "$LINT" --shard 1/6 --fast --list-files 2>&1) || rc=$?
+  [ "$rc" -eq 2 ] || fail "partition accepted --fast: $out"
+  rc=0
+  out=$(FM_LINT_JOBS=1 "$LINT" --shard 1/6 bin/fm-lint.sh 2>&1) || rc=$?
+  [ "$rc" -eq 2 ] || fail "partition accepted explicit paths: $out"
+  rc=0
+  out=$(FM_LINT_JOBS=2 "$LINT" --shard 1/6 --list-files 2>&1) || rc=$?
+  [ "$rc" -eq 2 ] || fail "partition accepted two workers: $out"
+  rc=0
+  out=$(FM_LINT_JOBS=1 FM_LINT_ONE_FILE=0 "$LINT" --shard 1/6 --list-files 2>&1) || rc=$?
+  [ "$rc" -eq 2 ] || fail "partition accepted batched source graphs: $out"
+  pass "CI lint partition refuses malformed selectors and reduced or unsafe analysis"
+}
+
+test_ci_partition_keeps_unhinted_roots_with_spaces() {
+  local tmp expected union shard listed
+  tmp=$(fm_test_tmproot fm-lint-ci-new-root)
+  mkdir -p "$tmp/bin/backends" "$tmp/tests"
+  cp "$LINT" "$tmp/bin/fm-lint.sh"
+  printf '#!/bin/bash\nprintf "new root\\n"\n' > "$tmp/bin/new root.sh"
+  printf '#!/bin/bash\nprintf "backend\\n"\n' > "$tmp/bin/backends/new backend.sh"
+  printf '#!/bin/bash\nprintf "test\\n"\n' > "$tmp/tests/new test.sh"
+  expected=$(CI=true "$tmp/bin/fm-lint.sh" --list-files | LC_ALL=C sort)
+  union=""
+  for shard in 1 2; do
+    listed=$(FM_LINT_JOBS=1 "$tmp/bin/fm-lint.sh" --shard "$shard/2" --list-files) \
+      || fail "partition did not list unhinted roots"
+    union=$(printf '%s\n%s' "$union" "$listed")
+  done
+  [ "$(printf '%s\n' "$union" | sed '/^$/d' | LC_ALL=C sort)" = "$expected" ] \
+    || fail "partition dropped, duplicated, or split an unhinted space-containing path"
+  pass "CI lint partition keeps new unhinted roots including paths with spaces"
+}
+
 # fm_lint_stub_git <fakebin-dir>: install a git stub for the changed-file mode
 # tests below. Its answers are driven by env vars the caller sets before
 # invoking fm-lint.sh, so those tests can steer git state without depending on
@@ -281,6 +349,28 @@ printf '%s\n' "\$@" >> "$log"
 exit 0
 SH
   chmod +x "$fakebin/shellcheck"
+}
+
+test_ci_partition_executes_only_selected_roots_with_full_analysis() {
+  local tmp fakebin log modes flags expected out
+  tmp=$(fm_test_tmproot fm-lint-ci-partition-execution)
+  fakebin=$(fm_fakebin "$tmp")
+  log="$tmp/roots"
+  modes="$tmp/modes"
+  flags="$tmp/flags"
+  fm_lint_stub_shellcheck "$fakebin" "$log"
+  expected=$(FM_LINT_JOBS=1 "$LINT" --shard 2/5 --list-files | LC_ALL=C sort)
+  out=$(PATH="$fakebin:$PATH" GITHUB_ACTIONS='' CI='' FM_LINT_JOBS=1 FM_LINT_ONE_FILE=1 \
+    FM_TEST_MODE_LOG="$modes" FM_TEST_FLAG_LOG="$flags" \
+    "$LINT" --shard 2/5 --telemetry "$tmp/telemetry" 2>&1) || fail "partition execution failed: $out"
+  [ "$(LC_ALL=C sort "$log")" = "$expected" ] || fail "executed roots differ from listed partition"
+  [ "$(LC_ALL=C sort -u "$modes")" = on ] || fail "partition reduced ShellCheck analysis"
+  [ "$(grep -c '^external-sources=yes$' "$flags")" = "$(wc -l < "$log" | tr -d ' ')" ] \
+    || fail "not every partition root received full source following"
+  [ "$(grep -c '^exclude=none$' "$flags")" = "$(wc -l < "$log" | tr -d ' ')" ] \
+    || fail "partition used local cross-file exclusions"
+  assert_grep $'jobs\t1' "$tmp/telemetry" "partition did not use exactly one worker"
+  pass "CI lint partition executes only its listed roots with full source-aware analysis on one worker"
 }
 
 test_fast_mode_disables_extended_analysis() {
@@ -1455,6 +1545,10 @@ SH
 
 test_help_reports_the_complete_interface
 test_list_files_reports_the_shell_inventory
+test_ci_partitions_cover_every_root_exactly_once
+test_ci_partition_rejects_unsafe_or_malformed_selectors
+test_ci_partition_keeps_unhinted_roots_with_spaces
+test_ci_partition_executes_only_selected_roots_with_full_analysis
 test_fast_mode_disables_extended_analysis
 test_ci_defaults_to_full_analysis
 test_ci_rejects_explicit_fast_mode

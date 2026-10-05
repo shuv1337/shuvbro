@@ -28,17 +28,19 @@ jobs:
   # token is contents: read only. The fork clause in each if is kept from the
   # private-runner setup; it can be relaxed later if fork pull requests should
   # run CI.
-  lint:
-    name: Lint
+  lint-shards:
+    name: Lint shard ${{ matrix.shard }}
     runs-on: ubuntu-latest
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    # Full-corpus ShellCheck via bin/fm-lint.sh. Pinned tool installs are about
-    # a second; the ~19 minute average is that analysis, so caching the
-    # downloads would not shorten the check and narrowing it would drop
-    # source-aware rules CI is required to keep. 40 minutes is above the slow
-    # green runs (~23 min) and stops a wedged analysis short of the 6-hour
-    # default.
-    timeout-minutes: 40
+    # Separate VMs retain full source-aware analysis without running two
+    # memory-heavy ShellCheck processes together. The cap is a hang tripwire.
+    # Five partitions keep the normal initial CI fan-out at 20 jobs, within
+    # the Free plan's standard-runner concurrency limit (aggregators start later).
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5]
     steps:
       - uses: actions/checkout@v6
         with:
@@ -53,19 +55,35 @@ jobs:
           set -eu
           bin/fm-install-actionlint.sh "$RUNNER_TEMP/bin"
           echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
-      # Single owner of the lint definition (shell file set, config, version,
-      # and GitHub workflow lint). Do not re-spell the checks here; keep CI
-      # and the pre-push gate on this script so a self-broken ci.yml still
-      # fails locally before merge. FM_LINT_JOBS=1 runs the same two
-      # ShellCheck shards one at a time. FM_LINT_ONE_FILE=1 invokes
-      # ShellCheck once per root with the same --external-sources flags:
-      # one shard's combined graph was SIGKILL'd (exit 137) in an 8g
-      # container even with the shards serialized. Keep the low-memory mode.
-      - name: Run full lint
+      # The owner enforces one worker/root per process and the full canonical
+      # source-following partition. Matrix count mismatches cannot drop roots.
+      - name: Run full lint partition
         env:
-          FM_LINT_JOBS: "1"
-          FM_LINT_ONE_FILE: "1"
-        run: bin/fm-lint.sh
+          FM_LINT_PARTITION: ${{ matrix.shard }}/${{ strategy.job-total }}
+        run: bin/fm-lint.sh --shard "$FM_LINT_PARTITION" --telemetry "$RUNNER_TEMP/fm-lint-timing.tsv"
+      - name: Upload lint partition timing
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fm-lint-timing-${{ matrix.shard }}
+          path: ${{ runner.temp }}/fm-lint-timing.tsv
+          if-no-files-found: warn
+
+  # Preserve the stable check name and propagate failures, cancellations, and
+  # unexpected skips rather than letting a failed matrix skip this check.
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    needs: lint-shards
+    if: >-
+      always() &&
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    timeout-minutes: 5
+    steps:
+      - name: Require every lint partition
+        env:
+          LINT_RESULT: ${{ needs.lint-shards.result }}
+        run: test "$LINT_RESULT" = success
 
   # Deterministic proof that portable parallel shards + portable serial + Herdr
   # equal the complete tests/*.test.sh inventory with no missing or duplicates,
@@ -205,15 +223,15 @@ jobs:
     name: Behavior portable serial ${{ matrix.shard }}
     runs-on: ubuntu-latest
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    # Current runners can take ~20 min for a balanced shard. This 30-minute cap
+    # More separate runners shorten the serial critical path. This 20-minute cap
     # preserves the timeout as a hang tripwire while allowing runner-speed and
     # job-setup margin; it is not the expected healthy end of the lane.
-    timeout-minutes: 30
+    timeout-minutes: 20
     strategy:
       # Every shard reports so one failure never hides another shard's result.
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
     steps:
       - uses: actions/checkout@v6
         with:

@@ -127,7 +127,10 @@ test_notice_episodes() {
 # the parked rows covers them without another doorbell; a row arriving after
 # it gets exactly one. Only a drain that cannot be proven to follow the
 # blocking admission (forced here by stripping the blocker's drain receipt)
-# makes a still-parked wake stall.
+# makes a still-parked wake stall. A transient in-flight delivery can already
+# have written the same "undelivered" diagnostic (deduplicated, never cleared),
+# so the diagnostic alone does not prove the stall's episode has begun; let
+# periodic reconciles observe the persistent stall before advancing its clock.
 test_notice_parked_wake_only_when_stuck() {
   tui_case notice-parked 1
   local out="$CASE/out.json" steps state="$HOME_DIR/state"
@@ -154,6 +157,7 @@ test_notice_parked_wake_only_when_stuck() {
       {do:"write",path:($s+"/epsilon.status"),text:"done: epsilon finished\n"},
       {do:"wait",until:"shell-ok",command:("grep -q epsilon " + $s + "/.wake-queue"),timeoutMs:20000},
       {do:"wait",until:"diagnostic",match:"undelivered",timeoutMs:20000},
+      {do:"sleep",ms:5000},
       {do:"advance-notice-clock",ms:31000},
       {do:"wait",until:"admitted",match:"WATCHER FAILURE",count:1,timeoutMs:10000}]')
   v2_tui "$CASE" "$(spec "$(jq -nc --argjson s "$steps" '{manualNoticeClock:true,steps:$s}')")" "$out"
@@ -166,7 +170,7 @@ test_notice_parked_wake_only_when_stuck() {
   step_ok "$out" 18 "a row arriving after the drain did not get its own doorbell"
   jq -e '.steps[22].stdout | test("stripped")' "$out" >/dev/null || fail "fixture: no admitted blocker to force: $(jq -c '.steps[22]' "$out")"
   step_ok "$out" 26 "a wake still parked after a later drain was hidden from the stall diagnostic"
-  step_ok "$out" 28 "a stuck parked wake did not raise WATCHER FAILURE after the bound"
+  step_ok "$out" 29 "a stuck parked wake did not raise WATCHER FAILURE after the bound"
   [ "$(wake_admissions "$out")" = 2 ] || fail "expected one initial and one post-drain doorbell: $(jq -c '[.admitted[].text[0:60]]' "$out")"
   pass "tui: a parked wake stays silent, a drain covers its presented rows, a post-drain row gets one doorbell, and only a provably stuck parked wake raises WATCHER FAILURE"
 }
