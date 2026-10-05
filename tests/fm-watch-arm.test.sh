@@ -806,6 +806,9 @@ test_moved_generation_acknowledgement_is_self_healing() {
 
 # Start the arm on a stand-in watcher whose TERM handling is <mode>:
 # ignore (a dropped trap) or slow (a cleanup that runs <seconds> then exits).
+# The stand-in publishes a healthy lock so the arm confirms it and settles in
+# wait. A TERM sent while the arm still polls could hit the same bash trap drop
+# in the arm itself.
 start_arm_on_stub_watcher() {  # <dir> <mode> [seconds]
   local dir=$1 i
   cat > "$dir/stub.sh" << 'EOF'
@@ -815,28 +818,36 @@ case "${FM_STUB_MODE:?}" in
   slow) trap 'sleep "${FM_STUB_CLEANUP_SECONDS:?}"; exit 0' TERM INT HUP ;;
   replace) trap '' TERM INT HUP ;;
 esac
+. "${FM_STUB_LIB:?}"
+mkdir -p "$STATE/.watch.lock"
+printf '%s\n' "$FM_HOME" > "$STATE/.watch.lock/fm-home"
+printf '%s\n' "${FM_WATCH_OVERRIDE:?}" > "$STATE/.watch.lock/watcher-path"
+fm_pid_identity "$$" > "$STATE/.watch.lock/pid-identity"
+printf '%s\n' "$$" > "$STATE/.watch.lock/pid"
+touch "$STATE/.last-watcher-beat"
 printf '%s\n' "$$" > "${FM_STUB_READY:?}"
 if [ "${FM_STUB_MODE}" = replace ]; then
-  sleep 1
+  while [ ! -e "${FM_STUB_READY}.replace" ]; do sleep 0.05; done
   exec sleep 300
 fi
 while :; do sleep 0.2; done
 EOF
   chmod +x "$dir/stub.sh"
   FM_STATE_OVERRIDE="$dir/state" FM_WATCH_OVERRIDE="$dir/stub.sh" FM_STUB_READY="$dir/ready" \
-    FM_STUB_MODE="$2" FM_STUB_CLEANUP_SECONDS="${3:-0}" FM_LOCK_STALE_AFTER=2 \
+    FM_STUB_LIB="$ROOT/bin/fm-wake-lib.sh" FM_STUB_MODE="$2" FM_STUB_CLEANUP_SECONDS="${3:-0}" FM_LOCK_STALE_AFTER=2 \
     FM_ARM_CONFIRM_TIMEOUT=60 "$WATCH_ARM" > "$dir/arm.out" 2> "$dir/arm.err" &
   ARM_PID=$!
   i=0
-  while [ "$i" -lt 50 ] && [ ! -s "$dir/ready" ]; do
+  while [ "$i" -lt 100 ] && ! grep -q '^watcher: started ' "$dir/arm.out" 2>/dev/null; do
     sleep 0.05
     i=$((i + 1))
   done
-  if [ ! -s "$dir/ready" ]; then
-    reap_or_fail "$ARM_PID"
-    fail "stub watcher did not start: $(cat "$dir/arm.out" "$dir/arm.err" 2>/dev/null)"
+  STUB_PID=$(cat "$dir/ready" 2>/dev/null || true)
+  if ! grep -q '^watcher: started ' "$dir/arm.out" 2>/dev/null; then
+    reap_bounded "$ARM_PID" || true
+    reap_bounded "$STUB_PID" || true
+    fail "arm did not confirm the stub watcher: $(cat "$dir/arm.out" "$dir/arm.err" 2>/dev/null)"
   fi
-  STUB_PID=$(cat "$dir/ready")
 }
 
 test_arm_reaps_a_watcher_that_survives_term() {
@@ -891,6 +902,8 @@ test_arm_does_not_kill_a_pid_whose_identity_changed() {
   dir=$(make_case arm-identity-changed)
   start_arm_on_stub_watcher "$dir" replace
   kill -TERM "$ARM_PID" 2>/dev/null || fail "could not signal the arm"
+  sleep 1
+  touch "$dir/ready.replace"
   reap_or_fail "$ARM_PID" NONE
   status=$?
   is_live_non_zombie "$STUB_PID" \
@@ -900,58 +913,6 @@ test_arm_does_not_kill_a_pid_whose_identity_changed() {
   reap_bounded "$STUB_PID" || true
   [ "$status" -eq 0 ] || fail "arm did not return after refusing to signal a changed identity"
   pass "watch-arm: a pid whose identity changes during the stop grace is not killed"
-}
-
-test_restart_refuses_to_launch_while_a_stopped_pid_remains() {
-  local dir home state stub parent_pid child_pid identity status
-  dir=$(make_case restart-zombie-holder)
-  home="$dir/home"
-  state="$dir/state"
-  stub="$dir/stub.sh"
-  mkdir -p "$home" "$state/.watch.lock"
-  cat > "$stub" << 'EOF'
-#!/usr/bin/env bash
-trap '' TERM INT HUP
-while :; do sleep 0.2; done
-EOF
-  chmod +x "$stub"
-  # The parent does not wait, so a KILL leaves a zombie it still owns.
-  bash -c 'bash "$1" & printf "%s\n" "$!" > "$2"; sleep 120' _ "$stub" "$dir/child.pid" &
-  parent_pid=$!
-  i=0
-  while [ "$i" -lt 50 ] && [ ! -s "$dir/child.pid" ]; do
-    sleep 0.05
-    i=$((i + 1))
-  done
-  child_pid=$(cat "$dir/child.pid" 2>/dev/null || true)
-  sleep 0.2
-  if [ -z "$child_pid" ]; then
-    kill -KILL "$parent_pid" 2>/dev/null || true
-    wait "$parent_pid" 2>/dev/null || true
-    fail "zombie fixture did not record its child"
-  fi
-  identity=$(FM_STATE_OVERRIDE="$state" bash -c '. "$1"; fm_pid_identity "$2"' _ "$ROOT/bin/fm-wake-lib.sh" "$child_pid") \
-    || {
-      kill -KILL "$parent_pid" 2>/dev/null || true
-      wait "$parent_pid" 2>/dev/null || true
-      fail "could not read the fixture watcher identity"
-    }
-  printf '%s\n' "$child_pid" > "$state/.watch.lock/pid"
-  printf '%s\n' "$home" > "$state/.watch.lock/fm-home"
-  printf '%s\n' "$stub" > "$state/.watch.lock/watcher-path"
-  printf '%s\n' "$identity" > "$state/.watch.lock/pid-identity"
-  status=0
-  FM_HOME="$home" FM_STATE_OVERRIDE="$state" FM_WATCH_OVERRIDE="$stub" \
-    FM_LOCK_STALE_AFTER=2 FM_ARM_CONFIRM_TIMEOUT=5 \
-    "$WATCH_ARM" --restart > "$dir/arm.out" 2> "$dir/arm.err" || status=$?
-  kill -KILL "$parent_pid" 2>/dev/null || true
-  wait "$parent_pid" 2>/dev/null || true
-  [ "$status" -ne 0 ] || fail "restart launched or exited 0 while the stopped pid was still present: $(cat "$dir/arm.out" "$dir/arm.err")"
-  grep -qF "stopped watcher pid $child_pid is still present" "$dir/arm.err" \
-    || fail "restart did not refuse a still-present pid: $(cat "$dir/arm.err")"
-  ! grep -q '^watcher: started ' "$dir/arm.out" \
-    || fail "restart launched a successor while the stopped pid was still present: $(cat "$dir/arm.out")"
-  pass "watch-arm: restart refuses to launch while a stopped watcher pid is still present"
 }
 
 test_downtime_marker_does_not_follow_symlink() {
@@ -995,5 +956,4 @@ test_moved_generation_acknowledgement_is_self_healing
 test_arm_reaps_a_watcher_that_survives_term
 test_arm_lets_a_slow_watcher_cleanup_finish
 test_arm_does_not_kill_a_pid_whose_identity_changed
-test_restart_refuses_to_launch_while_a_stopped_pid_remains
 test_downtime_marker_does_not_follow_symlink

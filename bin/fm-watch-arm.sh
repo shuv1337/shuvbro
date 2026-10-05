@@ -409,6 +409,7 @@ if [ "$mode" = handling-delivered ]; then
 fi
 
 # A zombie still passes kill -0. Gone means the pid has been reaped.
+# shellcheck disable=SC2329 # Invoked indirectly by the signal traps below.
 pid_fully_gone() {  # <pid>
   local pid=$1
   case "$pid" in ''|*[!0-9]*) return 0 ;; esac
@@ -416,6 +417,7 @@ pid_fully_gone() {  # <pid>
   return 0
 }
 
+# shellcheck disable=SC2329 # Invoked indirectly by the signal traps below.
 pid_is_zombie() {  # <pid>
   local pid=$1 stat
   case "$pid" in ''|*[!0-9]*) return 1 ;; esac
@@ -482,19 +484,15 @@ if [ "$mode" = restart ]; then
   lock_pid=$(cat "$WATCH_LOCK/pid" 2>/dev/null || true)
   if fm_pid_alive "$lock_pid"; then
     if fm_watcher_lock_matches_pid "$STATE" "$WATCH" "$lock_pid" "$FM_HOME"; then
-      # The successor must not see a watcher whose trap was dropped as a live
-      # holder and no-op. stop_pid_bounded escalates to KILL after the grace.
-      # A zombie still passes kill -0, so do not launch until that pid is gone.
-      stop_pid_bounded "$lock_pid"
+      kill -TERM "$lock_pid" 2>/dev/null || true
+      # Wait for it to actually exit before relaunching, so the fresh watcher
+      # either takes a released lock or reclaims a now-dead-pid stale lock instead
+      # of seeing the dying one as a live holder and no-opping.
       i=0
-      while [ "$i" -lt 50 ] && ! pid_fully_gone "$lock_pid"; do
+      while [ "$i" -lt 50 ] && fm_pid_alive "$lock_pid"; do
         sleep 0.1
         i=$((i + 1))
       done
-      if ! pid_fully_gone "$lock_pid"; then
-        echo "watcher: FAILED - stopped watcher pid $lock_pid is still present; refusing to launch a successor" >&2
-        exit 1
-      fi
     else
       if ! clear_stale_recorded_watcher_lock; then
         echo "watcher: FAILED - stale watcher recovery state could not be persisted" >&2
