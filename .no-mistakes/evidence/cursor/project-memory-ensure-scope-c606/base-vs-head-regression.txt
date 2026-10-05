@@ -1,0 +1,5 @@
+BASE (95d2c20) helper on existing AGENTS.md + CLAUDE.md symlink:
+updated: added ## Maintaining this file to AGENTS.md and wrote CLAUDE.md @AGENTS.md pointer in $SANDBOX/r
+-rw-r--r-- AGENTS.md  
+-rw-r--r-- CLAUDE.md  
+Maintaining sections: 1

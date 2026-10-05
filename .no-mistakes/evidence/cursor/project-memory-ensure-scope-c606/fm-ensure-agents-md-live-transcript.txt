@@ -1,0 +1,168 @@
+=== S1: existing AGENTS.md + correct CLAUDE.md symlink (no governance) ===
+$ /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M44VN23F54Y4YWHJSXR9QZY8/bin/fm-ensure-agents-md.sh $SANDBOX/s1
+unchanged: kept existing CLAUDE.md symlink in $SANDBOX/s1
+[exit 0]
+--- state of $SANDBOX/s1:
+-rw-r--r-- AGENTS.md  
+lrwxrwxrwx CLAUDE.md -> AGENTS.md
+  >> AGENTS.md:
+     # Existing
+     
+     Build with make.
+  >> CLAUDE.md:
+     # Existing
+     
+     Build with make.
+CHECK symlink kept: YES
+CHECK AGENTS.md bytes unchanged: YES
+$ /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M44VN23F54Y4YWHJSXR9QZY8/bin/fm-ensure-agents-md.sh $SANDBOX/s1
+unchanged: kept existing CLAUDE.md symlink in $SANDBOX/s1
+[exit 0]
+CHECK rerun idempotent: YES
+
+=== S2: existing AGENTS.md without CLAUDE.md (no governance) ===
+$ /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M44VN23F54Y4YWHJSXR9QZY8/bin/fm-ensure-agents-md.sh $SANDBOX/s2
+wrote: CLAUDE.md @AGENTS.md pointer in $SANDBOX/s2
+[exit 0]
+--- state of $SANDBOX/s2:
+-rw-r--r-- AGENTS.md  
+-rw-r--r-- CLAUDE.md  
+  >> AGENTS.md:
+     # Existing
+     
+     Build with make.
+  >> CLAUDE.md:
+     <!-- Points Claude at AGENTS.md via import; edit AGENTS.md, not this file. -->
+     @AGENTS.md
+CHECK AGENTS.md bytes unchanged (no governance retrofit): YES
+CHECK CLAUDE.md is real pointer file: YES
+
+=== S3: existing AGENTS.md + canonical pointer CLAUDE.md ===
+$ /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M44VN23F54Y4YWHJSXR9QZY8/bin/fm-ensure-agents-md.sh $SANDBOX/s2
+unchanged: AGENTS.md with CLAUDE.md @AGENTS.md pointer in $SANDBOX/s2
+[exit 0]
+CHECK still unchanged: YES
+
+=== S4: only real CLAUDE.md -> promoted verbatim ===
+$ /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M44VN23F54Y4YWHJSXR9QZY8/bin/fm-ensure-agents-md.sh $SANDBOX/s4
+promoted: moved CLAUDE.md to AGENTS.md and wrote CLAUDE.md @AGENTS.md pointer in $SANDBOX/s4
+[exit 0]
+--- state of $SANDBOX/s4:
+-rw-r--r-- AGENTS.md  
+-rw-r--r-- CLAUDE.md  
+  >> AGENTS.md:
+     # Mem
+     
+     Run tests with make test.  >> CLAUDE.md:
+     <!-- Points Claude at AGENTS.md via import; edit AGENTS.md, not this file. -->
+     @AGENTS.md
+CHECK promoted bytes identical (no governance appended): YES
+
+=== S5: empty dir -> skeleton with governance section ===
+$ /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M44VN23F54Y4YWHJSXR9QZY8/bin/fm-ensure-agents-md.sh $SANDBOX/s5
+created: AGENTS.md and CLAUDE.md @AGENTS.md pointer in $SANDBOX/s5
+[exit 0]
+--- state of $SANDBOX/s5:
+-rw-r--r-- AGENTS.md  
+-rw-r--r-- CLAUDE.md  
+  >> AGENTS.md:
+     # Project agent memory
+     
+     This file is the project's committed home for project-intrinsic agent knowledge: build, test, release, architecture, and sharp-edge notes that should travel with the code.
+     
+     - Add durable project-specific notes here as they are discovered through real work.
+     
+     ## Maintaining this file
+     
+     Keep this file for knowledge useful to almost every future agent session in this project.
+     Do not repeat what the codebase already shows; point to the authoritative file or command instead.
+     Prefer rewriting or pruning existing entries over appending new ones.
+     When updating this file, preserve this bar for all agents and keep entries concise.
+  >> CLAUDE.md:
+     <!-- Points Claude at AGENTS.md via import; edit AGENTS.md, not this file. -->
+     @AGENTS.md
+CHECK governance sections in skeleton: 1
+
+=== S6: correct CLAUDE.md symlink, AGENTS.md missing ===
+$ /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M44VN23F54Y4YWHJSXR9QZY8/bin/fm-ensure-agents-md.sh $SANDBOX/s6
+created: AGENTS.md and kept CLAUDE.md symlink in $SANDBOX/s6
+[exit 0]
+--- state of $SANDBOX/s6:
+-rw-r--r-- AGENTS.md  
+lrwxrwxrwx CLAUDE.md -> AGENTS.md
+  >> AGENTS.md:
+     # Project agent memory
+     
+     This file is the project's committed home for project-intrinsic agent knowledge: build, test, release, architecture, and sharp-edge notes that should travel with the code.
+     
+     - Add durable project-specific notes here as they are discovered through real work.
+     
+     ## Maintaining this file
+     
+     Keep this file for knowledge useful to almost every future agent session in this project.
+     Do not repeat what the codebase already shows; point to the authoritative file or command instead.
+     Prefer rewriting or pruning existing entries over appending new ones.
+     When updating this file, preserve this bar for all agents and keep entries concise.
+  >> CLAUDE.md:
+     # Project agent memory
+     
+     This file is the project's committed home for project-intrinsic agent knowledge: build, test, release, architecture, and sharp-edge notes that should travel with the code.
+     
+     - Add durable project-specific notes here as they are discovered through real work.
+     
+     ## Maintaining this file
+     
+     Keep this file for knowledge useful to almost every future agent session in this project.
+     Do not repeat what the codebase already shows; point to the authoritative file or command instead.
+     Prefer rewriting or pruning existing entries over appending new ones.
+     When updating this file, preserve this bar for all agents and keep entries concise.
+CHECK symlink kept: YES
+
+=== ADV1: wrong symlink CLAUDE.md -> other.md (must refuse, nothing touched) ===
+$ /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M44VN23F54Y4YWHJSXR9QZY8/bin/fm-ensure-agents-md.sh $SANDBOX/a1
+conflict: CLAUDE.md is a symlink in $SANDBOX/a1 but does not point to AGENTS.md
+[exit 1]
+--- state of $SANDBOX/a1:
+-rw-r--r-- AGENTS.md  
+lrwxrwxrwx CLAUDE.md -> other.md
+-rw-r--r-- other.md  
+  >> AGENTS.md:
+     x
+  >> CLAUDE.md:
+     other
+readlink: other.md
+
+=== ADV2: both real distinct files (must refuse) ===
+$ /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M44VN23F54Y4YWHJSXR9QZY8/bin/fm-ensure-agents-md.sh $SANDBOX/a2
+conflict: both AGENTS.md and CLAUDE.md are real files in $SANDBOX/a2; reconcile them manually
+[exit 1]
+--- state of $SANDBOX/a2:
+-rw-r--r-- AGENTS.md  
+-rw-r--r-- CLAUDE.md  
+  >> AGENTS.md:
+     a
+  >> CLAUDE.md:
+     c
+
+=== ADV3: lowercase agents.md case variant (must refuse) ===
+$ /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M44VN23F54Y4YWHJSXR9QZY8/bin/fm-ensure-agents-md.sh $SANDBOX/a3
+conflict: memory file is named agents.md in $SANDBOX/a3 but the convention is AGENTS.md; rename it to AGENTS.md so CLAUDE.md's @AGENTS.md pointer resolves portably
+[exit 1]
+agents.md
+
+=== ADV4: existing AGENTS.md with first-line project mark, symlink ===
+$ /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M44VN23F54Y4YWHJSXR9QZY8/bin/fm-ensure-agents-md.sh $SANDBOX/a4
+unchanged: kept existing CLAUDE.md symlink in $SANDBOX/a4
+[exit 0]
+CHECK CRLF marked file + symlink untouched: YES
+
+=== Brief: ship scaffold project-memory section ===
+[fm-brief exit 0]
+# Project memory
+Run `$FM_ROOT/bin/fm-ensure-agents-md.sh .` in the worktree only when this task produced durable project-intrinsic knowledge to record in `AGENTS.md`.
+Record only project knowledge useful to almost every future session.
+For anything the codebase already shows, prefer a pointer to the authoritative file, command, or doc over copying the detail.
+If you touch a project `AGENTS.md`, follow `$FM_ROOT/bin/fm-ensure-agents-md.sh`'s self-governance contract in the same pass.
+Keep it proportionate: skip `AGENTS.md` edits for trivial tasks that produced no durable project knowledge.
+
+# Definition of done
