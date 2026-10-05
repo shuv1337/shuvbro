@@ -10,6 +10,8 @@ set -u
 
 # shellcheck source=tests/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+# shellcheck source=bin/fm-timeout-lib.sh
+. "$ROOT/bin/fm-timeout-lib.sh"
 
 SPAWN="$ROOT/bin/fm-spawn.sh"
 GUARD="$ROOT/bin/worker-guards/sharkctl"
@@ -92,6 +94,30 @@ test_unmarked_shell_delegates_notify_ask() {
   [ "$(cat "$DECOY_LOG")" = "notify ask --wait" ] \
     || fail "unmarked sharkctl did not forward notify ask --wait: $(cat "$DECOY_LOG")"
   pass "FM_TASK_ID unset: sharkctl notify ask reaches the next sharkctl"
+}
+
+test_two_guard_aliases_delegate_once() {
+  local first="$TMP_ROOT/alias-first" second="$TMP_ROOT/alias-second" out rc
+  mkdir -p "$first" "$second"
+  ln -s "$ROOT/bin/fm-sharkctl-guard.sh" "$first/sharkctl"
+  ln -s "$ROOT/bin/fm-sharkctl-guard.sh" "$second/sharkctl"
+
+  reset_decoy
+  out=$(fm_run_timed 5 env FM_TASK_ID=worker-alias \
+    PATH="$first:$second:$DECOY_DIR:$SYSTEM_PATH" DECOY_LOG="$DECOY_LOG" \
+    "$first/sharkctl" live update --id fixture 2>&1) && rc=0 || rc=$?
+  expect_code 0 "$rc" "two guard aliases must delegate a worker's allowed verb (got: $out)"
+  [ "$(cat "$DECOY_LOG")" = "live update --id fixture" ] \
+    || fail "two aliases must forward the worker invocation exactly once: $(cat "$DECOY_LOG")"
+
+  reset_decoy
+  out=$(fm_run_timed 5 env -u FM_TASK_ID \
+    PATH="$first:$second:$DECOY_DIR:$SYSTEM_PATH" DECOY_LOG="$DECOY_LOG" \
+    "$second/sharkctl" notify ask --wait 2>&1) && rc=0 || rc=$?
+  expect_code 0 "$rc" "two guard aliases must delegate an unmarked invocation (got: $out)"
+  [ "$(cat "$DECOY_LOG")" = "notify ask --wait" ] \
+    || fail "two aliases must forward the unmarked invocation exactly once: $(cat "$DECOY_LOG")"
+  pass "two guard aliases skip each other and delegate allowed and unmarked invocations once"
 }
 
 # Fake tmux: answers the pane-path query and logs every send-keys payload in
@@ -270,5 +296,6 @@ EOF
 test_notify_ask_refuses_without_calling_sharkctl
 test_ask_refuses_and_other_verbs_delegate
 test_unmarked_shell_delegates_notify_ask
+test_two_guard_aliases_delegate_once
 test_spawned_ship_and_scout_refuse_notify_ask
 test_filtered_launch_keeps_the_guard

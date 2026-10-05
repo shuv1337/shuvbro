@@ -30,18 +30,10 @@ if [ -n "${FM_TASK_ID:-}" ]; then
   esac
 fi
 
-# Device and inode, following symlinks, so the worker-guards name and this
-# file compare equal and the search continues to the real sharkctl.
+# Bash's file-identity test follows symlinks on Linux and macOS, so every
+# alias of this guard is skipped before delegation to the real sharkctl.
 same_file() {
-  local left=$1 right=$2 left_id right_id
-  if left_id=$(stat -c '%d:%i' "$left" 2>/dev/null); then
-    right_id=$(stat -c '%d:%i' "$right" 2>/dev/null) || return 1
-  elif left_id=$(stat -f '%d:%i' "$left" 2>/dev/null); then
-    right_id=$(stat -f '%d:%i' "$right" 2>/dev/null) || return 1
-  else
-    return 1
-  fi
-  [ "$left_id" = "$right_id" ]
+  [ "$1" -ef "$2" ]
 }
 
 next_sharkctl() {
