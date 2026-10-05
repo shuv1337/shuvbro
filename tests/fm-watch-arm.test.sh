@@ -167,7 +167,7 @@ reap_bounded() {  # <pid> [signal]
   if [ "$signal" != NONE ]; then
     kill "-$signal" "$pid" 2>/dev/null || true
   fi
-  while [ "$i" -lt 120 ] && is_live_non_zombie "$pid"; do
+  while [ "$i" -lt 200 ] && is_live_non_zombie "$pid"; do
     sleep 0.1
     i=$((i + 1))
   done
@@ -797,54 +797,81 @@ test_moved_generation_acknowledgement_is_self_healing() {
   pass "watch-arm: a moved recovery generation consumes handled rows and names its remedy"
 }
 
-test_arm_reaps_a_watcher_that_survives_term() {
-  local dir state stub ready armout stub_pid start status i stub_alive elapsed
-  dir=$(make_case arm-reap-term-survivor)
-  state="$dir/state"
-  stub="$dir/survivor.sh"
-  ready="$dir/ready"
-  armout="$dir/arm.out"
-  cat > "$stub" << 'EOF'
+# Start the arm on a stand-in watcher whose TERM handling is <mode>:
+# ignore (a dropped trap) or slow (a cleanup that runs <seconds> then exits).
+start_arm_on_stub_watcher() {  # <dir> <mode> [seconds]
+  local dir=$1 i
+  cat > "$dir/stub.sh" << 'EOF'
 #!/usr/bin/env bash
-trap '' TERM INT HUP
-printf '%s\n' "$$" > "${FM_SURVIVOR_READY:?}"
-while :; do sleep 1; done
+case "${FM_STUB_MODE:?}" in
+  ignore) trap '' TERM INT HUP ;;
+  slow) trap 'sleep "${FM_STUB_CLEANUP_SECONDS:?}"; exit 0' TERM INT HUP ;;
+esac
+printf '%s\n' "$$" > "${FM_STUB_READY:?}"
+while :; do sleep 0.2; done
 EOF
-  chmod +x "$stub"
-  FM_STATE_OVERRIDE="$state" FM_WATCH_OVERRIDE="$stub" FM_SURVIVOR_READY="$ready" \
-    FM_ARM_CONFIRM_TIMEOUT=60 "$WATCH_ARM" > "$armout" &
+  chmod +x "$dir/stub.sh"
+  FM_STATE_OVERRIDE="$dir/state" FM_WATCH_OVERRIDE="$dir/stub.sh" FM_STUB_READY="$dir/ready" \
+    FM_STUB_MODE="$2" FM_STUB_CLEANUP_SECONDS="${3:-0}" FM_LOCK_STALE_AFTER=2 \
+    FM_ARM_CONFIRM_TIMEOUT=60 "$WATCH_ARM" > "$dir/arm.out" 2> "$dir/arm.err" &
   ARM_PID=$!
   i=0
-  while [ "$i" -lt 50 ] && [ ! -s "$ready" ]; do
+  while [ "$i" -lt 50 ] && [ ! -s "$dir/ready" ]; do
     sleep 0.05
     i=$((i + 1))
   done
-  if [ ! -s "$ready" ]; then
+  if [ ! -s "$dir/ready" ]; then
     reap_bounded "$ARM_PID" || true
-    fail "survivor stub did not start: $(cat "$armout" 2>/dev/null)"
+    fail "stub watcher did not start: $(cat "$dir/arm.out" "$dir/arm.err" 2>/dev/null)"
   fi
-  stub_pid=$(cat "$ready")
+  STUB_PID=$(cat "$dir/ready")
+}
+
+test_arm_reaps_a_watcher_that_survives_term() {
+  local dir start status stub_alive elapsed
+  dir=$(make_case arm-reap-term-survivor)
+  start_arm_on_stub_watcher "$dir" ignore
   kill -TERM "$ARM_PID" 2>/dev/null || {
     reap_bounded "$ARM_PID" || true
-    reap_bounded "$stub_pid" || true
+    reap_bounded "$STUB_PID" || true
     fail "could not signal the arm"
   }
   start=$SECONDS
   reap_bounded "$ARM_PID" NONE
   status=$?
   elapsed=$((SECONDS - start))
-  if is_live_non_zombie "$stub_pid"; then
+  if is_live_non_zombie "$STUB_PID"; then
     stub_alive=1
   else
     stub_alive=0
   fi
-  reap_bounded "$stub_pid" || true
+  reap_bounded "$STUB_PID" || true
   [ "$status" -eq 0 ] \
     || fail "arm did not exit after TERM; a watcher that survives TERM must not hang the arm"
-  [ "$elapsed" -lt 12 ] || fail "arm stop did not return promptly"
+  [ "$elapsed" -lt 15 ] || fail "arm stop did not return promptly"
   [ "$stub_alive" -eq 0 ] || fail "arm left a TERM-ignoring watcher alive"
   ! is_live_non_zombie "$ARM_PID" || fail "arm remained live after stop"
+  grep -qF "watcher: pid $STUB_PID survived TERM for 7s; sent KILL, so its cleanup was skipped and recovery will use the stale-lock path" "$dir/arm.err" \
+    || fail "arm KILLed the watcher without naming the skipped cleanup: $(cat "$dir/arm.err")"
   pass "watch-arm: a watcher that survives TERM is reaped instead of hanging the arm"
+}
+
+test_arm_lets_a_slow_watcher_cleanup_finish() {
+  local dir status
+  dir=$(make_case arm-slow-watcher-cleanup)
+  start_arm_on_stub_watcher "$dir" slow 5
+  kill -TERM "$ARM_PID" 2>/dev/null || {
+    reap_bounded "$ARM_PID" || true
+    reap_bounded "$STUB_PID" || true
+    fail "could not signal the arm"
+  }
+  reap_bounded "$ARM_PID" NONE
+  status=$?
+  reap_bounded "$STUB_PID" || true
+  [ "$status" -eq 0 ] || fail "arm did not exit after a slow watcher cleanup"
+  ! grep -qF 'sent KILL' "$dir/arm.err" \
+    || fail "arm KILLed a watcher whose cleanup fit within its bound: $(cat "$dir/arm.err")"
+  pass "watch-arm: a watcher cleanup within its lock-wait bound is not KILLed"
 }
 
 test_downtime_marker_does_not_follow_symlink() {
@@ -886,4 +913,5 @@ test_markerless_legacy_queue_is_recovered_on_arm
 test_handling_window_close_keeps_the_acknowledgement_valid
 test_moved_generation_acknowledgement_is_self_healing
 test_arm_reaps_a_watcher_that_survives_term
+test_arm_lets_a_slow_watcher_cleanup_finish
 test_downtime_marker_does_not_follow_symlink
