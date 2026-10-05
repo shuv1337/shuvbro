@@ -1,0 +1,4 @@
+ok - real herdr (0.9.1-shuv.6+9059819d8043): events.subscribe capability gate passes (protocol >= 16, events surface present in api schema)
+ok - real herdr (0.9.1-shuv.6+9059819d8043): a driven idle->blocked transition returns the blocked record in 0.049s (pane w1:p2)
+ok - real herdr: the watcher fast-path enqueues a stale wake naming the task window from the live blocked transition
+ok - real herdr: watcher TERM retires the socket reader, output pipes and temporary files in 0.025s

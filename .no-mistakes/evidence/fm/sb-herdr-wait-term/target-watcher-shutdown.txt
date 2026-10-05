@@ -1,0 +1,11 @@
+test_signals_interrupt_subscribed_event_wait (__main__.WatcherEventWaitShutdownTest.test_signals_interrupt_subscribed_event_wait) ... ok
+test_term_interrupts_subscription_ack_wait (__main__.WatcherEventWaitShutdownTest.test_term_interrupts_subscription_ack_wait) ... ok
+
+----------------------------------------------------------------------
+Ran 2 tests in 41.978s
+
+OK
+watcher SIGTERM shutdown: 0.024s, pipes closed and reader/FIFO/output removed
+watcher SIGHUP shutdown: 0.023s, pipes closed and reader/FIFO/output removed
+watcher SIGINT shutdown: 0.023s, pipes closed and reader/FIFO/output removed
+watcher SIGTERM shutdown: 0.023s, pipes closed and reader/FIFO/output removed

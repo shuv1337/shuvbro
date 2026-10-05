@@ -1,0 +1,98 @@
+test_signals_interrupt_subscribed_event_wait (__main__.WatcherEventWaitShutdownTest.test_signals_interrupt_subscribed_event_wait) ... 
+  test_signals_interrupt_subscribed_event_wait (__main__.WatcherEventWaitShutdownTest.test_signals_interrupt_subscribed_event_wait) (signal='SIGTERM') ... ERROR
+  test_signals_interrupt_subscribed_event_wait (__main__.WatcherEventWaitShutdownTest.test_signals_interrupt_subscribed_event_wait) (signal='SIGHUP') ... ERROR
+  test_signals_interrupt_subscribed_event_wait (__main__.WatcherEventWaitShutdownTest.test_signals_interrupt_subscribed_event_wait) (signal='SIGINT') ... ERROR
+test_term_interrupts_subscription_ack_wait (__main__.WatcherEventWaitShutdownTest.test_term_interrupts_subscription_ack_wait) ... ERROR
+
+======================================================================
+ERROR: test_signals_interrupt_subscribed_event_wait (__main__.WatcherEventWaitShutdownTest.test_signals_interrupt_subscribed_event_wait) (signal='SIGTERM')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/fm-base.C1y8/tests/fm-backend-herdr-eventwait.test.py", line 262, in test_signals_interrupt_subscribed_event_wait
+    self.check_shutdown(sig)
+    ~~~~~~~~~~~~~~~~~~~^^^^^
+  File "/tmp/fm-base.C1y8/tests/fm-backend-herdr-eventwait.test.py", line 232, in check_shutdown
+    stdout, stderr = watcher.communicate(timeout=1)
+                     ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^
+  File "/usr/lib/python3.14/subprocess.py", line 1221, in communicate
+    stdout, stderr = self._communicate(input, endtime, timeout)
+                     ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/subprocess.py", line 2154, in _communicate
+    self._check_timeout(endtime, orig_timeout, stdout, stderr)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/subprocess.py", line 1268, in _check_timeout
+    raise TimeoutExpired(
+    ...<2 lines>...
+            stderr=b''.join(stderr_seq) if stderr_seq else None)
+subprocess.TimeoutExpired: Command '['bash', '/tmp/fm-base.C1y8/bin/fm-watch.sh']' timed out after 1 seconds
+
+======================================================================
+ERROR: test_signals_interrupt_subscribed_event_wait (__main__.WatcherEventWaitShutdownTest.test_signals_interrupt_subscribed_event_wait) (signal='SIGHUP')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/fm-base.C1y8/tests/fm-backend-herdr-eventwait.test.py", line 262, in test_signals_interrupt_subscribed_event_wait
+    self.check_shutdown(sig)
+    ~~~~~~~~~~~~~~~~~~~^^^^^
+  File "/tmp/fm-base.C1y8/tests/fm-backend-herdr-eventwait.test.py", line 232, in check_shutdown
+    stdout, stderr = watcher.communicate(timeout=1)
+                     ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^
+  File "/usr/lib/python3.14/subprocess.py", line 1221, in communicate
+    stdout, stderr = self._communicate(input, endtime, timeout)
+                     ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/subprocess.py", line 2154, in _communicate
+    self._check_timeout(endtime, orig_timeout, stdout, stderr)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/subprocess.py", line 1268, in _check_timeout
+    raise TimeoutExpired(
+    ...<2 lines>...
+            stderr=b''.join(stderr_seq) if stderr_seq else None)
+subprocess.TimeoutExpired: Command '['bash', '/tmp/fm-base.C1y8/bin/fm-watch.sh']' timed out after 1 seconds
+
+======================================================================
+ERROR: test_signals_interrupt_subscribed_event_wait (__main__.WatcherEventWaitShutdownTest.test_signals_interrupt_subscribed_event_wait) (signal='SIGINT')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/fm-base.C1y8/tests/fm-backend-herdr-eventwait.test.py", line 262, in test_signals_interrupt_subscribed_event_wait
+    self.check_shutdown(sig)
+    ~~~~~~~~~~~~~~~~~~~^^^^^
+  File "/tmp/fm-base.C1y8/tests/fm-backend-herdr-eventwait.test.py", line 232, in check_shutdown
+    stdout, stderr = watcher.communicate(timeout=1)
+                     ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^
+  File "/usr/lib/python3.14/subprocess.py", line 1221, in communicate
+    stdout, stderr = self._communicate(input, endtime, timeout)
+                     ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/subprocess.py", line 2154, in _communicate
+    self._check_timeout(endtime, orig_timeout, stdout, stderr)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/subprocess.py", line 1268, in _check_timeout
+    raise TimeoutExpired(
+    ...<2 lines>...
+            stderr=b''.join(stderr_seq) if stderr_seq else None)
+subprocess.TimeoutExpired: Command '['bash', '/tmp/fm-base.C1y8/bin/fm-watch.sh']' timed out after 1 seconds
+
+======================================================================
+ERROR: test_term_interrupts_subscription_ack_wait (__main__.WatcherEventWaitShutdownTest.test_term_interrupts_subscription_ack_wait)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/fm-base.C1y8/tests/fm-backend-herdr-eventwait.test.py", line 265, in test_term_interrupts_subscription_ack_wait
+    self.check_shutdown(signal.SIGTERM, before_ack=True)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/tmp/fm-base.C1y8/tests/fm-backend-herdr-eventwait.test.py", line 232, in check_shutdown
+    stdout, stderr = watcher.communicate(timeout=1)
+                     ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^
+  File "/usr/lib/python3.14/subprocess.py", line 1221, in communicate
+    stdout, stderr = self._communicate(input, endtime, timeout)
+                     ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/subprocess.py", line 2154, in _communicate
+    self._check_timeout(endtime, orig_timeout, stdout, stderr)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/subprocess.py", line 1268, in _check_timeout
+    raise TimeoutExpired(
+    ...<2 lines>...
+            stderr=b''.join(stderr_seq) if stderr_seq else None)
+subprocess.TimeoutExpired: Command '['bash', '/tmp/fm-base.C1y8/bin/fm-watch.sh']' timed out after 1 seconds
+
+----------------------------------------------------------------------
+Ran 2 tests in 45.801s
+
+FAILED (errors=4)

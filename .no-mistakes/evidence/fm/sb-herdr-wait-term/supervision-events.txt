@@ -1,0 +1,19 @@
+ok - handle_push_transition: a blocked crew enqueues a stale wake naming its window and wakes the supervisor
+ok - handle_push_transition: enqueue failure cannot commit the Herdr dedupe marker
+ok - handle_push_transition: a declared-pause crew is absorbed (no fast wake), left to the poll loop's long cadence
+ok - handle_push_transition: a captain-held crew is absorbed (no fast wake), left to the poll loop's long cadence
+ok - event_wait_or_sleep: herdr windows go on the event pane list, but kind=secondmate endpoints are excluded
+ok - event_wait_or_sleep: one cached capability probe owns validation across bounded waits
+ok - event_wait_or_sleep: rc 0 handles the record, other clean waits reset failures without sleeping again or leaking output
+ok - event_wait_or_sleep: a home with no push-capable window is inert (sleeps POLL, never touches the event path)
+ok - event_wait_or_sleep: consecutive event-path failures disable the fast-path and revert to pure polling (fail-closed)
+.......
+----------------------------------------------------------------------
+Ran 7 tests in 42.065s
+
+OK
+watcher SIGTERM shutdown: 0.023s, pipes closed and reader/FIFO/output removed
+watcher SIGHUP shutdown: 0.023s, pipes closed and reader/FIFO/output removed
+watcher SIGINT shutdown: 0.021s, pipes closed and reader/FIFO/output removed
+watcher SIGTERM shutdown: 0.062s, pipes closed and reader/FIFO/output removed
+# fm-supervision-events.test.sh: all assertions passed
