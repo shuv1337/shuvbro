@@ -14,8 +14,8 @@ function retryDelay(attempt) {
   return Math.min(REARM_RETRY_MAX_MS, REARM_RETRY_BASE_MS * 2 ** Math.max(0, attempt - 1));
 }
 
-function wakePrompt(reason) {
-  return `WATCHER FIRED - drain queued wakes with bin/fm-wake-drain.sh and handle the reported wake. Watcher continuity is plugin-owned.\n\n${reason}`;
+function wakePrompt() {
+  return "WATCHER FIRED - drain the durable wake queue with bin/fm-wake-drain.sh, handle the presented wakes, and run the acknowledgement command it prints. Watcher continuity is plugin-owned.";
 }
 
 function classifyArmClose(stdout, stderr, code, signal) {
@@ -98,6 +98,11 @@ export function createWatchArmCoordinator(paths, deliverPrompt, options = {}) {
     catch { return undefined; }
   }
 
+  function episodeAcked() {
+    try { return /^acked:(?:handling|downtime):[A-Za-z0-9._-]+$/.test(readFileSync(`${paths.state}/.watcher-down`, "utf8").trim()); }
+    catch { return false; }
+  }
+
   function setArmStatus(status) {
     state.armStatus = status;
   }
@@ -152,11 +157,15 @@ export function createWatchArmCoordinator(paths, deliverPrompt, options = {}) {
     return confirmHandlingDelivery(snapshot());
   }
 
-  async function deliverActionableWake(sessionID, message, recovery, saved) {
+  async function deliverActionableWake(sessionID, recovery, saved) {
     if (state.stopped || options.owns && !options.owns()) return;
     if (options.admission?.acknowledged(saved)) return;
+    // A parked wake waits for the outstanding doorbell without handoff work.
+    if (options.admission?.parked(saved)) return;
     if (options.admission && !recovery) throw new Error("V2 successor has no verifiable recovery generation; pending admission retained");
-    if (recovery) {
+    // Once the lead acked the episode there is no handoff left to confirm;
+    // rows that arrived after its drain still need their own doorbell.
+    if (recovery && !(options.admission && episodeAcked())) {
       const confirmed = confirmHandlingDeliveryWithRetry(recovery);
       if (!confirmed.ok) {
         if (options.admission) throw new Error(confirmed.detail);
@@ -167,7 +176,7 @@ export function createWatchArmCoordinator(paths, deliverPrompt, options = {}) {
             await retireArm(state.child);
           }
         }
-        await sendPrompt(sessionID, wakePrompt(`${message}\n\n${confirmed.detail}`));
+        await sendPrompt(sessionID, `WATCHER FAILURE - drain the durable wake queue with bin/fm-wake-drain.sh and inspect the recovery failure.\n\n${confirmed.detail}`);
         return;
       }
     }
@@ -175,12 +184,12 @@ export function createWatchArmCoordinator(paths, deliverPrompt, options = {}) {
       await options.admission.deliver(options.admission.confirm(saved, recovery));
       return;
     }
-    await sendPrompt(sessionID, wakePrompt(message));
+    await sendPrompt(sessionID, wakePrompt());
   }
 
   function surfaceFailure(sessionID, reason, detail) {
     if (options.failure) { options.failure(reason, detail); return; }
-    void sendPrompt(sessionID, wakePrompt(reason)).catch(() => {});
+    void sendPrompt(sessionID, `WATCHER FAILURE - drain the durable wake queue with bin/fm-wake-drain.sh and inspect the recovery failure.\n\n${reason}`).catch(() => {});
   }
 
   function waitForRetry(attempt) {
@@ -364,9 +373,9 @@ export function createWatchArmCoordinator(paths, deliverPrompt, options = {}) {
           let saved, preparationError;
           try {
             saved = options.admission
-               ? options.admission.prepare(await encodeFirstmateOperationalInput(paths.root, "watcher", wakePrompt(classification.message)), "wake", { predecessorArmPid: predecessor, recovery: { generation: handlingGeneration() } })
+               ? options.admission.prepare(await encodeFirstmateOperationalInput(paths.root, "watcher", wakePrompt()), "wake", { predecessorArmPid: predecessor, recovery: { generation: handlingGeneration() } })
               : undefined;
-          } catch (error) { preparationError = error.message; state.unpreparedWake = { message: classification.message, predecessor }; }
+          } catch (error) { preparationError = error.message; state.unpreparedWake = { predecessor }; }
           const result = await restoreAfterActionableClose(sessionID, predecessor);
           return { ...result, saved, preparationError };
         })();
@@ -374,11 +383,10 @@ export function createWatchArmCoordinator(paths, deliverPrompt, options = {}) {
         void restoration
           .then(async (result) => {
             try {
-              const message = result.failure ? `${classification.message}\n\n${result.failure}` : classification.message;
               if (state.stopped) return;
               if (options.admission && result.failure) throw Object.assign(new Error(result.failure + (result.preparationError ? "\n" + result.preparationError : "")), { nonRecoverable: true });
               if (result.preparationError && result.recovery?.generation) {
-                try { result.saved = options.admission.prepare(await encodeFirstmateOperationalInput(paths.root, "watcher", wakePrompt(message)), "wake", { predecessorArmPid: predecessor, recovery: result.recovery }); }
+                try { result.saved = options.admission.prepare(await encodeFirstmateOperationalInput(paths.root, "watcher", wakePrompt()), "wake", { predecessorArmPid: predecessor, recovery: result.recovery }); }
                 catch (error) { throw Object.assign(error, { nonRecoverable: true }); }
                 state.unpreparedWake = null;
               } else if (result.preparationError) {
@@ -386,7 +394,11 @@ export function createWatchArmCoordinator(paths, deliverPrompt, options = {}) {
                 // a fresh downtime generation on every reconciliation tick.
                 throw Object.assign(new Error(result.preparationError), { nonRecoverable: true });
               }
-              await deliverActionableWake(sessionID, message, result.recovery, result.saved);
+              if (result.failure) {
+                surfaceFailure(sessionID, result.failure, { permanent: true });
+                return;
+              }
+              await deliverActionableWake(sessionID, result.recovery, result.saved);
             } finally {
               if (state.restorationInFlight === restoration) state.restorationInFlight = null;
             }
@@ -468,20 +480,20 @@ export function createWatchArmCoordinator(paths, deliverPrompt, options = {}) {
     hasUnpreparedWake: () => !!state.unpreparedWake,
     async resumePending(sessionID) {
       if (!options.admission || state.restorationInFlight || state.stopped) return;
-      const pending = options.admission.pending().filter(value => value.kind === "wake");
+      const pending = options.admission.pending().filter(value => value.kind === "wake" && !options.admission.parked(value));
       if (!pending.length && !state.unpreparedWake) return;
       const result = await restoreAfterActionableClose(sessionID, "");
       if (result.failure) throw Object.assign(new Error(result.failure), { nonRecoverable: true });
       if (state.unpreparedWake) {
-        const { message, predecessor } = state.unpreparedWake;
+        const { predecessor } = state.unpreparedWake;
         try {
-          pending.push(options.admission.prepare(await encodeFirstmateOperationalInput(paths.root, "watcher", wakePrompt(message)), "wake", { predecessorArmPid: predecessor, recovery: result.recovery || { generation: handlingGeneration() } }));
+          pending.push(options.admission.prepare(await encodeFirstmateOperationalInput(paths.root, "watcher", wakePrompt()), "wake", { predecessorArmPid: predecessor, recovery: result.recovery || { generation: handlingGeneration() } }));
           state.unpreparedWake = null;
         } catch (error) { throw Object.assign(error, { nonRecoverable: true }); }
       }
       for (const saved of pending) {
         if (state.stopped) return;
-        await deliverActionableWake(sessionID, "", result.recovery, saved);
+        await deliverActionableWake(sessionID, result.recovery, saved);
       }
     },
     async cleanup() {

@@ -2,7 +2,7 @@ import { identity, schema, publish, readRegistration, canonical, live, markerKey
 import { createWatchArmCoordinator } from "../lib/fm-watch-arm-v2.js";
 import { createAdmissionJournal } from "./admission.js";
 import { bindingRPC } from "./rpc.js";
-import { eventSessionID, isIdleEvent } from "../lib/fm-plugin-v2.js";
+import { eventData, eventSessionID, eventType, isIdleEvent } from "../lib/fm-plugin-v2.js";
 import { runProcess } from "../lib/fm-plugin-common.js";
 import { encodeFirstmateOperationalInput } from "../lib/fm-operational-input.js";
 import { existsSync } from "node:fs";
@@ -220,7 +220,7 @@ export default { id: "firstmate.native.v2", async setup(ctx) {
     try { const value = live(readRegistration(record.sessionID)); canonical(value, false); return !stopped && value.claimID === record.claimID && value.ownerPID === process.pid; }
     catch { return false; }
   };
-   const journal = createAdmissionJournal(paths, record.sessionID, input => ctx.client.session.prompt(input, { signal: AbortSignal.any([abort.signal, AbortSignal.timeout(10000)]) }), failure, { valid: validClaim, signal: abort.signal });
+   const journal = createAdmissionJournal(paths, record.sessionID, input => ctx.client.session.prompt(input, { signal: AbortSignal.any([abort.signal, AbortSignal.timeout(10000)]) }), failure, { valid: validClaim, signal: abort.signal, claim: record.claimID });
     const noticeJournal = createAdmissionJournal(paths, record.sessionID, input => ctx.client.session.prompt(input, { signal: AbortSignal.any([abort.signal, AbortSignal.timeout(10000)]) }), reason => failure("V2 repair notice delivery remains pending: " + reason), {
       failureClaim: record.claimID,
      signal: abort.signal,
@@ -262,7 +262,7 @@ export default { id: "firstmate.native.v2", async setup(ctx) {
       if (current.lifecycle !== "active") publish("claim", { ...current, lifecycle: "active" });
       const armStatus = await coordinator.ensureArmed(record.sessionID);
       await coordinator.resumePending(record.sessionID);
-      const pending = journal.pending().filter(value => value.kind === "wake" || value.kind === "startup:" + record.claimID);
+      const pending = journal.pending().filter(value => (value.kind === "wake" || value.kind === "startup:" + record.claimID) && (!journal.parked(value) || journal.stalled(value)));
       if (pending.length) failure("V2 retained admission remains undelivered; automatic recovery is continuing");
        else if (!coordinator.hasUnpreparedWake() && ["armed", "existing", "not-needed"].includes(armStatus)) notices.recovered();
     })();
@@ -294,7 +294,9 @@ export default { id: "firstmate.native.v2", async setup(ctx) {
     try {
       for await (const event of ctx.client.event.subscribe({ signal: abort.signal })) {
         if (stopped || eventSessionID(event) !== record.sessionID) continue;
+        if (eventType(event) === "session.inbox.enqueued") journal.accepted(eventData(event).inboxID);
         if (!isIdleEvent(event)) continue;
+        journal.idle();
         // Idle/interrupted alone never admits a continuation. The watcher is
         // restored here; only its genuine durable wake journal admits input.
         await reconcile();

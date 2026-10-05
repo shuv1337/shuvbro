@@ -25,6 +25,17 @@ When this session owns supervision and away mode is not active:
    Lead journal prompts (wakes, startup nudges and repair notices) use `delivery: "steer"`: an idle session starts execution, and a busy turn receives the prompt at its next model step boundary, after any active model response or tool execution finishes.
    Worker briefs remain queued through the separate worker launch path.
    Rejected or unknown acknowledgements retry the same ID/text; admission never acknowledges wake rows.
+   The wake doorbell contains only a generic instruction to drain and acknowledge the durable queue; authoritative reasons come from that drain.
+   While an admitted wake doorbell is still undrained, later wakes from the same claim stay journaled behind that outstanding steer without handoff confirmation.
+   If the lead's turn ends (an execution terminal event for the exact lead session) with no drain recorded since a doorbell's admission, that doorbell stops holding the slot, so parked or later wakes admit exactly one new doorbell; a later drain still retires both.
+   The exact-ID native inbox acceptance event also binds a turn end that arrives before the prompt receipt, including lost-receipt retries; an idle event before acceptance never releases a fresh doorbell.
+   Every main `bin/fm-wake-drain.sh` presentation advances a monotonic sequence in `state/.wake-drain-presented` with the recovery generation and highest row sequence it presented.
+   An admitted doorbell is handled once a drain is recorded after its admission, even if rows remain queued; a confirmed no-row recovery, or an unadmitted row wake whose every row that drain presented, is also covered by a drain recorded after its preparation.
+   A later wake names only the rows that arrived after the latest drain, so a covered record cannot absorb them and they get exactly one doorbell; a wake captured only after a drain already presented all its rows is covered without a doorbell.
+   Otherwise canonical row removal retires a row wake, and an acknowledged marker for a recovery's generation (or, once admitted, any later one) retires it; missing or malformed state retains a doorbell, and a doorbell admitted by an older claim never holds a new owner's slot.
+   A record parked behind an undrained doorbell is healthy coalescing and stays out of the undelivered-admission stall notice; it counts toward that notice only when a drain is recorded that cannot be proven to precede its blocker's admission.
+   A parked wake then admits if its obligation remains, or retires without another prompt if canonical handling already settled it; rows that arrived after the drain get their own doorbell, without a stale handoff confirmation once the episode is acknowledged.
+   Only canonically retired wake records expire after seven days; outstanding recovery records remain retained.
    An exhausted admission remains pending and produces a bounded diagnostic, not an unguarded recovery-marker reopen.
    Subsequent attempts continue with capped backoff while ownership remains valid; confirmed canonical queue acknowledgement retires the obsolete transport obligation without reporting it as admitted.
 6. Ordinary wake: do not ask the model to re-arm because continuity is plugin-owned.

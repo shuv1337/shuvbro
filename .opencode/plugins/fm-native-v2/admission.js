@@ -6,18 +6,32 @@ import { readPrivate, writePrivate } from "../../../bin/fm-opencode-v2-owner.mjs
 // Admission journal is adapter transport, not wake-row ownership. Only the
 // canonical drain/ack owner consumes queue rows. IDs/text survive replacement
 // successors, owner reload and unknown native prompt acknowledgement.
+// One outstanding steer doorbell at a time: native admission is not handling.
+// Canonical rows or the current recovery episode retain the doorbell slot.
 export function createAdmissionJournal(paths, sessionID, admit, report = console.error, options = {}) {
   const dir = join(paths.state, ".opencode-v2-admissions", createHash("sha256").update(sessionID).digest("hex"));
   const inflight = new Map(), retries = new Map();
+  let wakeSlot = "";
   const allowed = () => !options.signal?.aborted && (!options.valid || options.valid());
   function validate(value) {
     if (value.version !== 1 || value.sessionID !== sessionID || !/^msg_[a-f0-9]{64}$/.test(value.id) || typeof value.kind !== "string" || typeof value.text !== "string" || value.text.length > 12000 || !Array.isArray(value.rows) || value.rows.some(row => typeof row !== "string" || !/^[0-9]+\t[0-9]+$/.test(row)) || !["prepared", "confirmed", "admitted", "acknowledged"].includes(value.phase)) throw new Error("invalid V2 admission record");
     return value;
   }
+  // The canonical drain advances this sequence on every main presentation and
+  // names the highest row sequence it presented. Missing means no drain yet;
+  // malformed state cannot prove a later drain or a presented row.
+  function drainReceipt() {
+    try {
+      const match = readFileSync(join(paths.state, ".wake-drain-presented"), "utf8").match(/^([0-9]{1,15})\t[A-Za-z0-9._-]{0,200}(?:\t([0-9]{1,15}))?\n?$/);
+      return match ? { sequence: Number(match[1]), presented: match[2] === undefined ? null : Number(match[2]) } : { sequence: null, presented: null };
+    } catch (error) { return { sequence: error.code === "ENOENT" ? 0 : null, presented: null }; }
+  }
+  function drainSequence() { return drainReceipt().sequence; }
   function save(value) { writePrivate(join(dir, value.id + ".json"), validate(value)); return value; }
   function prepare(text, kind = "wake", context = {}) {
     let logical = kind;
     let identities = [];
+    let covered = false;
     if (kind === "wake") {
       let queue;
       try { queue = readFileSync(join(paths.state, ".wake-queue"), "utf8"); }
@@ -30,6 +44,12 @@ export function createAdmissionJournal(paths, sessionID, admit, report = console
         if (typeof generation !== "string" || !/^[A-Za-z0-9._-]{1,200}$/.test(generation)) throw new Error("actionable close has neither durable wake rows nor recovery generation");
         logical += ":recovery:" + generation;
       } else {
+        // Rows a drain already presented are covered by it; a later wake is
+        // the doorbell for the rows that arrived after that drain.
+        const { presented } = drainReceipt();
+        const later = Number.isInteger(presented) ? identities.filter(row => Number(row.split("\t")[1]) > presented) : [];
+        if (later.length) identities = later;
+        else covered = Number.isInteger(presented);
         const prior = pending().find(value => value.rows.some(row => identities.includes(row)));
         if (prior) return prior;
         logical += ":" + identities.join("\n");
@@ -38,17 +58,48 @@ export function createAdmissionJournal(paths, sessionID, admit, report = console
     const id = "msg_" + createHash("sha256").update(sessionID + "\0" + logical).digest("hex");
     try { return validate(readPrivate(join(dir, id + ".json"))); }
     catch (error) { if (error.code !== "ENOENT") throw error; }
-    return save({ version: 1, sessionID, id, kind, rows: identities, text, context, phase: "prepared" });
+    return save({ version: 1, sessionID, id, kind, rows: identities, text, context, phase: covered ? "acknowledged" : "prepared", drain: drainSequence() });
+  }
+  function drainedSince(value) {
+    const drained = drainSequence();
+    return Number.isInteger(value.drain) && Number.isInteger(drained) && drained > value.drain;
   }
   function acknowledged(value) {
+    // Callers can retain their pre-admission snapshot across a native receipt
+    // or reconciliation. Retirement follows the durable phase, not that copy.
+    value = validate(readPrivate(join(dir, value.id + ".json")));
+    if (value.phase === "acknowledged") return true;
+    // A doorbell is handled once a drain is recorded after its admission, even
+    // if rows remain queued; rows arriving after that drain need their own.
+    if (value.kind === "wake" && value.phase === "admitted" && drainedSince(value)) {
+      save({ ...value, phase: "acknowledged" });
+      return true;
+    }
+    // An unadmitted row wake whose every row a later drain presented is
+    // covered by that drain and retires without its own doorbell.
+    if (value.kind === "wake" && value.rows.length && drainedSince(value)) {
+      const { presented } = drainReceipt();
+      if (Number.isInteger(presented) && value.rows.every(row => Number(row.split("\t")[1]) <= presented)) {
+        save({ ...value, phase: "acknowledged" });
+        return true;
+      }
+    }
     if (!value.rows.length) {
-      // A confirmed recovery presentation is obsolete only when the canonical
-      // owner acked that exact episode. New rows remain separate obligations.
+      // Recovery has no row identities. A drain presented after preparation
+      // also covers a confirmed obligation. Otherwise exact-generation ack
+      // retires a confirmed obligation, and an admitted doorbell stays
+      // outstanding until any generation is acked. Missing or malformed state
+      // retains it.
       const generation = value.context?.recovery?.generation;
-      if (value.kind !== "wake" || value.phase !== "confirmed" || typeof generation !== "string" || !/^[A-Za-z0-9._-]{1,200}$/.test(generation)) return value.phase === "acknowledged";
+      if (value.kind !== "wake" || !["confirmed", "admitted"].includes(value.phase) || typeof generation !== "string" || !/^[A-Za-z0-9._-]{1,200}$/.test(generation)) return false;
+      if (drainedSince(value)) {
+        save({ ...value, phase: "acknowledged" });
+        return true;
+      }
       let marker;
       try { marker = readFileSync(join(paths.state, ".watcher-down"), "utf8").trim(); } catch { return false; }
-      if (!["acked:handling:" + generation, "acked:downtime:" + generation].includes(marker)) return false;
+      const episode = marker.match(/^acked:(?:handling|downtime):([A-Za-z0-9._-]{1,200})$/);
+      if (!episode || value.phase === "confirmed" && episode[1] !== generation) return false;
       save({ ...value, phase: "acknowledged" });
       return true;
     }
@@ -62,32 +113,91 @@ export function createAdmissionJournal(paths, sessionID, admit, report = console
     if (value.phase !== "acknowledged") save({ ...value, phase: "acknowledged" });
     return true;
   }
+  function outstandingDoorbells(exceptId) {
+    if (!existsSync(dir)) return [];
+    const result = [];
+    for (const name of readdirSync(dir).filter(name => /^msg_[a-f0-9]{64}\.json$/.test(name))) {
+      const value = validate(readPrivate(join(dir, name)));
+      // A doorbell admitted by an older claim cannot hold this owner's slot.
+      if (value.id === exceptId || value.kind !== "wake" || value.phase !== "admitted" || value.claim !== options.claim || value.idle) continue;
+      if (!acknowledged(value)) result.push(value);
+    }
+    return result;
+  }
+  // The lead's turn ended without draining: its doorbell no longer holds the
+  // slot, so parked wakes ring once more. A later drain still retires it.
+  function idle() {
+    for (const value of outstandingDoorbells()) save({ ...value, idle: true });
+    // The native inbox event can prove acceptance before the HTTP receipt.
+    // Bind idle to that exact ID, including receipt retries; an earlier idle
+    // without acceptance must never release a fresh doorbell.
+    for (const value of pending()) {
+      if (value.kind === "wake" && value.acceptedClaim === options.claim && value.nativeAccepted) save({ ...value, idle: true });
+    }
+  }
+  function accepted(id) {
+    if (!/^msg_[a-f0-9]{64}$/.test(id)) return;
+    let value;
+    try { value = validate(readPrivate(join(dir, id + ".json"))); }
+    catch (error) { if (error.code === "ENOENT") return; throw error; }
+    if (value.kind !== "wake" || value.phase !== "confirmed" || !Object.hasOwn(value, "attemptDrain") || value.attemptClaim !== options.claim || value.nativeAccepted) return;
+    save({ ...value, nativeAccepted: true, acceptedClaim: options.claim, acceptedDrain: value.attemptDrain });
+  }
+  function parkedBehindDoorbell(value) {
+    return value.kind === "wake" && !["admitted", "acknowledged"].includes(value.phase) && ((wakeSlot && wakeSlot !== value.id) || outstandingDoorbells(value.id).length > 0);
+  }
+  // Parking behind a doorbell the lead has not drained yet is coalescing. It
+  // is stuck only if a drain is recorded that cannot be proven to precede the
+  // blocking admission, since that drain should have retired the blocker.
+  function stalled(value) {
+    if (!parkedBehindDoorbell(value)) return false;
+    const drained = drainSequence();
+    if (drained === 0) return false;
+    return outstandingDoorbells(value.id).some(blocker => !Number.isInteger(blocker.drain) || !Number.isInteger(drained) || drained > blocker.drain);
+  }
   async function attemptDelivery(value) {
     validate(value);
     if (["admitted", "acknowledged"].includes(value.phase) || acknowledged(value)) return true;
     if (value.kind === "wake" && value.phase !== "confirmed") throw new Error("V2 wake admission requires successor confirmation first");
+    if (parkedBehindDoorbell(value)) return false;
     const retry = retries.get(value.id);
     if (retry && Date.now() < retry.after) return false;
-    for (let attempt = 0; attempt < 5; attempt++) {
-      if (acknowledged(value)) { retries.delete(value.id); return true; }
-      try {
-        if (!allowed()) throw new Error("V2 admission cancelled after ownership loss or retirement");
-        // Lead operations must reach a busy turn at its next step boundary.
-        // Steer also starts idle sessions; worker brief admission is separate.
-        const result = await admit({ sessionID, id: value.id, text: value.text, delivery: "steer" });
-        if (result?.id !== value.id) throw new Error("native admission did not acknowledge the exact message ID");
-        save({ ...value, phase: "admitted" });
-        retries.delete(value.id);
-        return true;
-      } catch (error) {
-        if (attempt === 4) {
-          const failures = (retry?.failures || 0) + 1;
-          retries.set(value.id, { failures, after: Date.now() + Math.min(30000, 2000 * 2 ** Math.min(failures, 4)) });
-          if (failures === 1) report("V2 steer admission remains pending: " + error.message);
-          throw error;
+    if (value.kind === "wake") wakeSlot = value.id;
+    try {
+      for (let attempt = 0; attempt < 5; attempt++) {
+        if (acknowledged(value)) { retries.delete(value.id); return true; }
+        try {
+          if (!allowed()) throw new Error("V2 admission cancelled after ownership loss or retirement");
+          // A steer reaches a busy lead at its next step boundary. The slot
+          // remains occupied until canonical handling, not the native receipt.
+          const drain = drainSequence();
+          const current = validate(readPrivate(join(dir, value.id + ".json")));
+          if (current.nativeAccepted && current.acceptedClaim !== options.claim) {
+            delete current.nativeAccepted; delete current.acceptedClaim;
+            delete current.acceptedDrain; delete current.idle;
+          }
+          save({ ...current, attemptClaim: options.claim, attemptDrain: drain });
+          const result = await admit({ sessionID, id: value.id, text: value.text, delivery: "steer" });
+          if (result?.id !== value.id) throw new Error("native admission did not acknowledge the exact message ID");
+          // Reload observations written during the request. A lost receipt
+          // retries this ID without discarding its acceptance/idle history.
+          accepted(value.id);
+          const observed = validate(readPrivate(join(dir, value.id + ".json")));
+          if (observed.phase !== "acknowledged") save({ ...observed, phase: "admitted", claim: options.claim, drain: observed.acceptedDrain ?? drain });
+          retries.delete(value.id);
+          return true;
+        } catch (error) {
+          if (attempt === 4) {
+            const failures = (retry?.failures || 0) + 1;
+            retries.set(value.id, { failures, after: Date.now() + Math.min(30000, 2000 * 2 ** Math.min(failures, 4)) });
+            if (failures === 1) report("V2 steer admission remains pending: " + error.message);
+            throw error;
+          }
+          await new Promise(resolve => setTimeout(resolve, 100 * 2 ** attempt));
         }
-        await new Promise(resolve => setTimeout(resolve, 100 * 2 ** attempt));
       }
+    } finally {
+      if (wakeSlot === value.id) wakeSlot = "";
     }
   }
   function deliver(value) {
@@ -103,11 +213,10 @@ export function createAdmissionJournal(paths, sessionID, admit, report = console
     for (const name of readdirSync(dir).filter(name => /^msg_[a-f0-9]{64}\.json$/.test(name))) {
       const path = join(dir, name), value = validate(readPrivate(path));
       // Keep claim startup deduplication and every unadmitted obligation. Old
-      // canonically acked row wakes and admitted no-row recoveries can expire.
+      // canonically retired wakes can expire; outstanding recoveries cannot.
       const old = Date.now() - statSync(path).mtimeMs > 7 * 24 * 60 * 60 * 1000;
       const acked = acknowledged(value);
-      const completedRecovery = value.rows.length === 0 && value.phase === "admitted";
-      if (value.kind === "wake" && (acked || completedRecovery) && old) { unlinkSync(path); continue; }
+      if (value.kind === "wake" && acked && old) { unlinkSync(path); continue; }
       if (value.kind.startsWith("failure:") && old && (value.phase === "admitted" || options.failureClaim && !value.kind.startsWith("failure:" + options.failureClaim + ":"))) { unlinkSync(path); retries.delete(value.id); continue; }
       if (!["admitted", "acknowledged"].includes(value.phase) && !acked) result.push(value);
     }
@@ -115,6 +224,10 @@ export function createAdmissionJournal(paths, sessionID, admit, report = console
   }
   return {
     prepare,
+    parked: parkedBehindDoorbell,
+    idle,
+    accepted,
+    stalled,
     confirm: (value, recovery) => {
       const phase = ["admitted", "acknowledged"].includes(value.phase) ? value.phase : "confirmed";
       if (value.phase === phase && JSON.stringify(value.context?.confirmedRecovery) === JSON.stringify(recovery || null)) return value;
