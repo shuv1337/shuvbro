@@ -1,0 +1,8 @@
+live-harness-optin family: 32 scripts; real-herdr-gated family: 13 scripts
+[--all] without exclusions: total=222 live-harness-optin=32 real-herdr-gated=13 | with runbook exclusions: total=177 live-harness-optin=0 real-herdr-gated=0
+[--lane portable-serial] without exclusions: total=185 live-harness-optin=32 real-herdr-gated=0 | with runbook exclusions: total=153 live-harness-optin=0 real-herdr-gated=0
+[--lane portable-parallel-1] without exclusions: total=11 live-harness-optin=0 real-herdr-gated=0 | with runbook exclusions: total=11 live-harness-optin=0 real-herdr-gated=0
+[--lane portable-parallel-2] without exclusions: total=13 live-harness-optin=0 real-herdr-gated=0 | with runbook exclusions: total=13 live-harness-optin=0 real-herdr-gated=0
+[--lane portable-serial-6of10] without exclusions: total=19 live-harness-optin=2 real-herdr-gated=0 | with runbook exclusions: total=17 live-harness-optin=0 real-herdr-gated=0
+[--changed --base b952627] without exclusions: total=49 live-harness-optin=0 real-herdr-gated=13 | with runbook exclusions: total=36 live-harness-optin=0 real-herdr-gated=0
+[--changed --base HEAD~30] without exclusions: total=0 live-harness-optin=0 real-herdr-gated=0 | with runbook exclusions: total=0 live-harness-optin=0 real-herdr-gated=0
