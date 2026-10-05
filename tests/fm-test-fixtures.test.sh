@@ -128,6 +128,50 @@ test_send_stubs_and_ssh() {
   pass "send stubs log typed text and fake ssh records argv with a controllable exit"
 }
 
+test_relocated_home_path_prefers_real_node_over_a_shim() {
+  local dir shimbin realbin fakebin path resolved
+  dir="$TMP_ROOT/node-shim"
+  shimbin="$dir/shim"
+  realbin="$dir/real"
+  fakebin="$dir/fake"
+  mkdir -p "$shimbin" "$realbin" "$fakebin" "$dir/throwaway"
+  cat > "$shimbin/node" <<'SH'
+#!/bin/sh
+if [ ! -e "$HOME/.mise-ok" ]; then
+  printf 'shim needs the account HOME\n'
+  exit 1
+fi
+printf 'shim\n'
+SH
+  cat > "$realbin/node" <<'SH'
+#!/bin/sh
+printf 'real\n'
+SH
+  chmod +x "$shimbin/node" "$realbin/node"
+  # The helper's node entry is a directory containing only node, same shape as
+  # FM_TEST_REAL_NODE_DIR. The shim stays later on PATH and must not win.
+  mkdir -p "$dir/node-only"
+  ln -s "$realbin/node" "$dir/node-only/node"
+  path=$(FM_TEST_REAL_NODE_DIR="$dir/node-only" PATH="$shimbin:/usr/bin:/bin" \
+    fm_test_path_with_real_node "$fakebin")
+  resolved=$(PATH="$path" HOME="$dir/throwaway" command -v node) \
+    || fail "relocated HOME path could not resolve node"
+  [ "$resolved" = "$dir/node-only/node" ] \
+    || fail "relocated HOME path resolved node to '$resolved'"
+  resolved=$(PATH="$path" HOME="$dir/throwaway" node) \
+    || fail "real node failed under a relocated HOME"
+  [ "$resolved" = real ] || fail "shim ran under a relocated HOME, got '$resolved'"
+  cat > "$fakebin/node" <<'SH'
+#!/bin/sh
+printf 'stub\n'
+SH
+  chmod +x "$fakebin/node"
+  resolved=$(PATH="$path" HOME="$dir/throwaway" node) \
+    || fail "fakebin node stub failed"
+  [ "$resolved" = stub ] || fail "fakebin node stub did not win, got '$resolved'"
+  pass "relocated HOME path prefers the real node and still lets a fakebin stub win"
+}
+
 test_spawn_home_layout() {
   local home="$TMP_ROOT/home"
   fm_test_spawn_home "$home" claude
@@ -145,4 +189,5 @@ test_no_mistakes_init_doctor_markers
 test_fake_gh_and_gh_axi
 test_spawn_tmux_and_fakebin
 test_send_stubs_and_ssh
+test_relocated_home_path_prefers_real_node_over_a_shim
 test_spawn_home_layout
