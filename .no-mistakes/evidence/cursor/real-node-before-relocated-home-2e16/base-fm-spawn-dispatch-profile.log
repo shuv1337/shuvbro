@@ -1,0 +1,21 @@
+ok - allowlist=absent preserves the operational floor and filters only when opted in
+ok - allowlist=missing-config preserves the operational floor and filters only when opted in
+ok - allowlist=enabled preserves the operational floor and filters only when opted in
+ok - allowlist=empty preserves the operational floor and filters only when opted in
+ok - invalid allowlist names refuse before launch or task publication
+ok - inaccessible config with present allowlist refuses before launch or task publication
+ok - inaccessible config with absent allowlist refuses before launch or task publication
+ok - inaccessible ancestor with present allowlist refuses before launch or task publication
+ok - inaccessible ancestor with absent allowlist refuses before launch or task publication
+ok - secondmate launch inherits the allowlist for subsequent worker launches
+ok - local inheritance preserves the allowlist on source errors and mirrors proven absence
+ok - remote inheritance preserves the allowlist on source errors and mirrors proven absence
+ok - fm-spawn: actual ship/scout launch commands deliver the worker role contract
+not ok - claude spawn without profile flags should succeed: warning: /tmp/fm-spawn-dispatch-profile.tA807I/profile-off/home/data/profile-off-z1/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+mise ERROR error parsing config file: /home/shuv/.config/mise/config.toml
+mise ERROR Config files in /home/shuv/.config/mise/config.toml are not trusted.
+Trust them with `mise trust`. See https://mise.jdx.dev/cli/trust.html for more information.
+mise ERROR Version: 2026.10.0 linux-x64 (2026-10-02)
+mise ERROR Run with --verbose or MISE_VERBOSE=1 for more information
+error: refusing to pre-register Claude trust: could not record trust for '/tmp/fm-spawn-dispatch-profile.tA807I/profile-off/wt' in '/tmp/fm-spawn-dispatch-profile.tA807I/profile-off/home/user-home/.claude.json'
+error: could not pre-register Claude workspace trust for /tmp/fm-spawn-dispatch-profile.tA807I/profile-off/wt; refusing to launch a claude worker that would wedge on the trust dialog; inspect window firstmate:fm-profile-off-z1: expected exit 0, got 1

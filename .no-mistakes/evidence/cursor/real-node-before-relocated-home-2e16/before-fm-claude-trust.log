@@ -1,0 +1,9 @@
+# BASE 95d2c20
+$ bash tests/fm-claude-trust.test.sh
+not ok - a fresh linked worktree must be trusted: mise ERROR error parsing config file: /home/shuv/.config/mise/config.toml
+mise ERROR Config files in /home/shuv/.config/mise/config.toml are not trusted.
+Trust them with `mise trust`. See https://mise.jdx.dev/cli/trust.html for more information.
+mise ERROR Version: 2026.10.0 linux-x64 (2026-10-02)
+mise ERROR Run with --verbose or MISE_VERBOSE=1 for more information
+error: refusing to pre-register Claude trust: could not record trust for '/tmp/fm-claude-trust.PmuinW/fresh/wt' in '/tmp/fm-claude-trust.PmuinW/fresh/claude-config/.claude.json': expected exit 0, got 1
+exit=1
