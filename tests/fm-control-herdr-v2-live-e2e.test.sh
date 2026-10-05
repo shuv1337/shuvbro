@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Real shuvcode exit/relaunch through a real Treehouse nested login shell on
 # Herdr. The nested shell is Herdr's configured pane shell ([terminal]
-# default_shell, else $SHELL, else the account shell), not a hardcoded zsh.
+# default_shell, else $SHELL, else /bin/sh), not a hardcoded zsh.
 # Opt in with FM_CONTROL_HERDR_V2_LIVE=1 (submits diagnostic prompts).
 # FM_HERDR_LAB_HELPER and FM_HERDR_LAB_LABEL select the guarded helper and lab label.
 # Every Herdr call uses the guarded named-session helper, including backend
@@ -113,8 +113,8 @@ chmod +x "$LAB/bin/herdr"
   PANE=$(sed -n 's/^herdr_pane_id=//p' "$HOME_DIR/state/nested.meta")
   "$ROOT/bin/fm-control.sh" nested exit > "$LAB/exit.log" 2>&1
   herdr pane process-info --pane "$PANE" --session "$HERDR_LAB_SESSION" > "$LAB/after-exit.json"
-  # Herdr login panes set SHELL from [terminal] default_shell when it is set,
-  # otherwise from the server's SHELL. Treehouse then opens that shell. Read
+  # Herdr resolves the pane shell from [terminal] default_shell when it is
+  # set, otherwise from the server's SHELL, otherwise /bin/sh. Read
   # the same config the running server loaded (the lab XDG override is for
   # shuvcode, not Herdr) so a bash-login host is not required to be zsh.
   herdr_shell_config=${HERDR_CONFIG_PATH:-$HOME/.config/herdr/config.toml}
@@ -136,20 +136,10 @@ chmod +x "$LAB/bin/herdr"
     configured_shell=${SHELL:-}
   fi
   if [ -z "$configured_shell" ]; then
-    configured_shell=$(getent passwd "$(id -un)" | awk -F: 'NR==1 { print $NF }')
-  fi
-  if [ -z "$configured_shell" ]; then
     configured_shell=/bin/sh
   fi
   configured_shell=${configured_shell##*/}
   configured_shell=${configured_shell#-}
-  case "$configured_shell" in
-    sh|bash|zsh|dash|ksh|fish) ;;
-    *)
-      echo "not ok - configured shell '${configured_shell:-unset}' is not a recognized login shell" >&2
-      exit 1
-      ;;
-  esac
   jq -e --arg shell "$configured_shell" '
     .result.process_info
     | .foreground_process_group_id != .shell_pid
