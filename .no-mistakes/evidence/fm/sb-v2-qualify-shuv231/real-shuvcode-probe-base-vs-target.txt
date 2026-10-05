@@ -1,0 +1,11 @@
+$ which shuvcode && shuvcode --version
+/home/shuv/.local/bin/shuvcode
+shuvcode v2.0.23-shuv.1
+
+# BASE d123b25: node bin/fm-opencode-v2-capability.mjs $PWD
+opencode-v2 capability probe: unqualified target shuvcode v2.0.23-shuv.1; use qualified shuvcode v2.0.22-shuv.2 or qualify the new build first
+exit=1
+
+# TARGET 71e69ca: node bin/fm-opencode-v2-capability.mjs $PWD
+{"version":"shuvcode v2.0.23-shuv.1","runtime":"effect","qualified":true}
+exit=0

@@ -1,0 +1,26 @@
+ok - capability probe admits compatible newer forks and standalone native builds and refuses V1, old or known-bad builds, missing CLI/API/events and mismatched runtime without service access
+ok - live binary resolver returns dispatch native choice in both locales and fails when that choice or override cannot run
+ok - default worker shares service, records exact session/model, strips activation and admits before attachment
+ok - explicit worker shares service, records exact session/model, strips activation and admits before attachment
+ok - variant worker shares service, records exact session/model, strips activation and admits before attachment
+ok - configured worker shares service, records exact session/model, strips activation and admits before attachment
+ok - configured-object worker shares service, records exact session/model, strips activation and admits before attachment
+ok - secondmate launcher validates its parent, freezes its own root and delegates charter admission to native primary activation
+ok - resume admits the brief to the idle recorded session and attaches it without creating another
+ok - resume keeps the session model unless a different one is requested, then switches it natively
+ok - resume refuses a recorded session with active execution instead of joining it
+ok - resume falls back to a fresh session when the binding names another incarnation, worktree or a missing session
+ok - remove task metadata before prompt admission refuses execution
+ok - replace task metadata before prompt admission refuses execution
+ok - configured default refuses rather than selecting an external catalog fallback
+ok - unavailable variant refuses before worker session creation
+ok - after-model registration disappearance refuses without default service auto-start
+ok - after-prompt registration disappearance refuses without default service auto-start
+ok - worker on a lead's named registration records, admits and interrupts on that service while a default service exists
+ok - missing lead registration refuses the worker instead of using the default service
+ok - stale or noncanonical lead owner records refuse worker dispatch without a default fallback
+ok - a retired lead owner record keeps the default service and is retained
+
+real	0m11.519s
+user	0m7.226s
+sys	0m4.368s

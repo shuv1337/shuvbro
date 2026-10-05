@@ -1,0 +1,57 @@
+
+## Next release, standalone native (no npm pkg) -> admitted via CLI-only checks
+$ PATH=/home/shuv/.cache/agent-ws/probe.Ny2O/future:$PATH node bin/fm-opencode-v2-capability.mjs $ROOT
+{"version":"shuvcode v2.0.24-shuv.1","runtime":"effect","qualified":true}
+exit=0
+
+## Minor bump standalone -> admitted
+$ PATH=/home/shuv/.cache/agent-ws/probe.Ny2O/minor:$PATH node bin/fm-opencode-v2-capability.mjs $ROOT
+{"version":"shuvcode v2.1.0-shuv.3","runtime":"effect","qualified":true}
+exit=0
+
+## Below floor -> refused
+$ PATH=/home/shuv/.cache/agent-ws/probe.Ny2O/old:$PATH node bin/fm-opencode-v2-capability.mjs $ROOT
+opencode-v2 capability probe: shuvcode v2.0.22-shuv.1 is below the supported floor shuvcode v2.0.22-shuv.2; upgrade shuvcode before dispatch
+exit=1
+
+## V1/non-shuvcode -> refused
+$ PATH=/home/shuv/.cache/agent-ws/probe.Ny2O/v1:$PATH node bin/fm-opencode-v2-capability.mjs $ROOT
+opencode-v2 capability probe: unsupported target opencode v1.0.0; install stable shuvcode V2 (V1 opencode and non-shuvcode binaries are not supported)
+exit=1
+
+## Prerelease suffix -> refused
+$ PATH=/home/shuv/.cache/agent-ws/probe.Ny2O/rc:$PATH node bin/fm-opencode-v2-capability.mjs $ROOT
+opencode-v2 capability probe: unsupported target shuvcode v2.0.24-shuv.1-rc.1; install stable shuvcode V2 (V1 opencode and non-shuvcode binaries are not supported)
+exit=1
+
+## Missing --server launch flag -> refused
+$ PATH=/home/shuv/.cache/agent-ws/probe.Ny2O/noflag:$PATH node bin/fm-opencode-v2-capability.mjs $ROOT
+opencode-v2 capability probe: missing native --server launch/API capability in shuvcode v2.0.24-shuv.1; reinstall or upgrade shuvcode before dispatch
+exit=1
+
+## npm pkg version 2.0.24-shuv.1 (semver.clean) + binary reports +abc123 -> admitted with client checks
+$ PATH=/home/shuv/.cache/agent-ws/probe.Ny2O/meta:$PATH node bin/fm-opencode-v2-capability.mjs $ROOT
+{"version":"shuvcode v2.0.24-shuv.1+abc123","runtime":"effect","qualified":true}
+exit=0
+
+## npm pkg version differs from binary -> refused
+$ PATH=/home/shuv/.cache/agent-ws/probe.Ny2O/mism:$PATH node bin/fm-opencode-v2-capability.mjs $ROOT
+opencode-v2 capability probe: executable and bundled client versions differ; reinstall the complete matching shuvcode npm package (including its client), or use a compatible build; no service was contacted
+exit=1
+
+## Orphaned hoisted native pkg (no owner shuvcode pkg) -> refused
+$ PATH=/home/shuv/.cache/agent-ws/probe.Ny2O/orphbin:$PATH node bin/fm-opencode-v2-capability.mjs $ROOT
+opencode-v2 capability probe: native package has no matching shuvcode owner package with an offline client; reinstall the complete matching shuvcode npm package (including its client), or use a compatible build; no service was contacted
+exit=1
+
+## Hoisted native pkg with matching owner -> admitted with client checks
+$ PATH=/home/shuv/.cache/agent-ws/probe.Ny2O/hoistbin:$PATH node bin/fm-opencode-v2-capability.mjs $ROOT
+{"version":"shuvcode v2.0.24-shuv.1","runtime":"effect","qualified":true}
+exit=0
+
+## npm pkg whose client drops prompt delivery -> refused
+opencode-v2 capability probe: incompatible session.prompt request contract; reinstall the complete matching shuvcode npm package (including its client), or use a compatible build; no service was contacted
+exit=1
+
+## Known-bad list (test-only injection) refuses listed build
+opencode-v2 capability probe: known-incompatible shuvcode v2.0.24-shuv.1+abc123: fixture regression; install a fixed build before dispatch
