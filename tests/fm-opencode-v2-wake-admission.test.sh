@@ -253,6 +253,19 @@ for (const forced of [false,true]) {
   assert.equal(f.reload().pending().length,0);
   assert.equal(fs.readFileSync(f.queue,'utf8').split('\n').filter(Boolean).length,3,'admission never consumes rows');
 }
+// A wake captured only after the drain presented all its rows is covered by
+// that drain: its durable row stays queued but no doorbell is admitted.
+{
+  const f=fixture('late-capture');
+  fs.writeFileSync(f.queue.replace('/.wake-queue','/.wake-drain-presented'),'2\tG\t1\n');
+  fs.writeFileSync(f.queue,row);
+  const late=f.journal.confirm(f.journal.prepare('late capture'));
+  assert.equal(await f.journal.deliver(late),true);
+  assert.equal(f.calls.length,0,'an already-presented row must not get its own doorbell');
+  assert.equal(f.phase(late),'acknowledged');
+  assert.equal(f.reload().pending().length,0);
+  assert.equal(fs.readFileSync(f.queue,'utf8'),row,'coverage never consumes rows');
+}
 // An in-flight no-row admission owns the slot before its native receipt.
 {
   let release;
@@ -329,7 +342,7 @@ const journal=createAdmissionJournal(p,'ses_drain',async input=>{assert.equal(in
 const c=createWatchArmCoordinator(p,()=>{throw new Error('unjournaled delivery');},{owns:()=>true,admission:journal,failure:reason=>failures.push(reason)});
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const until=async(predicate,what)=>{for(let i=0;i<200&&!predicate();i++)await sleep(25);assert.ok(predicate(),what+' '+JSON.stringify(failures));};
-const records=()=>fs.readdirSync(p.state+'/.opencode-v2-admissions',{recursive:true}).filter(name=>name.endsWith('.json')).length;
+const records=()=>fs.existsSync(p.state+'/.opencode-v2-admissions')?fs.readdirSync(p.state+'/.opencode-v2-admissions',{recursive:true}).filter(name=>name.endsWith('.json')).length:0;
 const fire=async(reason,count)=>{fs.writeFileSync(p.state+'/fire',reason+'\n');await until(()=>!fs.existsSync(p.state+'/fire')&&records()===count,'fire was not journaled');await sleep(400);};
 const lead=(...args)=>{const r=spawnSync(process.env.DRAIN,args,{encoding:'utf8',env:{...process.env,FM_HOME:process.env.LAB,FM_STATE_OVERRIDE:p.state}});assert.equal(r.status,0,r.stderr);return r;};
 const ack=drain=>{const m=drain.stderr.match(/--ack-through ([0-9]+) --recovery-generation ([A-Za-z0-9._-]+)/);assert.ok(m,drain.stderr);return lead('--ack-through',m[1],'--recovery-generation',m[2]);};

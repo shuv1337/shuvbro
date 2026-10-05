@@ -31,6 +31,7 @@ export function createAdmissionJournal(paths, sessionID, admit, report = console
   function prepare(text, kind = "wake", context = {}) {
     let logical = kind;
     let identities = [];
+    let covered = false;
     if (kind === "wake") {
       let queue;
       try { queue = readFileSync(join(paths.state, ".wake-queue"), "utf8"); }
@@ -48,6 +49,7 @@ export function createAdmissionJournal(paths, sessionID, admit, report = console
         const { presented } = drainReceipt();
         const later = Number.isInteger(presented) ? identities.filter(row => Number(row.split("\t")[1]) > presented) : [];
         if (later.length) identities = later;
+        else covered = Number.isInteger(presented);
         const prior = pending().find(value => value.rows.some(row => identities.includes(row)));
         if (prior) return prior;
         logical += ":" + identities.join("\n");
@@ -56,7 +58,7 @@ export function createAdmissionJournal(paths, sessionID, admit, report = console
     const id = "msg_" + createHash("sha256").update(sessionID + "\0" + logical).digest("hex");
     try { return validate(readPrivate(join(dir, id + ".json"))); }
     catch (error) { if (error.code !== "ENOENT") throw error; }
-    return save({ version: 1, sessionID, id, kind, rows: identities, text, context, phase: "prepared", drain: drainSequence() });
+    return save({ version: 1, sessionID, id, kind, rows: identities, text, context, phase: covered ? "acknowledged" : "prepared", drain: drainSequence() });
   }
   function drainedSince(value) {
     const drained = drainSequence();
