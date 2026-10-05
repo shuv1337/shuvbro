@@ -131,4 +131,4 @@ The empirical basis for each adapter's value is the `harness-adapters` skill's v
 - `tests/fm-control-relaunch.test.sh` - the relaunch transaction: identity preservation, harness switching, the progress note, checkpoint refusals, rollback after a failed launch, and opencode-v2's same-session relaunch and agent-free gate.
 - `tests/fm-control-herdr-smoke.test.sh` - the second state-verified backend against the real herdr binary, on an isolated throwaway lab session.
 - `tests/fm-opencode-v2-worker-live-e2e.test.sh` - opt-in: a real shuvcode worker on an isolated shared service is exited and relaunched into its recorded session.
-- `tests/fm-control-herdr-v2-live-e2e.test.sh` - opt-in: a real shuvcode worker in a Treehouse worktree on Herdr is exited through its nested shell and relaunched in place.
+- `tests/fm-control-herdr-v2-live-e2e.test.sh` - opt-in: a real shuvcode worker in a Treehouse worktree on Herdr is exited through its nested shell and relaunched in place, and a home-local shuvcode secondmate is launched, relaunched into its session and retired.

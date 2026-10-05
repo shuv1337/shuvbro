@@ -66,11 +66,11 @@ Pick whichever one matches your subscription and workflow.
 
 Oh My Pi (`omp`), a Pi fork, is verified as a primary with the same extension-owned watcher model as Pi and a stronger turn-end guard: its blocking `session_stop` hook compels a continuation instead of requesting one.
 Codex and OpenCode are also verified and supported as primary harnesses; Codex uses bounded foreground checkpoints, and OpenCode uses a TUI plugin, so both carry more harness-specific supervision tradeoffs than the three co-primaries.
-shuvcode, the OpenCode V2 fork, uses one native server/TUI package and the normal shared execution service; secondmates remain unsupported.
+shuvcode, the OpenCode V2 fork, uses one native server/TUI package and the normal shared execution service, and can also run home-local secondmates.
 This native shared-service route is pending combined live qualification, not yet a qualified replacement for the supported primary harnesses; see the [verification status](docs/verification/runtime-backends.md#native-shared-service-qualification-status).
 Run `npm ci --prefix .opencode/plugins` once per local copy, then start the lead with `bin/fm-opencode-v2-lead.sh` for explicit Linux primary activation; it resumes or creates the lead session and resolves the installed native executable for `bin/fm-opencode-v2-primary.sh --session <exact-session-id> --native-binary <installed-native-executable>`.
 Ordinary clients, including a plain `shuvcode` launch, remain inert observers whose session start stays read-only; the shared service itself never owns the home lock.
-The [native supervision protocol](docs/supervision-protocols/opencode-v2.md) owns activation, recovery and supported limits; the [adapter reference](.agents/skills/harness-adapters/references/harness/opencode-v2.md) owns worker launch details.
+The [native supervision protocol](docs/supervision-protocols/opencode-v2.md) owns activation, recovery and supported limits; the [adapter reference](.agents/skills/harness-adapters/references/harness/opencode-v2.md) owns worker and secondmate launch details.
 Cursor Agent CLI is verified as a primary too, using a tracked project-scope `.cursor/hooks.json` whose `stop` hook parks on the watcher between turns, closest in shape to Claude Code's.
 Launch it with `--trust`, or none of its project hooks load; it also has no turn-end hook in headless `cursor-agent -p`, so run the primary session interactively.
 

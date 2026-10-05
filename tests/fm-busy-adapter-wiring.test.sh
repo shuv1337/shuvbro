@@ -526,13 +526,22 @@ test_opencode_v2_is_refused_as_a_positional_secondmate() {
   local rec id=busy-oc-v2-sm out
   rec=$(make_spawn_case oc-v2-secondmate opencode "$id")
   read_case_record "$rec"
+  cat > "$FAKEBIN_DIR/shuvcode" <<'SH'
+#!/usr/bin/env bash
+echo 'shuvcode v2.0.22-shuv.1'
+SH
+  chmod +x "$FAKEBIN_DIR/shuvcode"
   out=$(GROK_HOME="$HOME_DIR/grok-home" \
     fm_test_run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" --secondmate "$id" opencode-v2) && {
-    fail "an opencode-v2 secondmate must be refused: $out"
+    fail "an unqualified opencode-v2 build must be refused: $out"
   }
-  assert_contains "$out" 'opencode-v2 secondmates are not qualified' \
-    "a positional opencode-v2 secondmate must hit the unqualified refusal, not a bogus home path: $out"
-  pass "opencode-v2 is refused as a positional secondmate before any worker is created"
+  assert_contains "$out" 'unqualified target' \
+    "a positional V2 secondmate must probe capabilities, not parse the harness as a home: $out"
+  assert_absent "$HOME_DIR/state/.spawn-$id.lock" 'V2 secondmate refusal must release the spawn lock'
+  assert_absent "$HOME_DIR/state/$id.meta" 'V2 secondmate refusal must precede task metadata'
+  assert_absent "$HOME_DIR/state/$id.status" 'V2 secondmate refusal must precede task status'
+  assert_absent "$HOME_DIR/state/$id.opencode-v2-session.json" 'V2 secondmate refusal must precede a session record'
+  pass "positional V2 secondmate refuses an unqualified installed build before dispatch"
 }
 
 test_opencode_v2_capability_refuses_before_dispatch() {

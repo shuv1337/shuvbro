@@ -1,6 +1,6 @@
 # Shuvcode (OpenCode V2 fork)
 
-Native shared-service qualification is pending; [runtime verification](../../../../../docs/verification/runtime-backends.md#native-shared-service-qualification-status) owns the actual isolated v2.0.22-shuv.2 evidence and remaining live matrix.
+The combined native shared-service matrix remains pending; [runtime verification](../../../../../docs/verification/runtime-backends.md#native-shared-service-qualification-status) owns the qualified worker and home-local secondmate evidence and remaining live matrix.
 This is a fork of OpenCode V2 distributed as `shuvcode`, never sloppy-matched as V1 `opencode` and never claimed as the upstream `opencode2` beta.
 
 ## Identity
@@ -55,7 +55,11 @@ When that wait fails, spawn records the composer verdict and a bounded pane tail
 `tests/fm-opencode-v2-worker-live-e2e.test.sh` is the opt-in isolated-XDG/shared-service worker probe, including exit and relaunch; [runtime verification](../../../../../docs/verification/runtime-backends.md#shuvcode-explicit-model-worker) records its current result.
 Under `--auto` the composer footer reads `Build auto · <model> · <effort>` with the `auto` word and `·` separators in muted truecolor, so the classifier recognises that footer from the plain row rather than the ghost-stripped one.
 The worker wiring writes `.opencode/plugins/package.json` only when the project has none, so a project that tracks that file keeps its own copy.
-Secondmate launches are refused until that role is qualified.
+Secondmates use the launch helper's `--secondmate` path, which activates a lead at the secondmate's own code root and `FM_HOME`, never the parent's lead claim.
+Install the pinned guard runtime in that seeded home too; a missing runtime refuses before any endpoint opens.
+The parent-owned session sidecar still supplies native execution proof for control, recovery and retirement, while the child owns its exact activation, session start and supervision.
+The native TUI plugin admits its charter only after publishing the child's claim, guard marker and frozen environment.
+The existing secondmate profile pin and parent-channel contract are unchanged; [secondmate provisioning](../../../secondmate-provisioning/SKILL.md) owns them.
 Busy state comes from the Firstmate-owned worker plugin's `session.execution.started` (busy) and its `session.execution.succeeded`, `failed`, or `interrupted` terminal event (idle), latched to the worker's own root session; shuvcode publishes no `session.status` or `session.idle` event to plugins.
 `bin/fm-opencode-v2-session.mjs` reconciles the exact recorded worker through native `session.get` and `session.active`, and interrupts that exact session before pane lifecycle actions or explicitly approved discard.
 Teardown refuses active or unverifiable native execution; a dead pane is not evidence that the worker stopped.
@@ -68,7 +72,7 @@ The worker session is created without a permission override, so project deny rul
 
 ## Control
 
-`../../../bin/fm-control.sh` drives `interrupt`, `exit`, and `relaunch` for ship and scout workers; `../../../bin/fm-control-lib.sh` holds the adapter row and `../../../docs/agent-control.md` the verb contracts.
+`../../../bin/fm-control.sh` drives `interrupt`, `exit`, and `relaunch` for ship, scout and local secondmate agents; `../../../bin/fm-control-lib.sh` holds the adapter row and `../../../docs/agent-control.md` the verb contracts.
 No pane key reaches the execution: interrupt cancels the exact recorded session, and exit does that before typing `/exit` into the TUI.
 Exit is confirmed only when no shuvcode process remains in the endpoint's foreground and the recorded session has no active execution; either fact alone is not a stop.
 On Herdr the endpoint fact comes from the pane's foreground processes, because the shuvcode hook registration still answers after the TUI exits.

@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # Unattended native worker on the normal shared execution service.
-# Usage: [--resume] [--model provider/model[#variant]] --prompt TEXT --session-record FILE
+# Usage: [--secondmate] [--resume] [--model provider/model[#variant]] --prompt TEXT --session-record FILE
+# --secondmate activates a home-local lead TUI, not a worker: its own native
+# plugin admits TEXT only after claiming that home and freezing its environment.
+# The parent-owned FILE still supplies exact-session lifecycle reconciliation.
+# For a secondmate it also binds the spawn generation and deterministic
+# charter message ID admitted by that exact home-local TUI.
 # An exact recorded session is created before prompt admission; no private
 # server/stdin lease is started or killed. --auto applies to this worker TUI.
 # FILE is the home-owned task session sidecar passed by fm-spawn, not an RPC
@@ -19,7 +24,7 @@
 # refuses instead. fm-spawn proves the recorded session idle before it runs
 # this, so a fresh fallback never abandons active execution.
 set -euo pipefail
-model_ref='' prompt='' have_prompt=0 record='' resume=0
+model_ref='' prompt='' have_prompt=0 record='' resume=0 secondmate=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --model|--prompt|--session-record)
@@ -27,12 +32,13 @@ while [ "$#" -gt 0 ]; do
       case "$1" in --model) model_ref=$2 ;; --prompt) prompt=$2; have_prompt=1 ;; --session-record) record=$2 ;; esac
       shift 2 ;;
     --resume) resume=1; shift ;;
-    --help|-h) echo 'Usage: fm-opencode-v2-launch.sh [--resume] [--model provider/model[#variant]] --prompt TEXT --session-record FILE'; exit 0 ;;
+    --secondmate) secondmate=1; shift ;;
+    --help|-h) echo 'Usage: fm-opencode-v2-launch.sh [--secondmate] [--resume] [--model provider/model[#variant]] --prompt TEXT --session-record FILE'; exit 0 ;;
     *) exit 2 ;;
   esac
 done
 [ "$have_prompt" -eq 1 ] && [ -n "$record" ] || exit 2
-unset FM_V2_ACTIVATION OPENCODE_SESSION_ID
+unset FM_V2_ACTIVATION OPENCODE_SESSION_ID FM_V2_LAUNCH_PROMPT FM_V2_LAUNCH_MESSAGE_ID
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 case "$record" in *.opencode-v2-session.json) ;; *) echo 'error: native worker requires a task-bound session sidecar' >&2; exit 1 ;; esac
 meta=${record%.opencode-v2-session.json}.meta
@@ -44,6 +50,18 @@ service=$(node "$SCRIPT_DIR/fm-opencode-v2-owner.mjs" service ${endpoint:+"$endp
 # discovery/auto-start is allowed after registration, even if it disappears.
 api() { node "$SCRIPT_DIR/fm-opencode-v2-owner.mjs" api "$@" <<< "$service"; }
 directory=$(pwd -P)
+if [ "$secondmate" -eq 1 ]; then
+  [ "$(sed -n 's/^kind=//p' "$meta")" = secondmate ] && [ "$(realpath "$FM_HOME")" = "$directory" ] \
+    || { echo 'error: native secondmate requires its own home and parent secondmate metadata' >&2; exit 1; }
+  # shellcheck source=bin/fm-secondmate-parent-lib.sh
+  . "$SCRIPT_DIR/fm-secondmate-parent-lib.sh"
+  if [ ! -f "$directory/.fm-secondmate-home" ] || [ -L "$directory/.fm-secondmate-home" ] \
+    || ! fm_secondmate_parent_record_parse "$directory/.fm-secondmate-parent"; then
+    echo 'error: native secondmate requires a seeded home with a valid parent binding' >&2
+    exit 1
+  fi
+  node "$SCRIPT_DIR/fm-opencode-v2-capability.mjs" "$directory" >/dev/null || exit 1
+fi
 catalog=$(mktemp "${TMPDIR:-/tmp}/fm-v2-catalog.XXXXXX")
 trap 'rm -f "$catalog"' EXIT
 
@@ -152,6 +170,27 @@ umask 077
 temporary=$(mktemp "${record}.XXXXXX")
 jq -c --argjson service "$service" '.data | {version:1,sessionID:.id,location:.location,model:.model} + $service' <<< "$response" > "$temporary"
 mv "$temporary" "$record"
+if [ "$secondmate" -eq 1 ]; then
+  if [ "$resumed" -eq 1 ]; then
+    api session.active > "$catalog"
+    jq -e --arg id "$session" '(.data | type) == "object" and (.data | has($id) | not)' "$catalog" >/dev/null \
+      || { echo 'error: recorded native secondmate became active before charter admission; refusing to resume it' >&2; exit 1; }
+  fi
+  temporary=$(mktemp "${record}.XXXXXX")
+  generation=$(sed -n 's/^spawn_gen=//p' "$meta")
+  [[ "$generation" =~ ^s[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'error: native secondmate requires a current spawn generation' >&2; exit 1; }
+  prompt_id=$(node -e 'console.log("msg_"+require("node:crypto").createHash("sha256").update(process.argv[1]+"\0"+process.argv[2]).digest("hex"))' "$session" "$generation")
+  jq --arg generation "$generation" --arg prompt_id "$prompt_id" '.spawnGeneration=$generation | .launchMessageID=$prompt_id' "$record" > "$temporary"
+  mv "$temporary" "$record"
+  [ -f "$meta" ] && [ ! -L "$meta" ] && [ "$(cat "$meta")" = "$meta_before" ] \
+    || { echo 'error: native secondmate metadata changed before activation' >&2; exit 1; }
+  # shellcheck source=bin/fm-shuvcode-lib.sh
+  . "$SCRIPT_DIR/fm-shuvcode-lib.sh"
+  binary=$(fm_shuvcode_native_binary) || { echo 'error: native secondmate executable is unavailable' >&2; exit 1; }
+  rm -f "$catalog"
+  trap - EXIT
+  FM_ROOT_OVERRIDE="$directory" exec "$SCRIPT_DIR/fm-opencode-v2-primary.sh" --session "$session" --native-binary "$binary" --server "$(jq -er .serviceURL <<< "$service")" --auto --prompt "$prompt" --prompt-id "$prompt_id"
+fi
 # Explicit-endpoint TUIs do not perform the managed client's environment push.
 # Preserve worker caller routing before admission, without parent activation or
 # endpoint credentials. Native execution injects its own exact session ID.

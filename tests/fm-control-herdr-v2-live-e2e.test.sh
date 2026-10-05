@@ -7,7 +7,7 @@
 set -eu
 # shellcheck source=tests/fixtures.sh
 . "$(dirname "${BASH_SOURCE[0]}")/fixtures.sh"
-fm_live_gate opt-in FM_CONTROL_HERDR_V2_LIVE shuvcode herdr treehouse jq git node
+fm_live_gate opt-in FM_CONTROL_HERDR_V2_LIVE shuvcode herdr treehouse jq git node npm
 LAB=$(mktemp -d "${TMPDIR:-/tmp}/fm-control-herdr-v2.XXXXXX")
 LAB=$(cd "$LAB" && pwd -P)
 HERDR_LAB_HELPER=${FM_HERDR_LAB_HELPER:-"$ROOT/bin/fm-herdr-lab.sh"}
@@ -72,6 +72,9 @@ chmod +x "$LAB/bin/herdr"
   # shellcheck disable=SC2329 # Invoked through the EXIT trap below.
   cleanup_service() {
     local status=$? current
+    if [ -n "${HOME_DIR:-}" ] && [ -f "$HOME_DIR/state/mate.meta" ]; then
+      "$ROOT/bin/fm-control.sh" mate exit > "$LAB/mate-cleanup.log" 2>&1 || status=1
+    fi
     current=$(node "$ROOT/bin/fm-opencode-v2-owner.mjs" identity "$SERVICE_PID" 2>/dev/null) || current=''
     if [ "$current" = "$SERVICE_IDENTITY" ]; then shuvcode service stop >/dev/null || status=1; else status=1; fi
     node "$ROOT/bin/fm-opencode-v2-owner.mjs" cleanup-test-namespace >/dev/null || status=1
@@ -114,4 +117,71 @@ chmod +x "$LAB/bin/herdr"
   "$ROOT/bin/fm-control.sh" nested exit > "$LAB/second-exit.log" 2>&1
   grep -q 'native-session=idle' "$LAB/second-exit.log"
   printf 'ok - %s: real Herdr/Treehouse nested-shell exit, in-place relaunch and second exit\n' "$VERSION"
+
+  # Persistent V2 secondmate: a separate code/home root, own lead activation,
+  # real session start, parent-channel output, durable profile and relaunch.
+  # Copy the candidate's changed tracked files into the disposable clone so
+  # this probe also works before the implementation commit.
+  MATE="$LAB/mate"
+  git clone --quiet --no-hardlinks "$ROOT" "$MATE"
+  while IFS= read -r file; do
+    [ -f "$ROOT/$file" ] || continue
+    mkdir -p "$MATE/$(dirname "$file")"
+    cp "$ROOT/$file" "$MATE/$file"
+  done < <(git -C "$ROOT" diff --name-only HEAD)
+  mkdir -p "$MATE/state" "$MATE/data" "$MATE/config" "$MATE/projects"
+  printf 'mate\n' > "$MATE/.fm-secondmate-home"
+  printf 'schema=fm-secondmate-parent.v1\nroute=local\nparent_home=%s\n' "$HOME_DIR" > "$MATE/.fm-secondmate-parent"
+  npm ci --prefix "$MATE/.opencode/plugins" --ignore-scripts > "$LAB/npm.log" 2>&1
+  printf 'opencode-v2 %s low\n' "${FM_OPENCODE_V2_MODEL:-opencode/space-bunny-free}" > "$HOME_DIR/config/secondmate-harness"
+  printf -- '- mate - isolated V2 fixture (home: %s; scope: diagnostic startup; projects: ; added 2026-10-04)\n' "$MATE" > "$HOME_DIR/data/secondmates.md"
+  cat > "$MATE/data/charter.md" <<EOF
+# Disposable secondmate diagnostic charter
+You are the persistent secondmate in this private home, reporting only to the parent.
+Your FM_HOME is $MATE, not the parent home $HOME_DIR.
+Run exactly this shell command once now, with no pipe, no tail and no other FM_HOME value:
+FM_HOME=$MATE FM_ROOT_OVERRIDE=$MATE FM_STATE_OVERRIDE=$MATE/state FM_CONFIG_OVERRIDE=$MATE/config FM_DATA_OVERRIDE=$MATE/data bin/fm-session-start.sh
+Read its full output. Do not separately bootstrap or supervise.
+Then use shell to append exactly 'working: V2_SECOND_MATE_STARTED' to $HOME_DIR/state/mate.status.
+This is the parent channel. Do not contact the captain or use notifications.
+No project work, delegation, audits, validation, or autonomous work is authorized.
+Remain idle after the parent status append, and repeat that append after a relaunch.
+EOF
+  export FM_SKIP_SECONDMATE_SYNC=1
+  "$ROOT/bin/fm-spawn.sh" mate --secondmate --backend herdr > "$LAB/mate-spawn.log" 2>&1
+  mate_wait() {
+    local expected=$1 _ count
+    for _ in $(seq 1 240); do
+      count=$(grep -c 'V2_SECOND_MATE_STARTED' "$HOME_DIR/state/mate.status" 2>/dev/null || true)
+      if [ "${count:-0}" -ge "$expected" ] && node "$ROOT/bin/fm-opencode-v2-session.mjs" status "$HOME_DIR/state/mate.opencode-v2-session.json" "$MATE" | jq -e '.executing==false' >/dev/null; then return 0; fi
+      sleep 0.5
+    done
+    echo "not ok - $VERSION secondmate did not append parent status and settle" >&2
+    return 1
+  }
+  mate_wait 1
+  SESSION=$(jq -er .sessionID "$HOME_DIR/state/mate.opencode-v2-session.json")
+  jq -e --arg s "$SESSION" --arg h "$MATE" '.sessionID==$s and .root==$h and .home==$h and .state==($h+"/state") and .lifecycle=="active"' "$MATE/state/.opencode-v2-owner.json" >/dev/null
+  [ "$(cat "$MATE/state/.lock")" = "$(jq -r .ownerPID "$MATE/state/.opencode-v2-owner.json")" ]
+  [ ! -e "$HOME_DIR/state/.opencode-v2-owner.json" ]
+  FM_POLL=1 FM_SIGNAL_GRACE=0 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 \
+    timeout 30 "$ROOT/bin/fm-watch.sh" > "$LAB/parent-notification.log"
+  "$ROOT/bin/fm-wake-drain.sh" > "$LAB/parent-wake.log" 2>&1
+  grep -q V2_SECOND_MATE_STARTED "$LAB/parent-wake.log"
+  ack=$(sed -n 's/^WAKE_ACK_REQUIRED: after handling completes run bin\/fm-wake-drain.sh --ack-through \([0-9]*\) --recovery-generation \([^ ]*\)$/\1 \2/p' "$LAB/parent-wake.log")
+  [ -n "$ack" ] || fail 'parent observation did not produce a generation-bound acknowledgement'
+  read -r ack_seq ack_generation <<< "$ack"
+  "$ROOT/bin/fm-wake-drain.sh" --ack-through "$ack_seq" --recovery-generation "$ack_generation"
+  "$ROOT/bin/fm-control.sh" mate relaunch --note 'Repeat the diagnostic charter startup and parent-channel status; no project work.' > "$LAB/mate-relaunch.log" 2>&1
+  mate_wait 2
+  [ "$(jq -r .sessionID "$HOME_DIR/state/mate.opencode-v2-session.json")" = "$SESSION" ]
+  [ "$(sed -n 's/^harness=//p' "$HOME_DIR/state/mate.meta")" = opencode-v2 ]
+  [ "$(sed -n 's/^model=//p' "$HOME_DIR/state/mate.meta")" = "${FM_OPENCODE_V2_MODEL:-opencode/space-bunny-free}" ]
+  [ "$(sed -n 's/^effort=//p' "$HOME_DIR/state/mate.meta")" = low ]
+  jq -e '.model.variant=="low"' "$HOME_DIR/state/mate.opencode-v2-session.json" >/dev/null
+  "$ROOT/bin/fm-control.sh" mate exit > "$LAB/mate-exit.log" 2>&1
+  grep -q native-session=idle "$LAB/mate-exit.log"
+  "$ROOT/bin/fm-teardown.sh" mate > "$LAB/mate-retire.log" 2>&1
+  [ ! -e "$MATE" ] && [ ! -e "$HOME_DIR/state/mate.meta" ]
+  printf 'ok - %s: V2 secondmate owns its home, runs startup, delivers parent status, resumes its session/profile and retires cleanly\n' "$VERSION"
 )

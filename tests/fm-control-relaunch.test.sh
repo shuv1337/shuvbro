@@ -852,9 +852,7 @@ test_secondmate_relaunch_onto_a_crewmate_only_adapter_refuses_before_stop() {
   } > "$home/state/sm7.meta"
   printf '%s\n' "fm-sm7" > "$dir/fake/windows"
   printf '%s' "$dir/smhome" > "$dir/fake/cwd"
-  # opencode-v2 has verified worker control mechanics, but its secondmate role
-  # is not qualified, so it belongs with the crewmate-only adapters here.
-  for adapter in muse opencode-v2; do
+  for adapter in muse gemini rovo; do
     out=$(run_control "$dir" sm7 relaunch --harness "$adapter"); rc=$?
     expect_code 1 "$rc" "$adapter should refuse a secondmate relaunch"
     assert_contains "$out" "not verified to run a secondmate task" \

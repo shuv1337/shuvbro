@@ -465,7 +465,8 @@ case "${1:-}" in
           printf 'launch-helper\n' > "$FM_FAKE_V2_STATE"
           if [ -n "${FM_FAKE_V2_SIDECAR:-}" ]; then
             birth=$(node "$FM_FAKE_V2_ROOT/bin/fm-opencode-v2-owner.mjs" identity "$FM_FAKE_V2_SERVICE_PID")
-            ( umask 077; jq -cn --argjson birth "$birth" --arg wt "$FM_FAKE_V2_SIDECAR" '{version:1,sessionID:"ses_spawned",location:{directory:$wt},model:{providerID:"fixture",id:"echo"},servicePID:$birth.pid,serviceStart:$birth.start,hostBootID:$birth.boot,serviceURL:"http://127.0.0.1:12345"}' \
+            generation=$(sed -n 's/^spawn_gen=//p' "$FM_FAKE_V2_HOME/state/$FM_FAKE_V2_ID.meta")
+            ( umask 077; jq -cn --argjson birth "$birth" --arg wt "$FM_FAKE_V2_SIDECAR" --arg generation "$generation" --arg charter "msg_$(printf '%064d' 1)" '{version:1,sessionID:"ses_spawned",location:{directory:$wt},model:{providerID:"fixture",id:"echo"},servicePID:$birth.pid,serviceStart:$birth.start,hostBootID:$birth.boot,serviceURL:"http://127.0.0.1:12345",spawnGeneration:$generation,launchMessageID:$charter}' \
               > "$FM_FAKE_V2_HOME/state/$FM_FAKE_V2_ID.opencode-v2-session.json" )
           fi ;;
         *'shuvcode --standalone'*) printf 'launch-typed\n' > "$FM_FAKE_V2_STATE" ;;
@@ -739,6 +740,7 @@ case "$4" in
 server.info) jq -cn --argjson pid "$FM_FAKE_V2_SERVICE_PID" '{pid:$pid}' ;;
 session.get) jq -cn --arg wt "$FM_FAKE_V2_SIDECAR" '{data:{id:"ses_spawned",location:{directory:$wt},model:{providerID:"fixture",id:"echo"}}}' ;;
 session.active) if [ -e "$FM_FAKE_V2_NATIVE/cancelled" ]; then echo '{"data":{}}'; else echo '{"data":{"ses_spawned":{"type":"running"}}}'; fi ;;
+session.message.list) printf '%s\n' "$FM_FAKE_V2_MESSAGES" ;;
 session.interrupt)
   printf 'interrupt\n' >> "$FM_FAKE_V2_STATE.ops"
   [ "$FM_FAKE_V2_CANCEL" = confirmed ] || exit 17
@@ -747,6 +749,44 @@ session.interrupt)
 esac
 SH
   chmod +x "$FAKEBIN_DIR/shuvcode"
+}
+
+test_opencode_v2_secondmate_requires_exact_charter_without_composer_enter() {
+  local id sm out status mode messages
+  for mode in absent accepted; do
+    id="profile-v2-secondmate-charter-$mode"
+    opencode_v2_launch_case "$id" "$id"
+    make_opencode_v2_native_service
+    sm="$CASE_DIR/secondmate-home"
+    make_seeded_secondmate_home "$sm" "$id"
+    mkdir -p "$sm/.opencode/plugins"
+    cp "$ROOT/.opencode/plugins/package.json" "$sm/.opencode/plugins/"
+    ln -s "$ROOT/.opencode/plugins/node_modules" "$sm/.opencode/plugins/node_modules"
+    if [ "$mode" = accepted ]; then
+      messages=$(jq -cn --arg charter "msg_$(printf '%064d' 1)" '{data:[{id:"msg_response",type:"assistant"},{id:$charter,type:"user"}]}')
+    else
+      messages='{"data":[{"id":"msg_unrelated", "type":"assistant"}]}'
+    fi
+    out=$(FM_SKIP_SECONDMATE_SYNC=1 FM_SKIP_SECONDMATE_INHERIT=1 FM_FAKE_V2_PREFILL=yes \
+      FM_FAKE_V2_STATE="$CASE_DIR/v2.state" FM_FAKE_V2_ROOT="$ROOT" FM_FAKE_V2_HOME="$HOME_DIR" FM_FAKE_V2_ID="$id" \
+      FM_OPENCODE_V2_READY_POLLS=3 FM_OPENCODE_V2_POLL_INTERVAL=0 \
+      FM_FAKE_V2_SIDECAR="$sm" FM_FAKE_V2_SERVICE_PID=$$ FM_FAKE_V2_NATIVE="$CASE_DIR" FM_FAKE_V2_CANCEL=confirmed FM_FAKE_V2_MESSAGES="$messages" \
+      run_spawn "$HOME_DIR" "$sm" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$sm" --secondmate)
+    status=$?
+    [ ! -e "$CASE_DIR/v2.state.enters" ] || fail "secondmate sent Enter into the worker composer ($mode)"
+    if [ "$mode" = accepted ]; then
+      expect_code 0 "$status" "secondmate rejected its exact charter execution"$'\n'"$out"
+      assert_contains "$out" "kind=secondmate" "secondmate lost its role"
+      [ -f "$HOME_DIR/state/$id.meta" ] || fail 'accepted secondmate lost its durable record'
+    else
+      expect_code 1 "$status" "secondmate committed spawn without exact charter execution"$'\n'"$out"
+      assert_contains "$out" "did not prove its exact charter started" "secondmate proof timeout reported worker prefill instead"
+      [ ! -f "$HOME_DIR/state/$id.meta" ] || fail 'failed secondmate published its task record'
+      assert_contains "$(cat "$CASE_DIR/v2.state.ops")" "interrupt" "secondmate proof timeout did not cancel the exact native session"
+      assert_contains "$(cat "$CASE_DIR/v2.state.ops")" "kill-window" "secondmate proof timeout left its endpoint"
+    fi
+  done
+  pass "opencode-v2 secondmate requires exact charter execution and never submits a worker composer"
 }
 
 test_opencode_v2_spawn_failure_cancels_admitted_session() {
@@ -1351,6 +1391,59 @@ test_claude_secondmate_launch_carries_the_attribution_policy() {
   pass "a claude secondmate launch carries the attribution-off policy too"
 }
 
+test_explicit_secondmate_harness_skips_pinned_v2_probe() {
+  local rec id sm out status
+  id=profile-secondmate-v2-pin-claude
+  rec=$(make_spawn_case profile-secondmate-v2-pin-claude codex "$id")
+  read_case_record "$rec"
+  printf '%s\n' opencode-v2 > "$HOME_DIR/config/secondmate-harness"
+  cat > "$FAKEBIN_DIR/shuvcode" <<'SH'
+#!/usr/bin/env bash
+echo 'shuvcode v2.0.22-shuv.1'
+SH
+  chmod +x "$FAKEBIN_DIR/shuvcode"
+  sm="$CASE_DIR/secondmate-home"
+  make_seeded_secondmate_home "$sm" "$id"
+  sm=$(cd "$sm" && pwd -P)
+  printf -- '- %s - pinned V2 fixture (home: %s; scope: test; projects: ; added 2026-10-04)\n' "$id" "$sm" \
+    > "$HOME_DIR/data/secondmates.md"
+
+  out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" claude --secondmate)
+  status=$?
+  expect_code 0 "$status" "an explicit claude secondmate must not be gated on the pinned V2 build"$'\n'"$out"
+  assert_contains "$out" "spawned $id harness=claude kind=secondmate" \
+    "explicit claude secondmate did not keep its requested harness"
+  pass "an explicit non-V2 secondmate proceeds despite an unqualified pinned V2 build"
+}
+
+test_explicit_v2_secondmate_refuses_unqualified_build_before_state() {
+  local rec id sm out status
+  id=profile-secondmate-v2-unqualified
+  rec=$(make_spawn_case profile-secondmate-v2-unqualified codex "$id")
+  read_case_record "$rec"
+  cat > "$FAKEBIN_DIR/shuvcode" <<'SH'
+#!/usr/bin/env bash
+echo 'shuvcode v2.0.22-shuv.1'
+SH
+  chmod +x "$FAKEBIN_DIR/shuvcode"
+  sm="$CASE_DIR/secondmate-home"
+  make_seeded_secondmate_home "$sm" "$id"
+  sm=$(cd "$sm" && pwd -P)
+  printf -- '- %s - unqualified V2 fixture (home: %s; scope: test; projects: ; added 2026-10-04)\n' "$id" "$sm" \
+    > "$HOME_DIR/data/secondmates.md"
+
+  out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" opencode-v2 --secondmate)
+  status=$?
+  [ "$status" -ne 0 ] || fail "an explicit opencode-v2 secondmate spawned on an unqualified build"$'\n'"$out"
+  assert_contains "$out" "unqualified target shuvcode v2.0.22-shuv.1" "unqualified V2 secondmate was not refused by the capability probe"
+  assert_not_contains "$out" "spawned $id" "unqualified V2 secondmate reported a spawn"
+  assert_absent "$HOME_DIR/state/$id.meta" "unqualified V2 secondmate published task metadata"
+  assert_absent "$HOME_DIR/state/$id.opencode-v2-session.json" "unqualified V2 secondmate published a session record"
+  assert_absent "$sm/state" "unqualified V2 secondmate created child home state"
+  [ ! -s "$LAUNCH_LOG" ] || fail "unqualified V2 secondmate launched an endpoint"$'\n'"$(cat "$LAUNCH_LOG")"
+  pass "an explicit opencode-v2 secondmate refuses an unqualified build before publishing state"
+}
+
 test_active_dispatch_profile_does_not_block_secondmate_launch() {
   local rec id sm out status
   id=profile-secondmate-z16
@@ -1673,6 +1766,7 @@ test_opencode_v2_unsubmitted_brief_fails_loudly
 test_opencode_v2_spawn_failure_keeps_pane_diagnostic
 test_opencode_v2_auto_submitted_brief
 test_opencode_v2_spawn_failure_cancels_admitted_session
+test_opencode_v2_secondmate_requires_exact_charter_without_composer_enter
 test_opencode_v2_rollback_cancels_admitted_session
 test_opencode_v2_stale_lead_refuses_before_window
 test_opencode_worker_keeps_tracked_plugins_package_json
@@ -1700,5 +1794,7 @@ test_non_claude_harness_ignores_config_dir
 test_claude_crewmate_launch_carries_the_attribution_policy
 test_claude_secondmate_launch_carries_the_attribution_policy
 test_active_dispatch_profile_does_not_block_secondmate_launch
+test_explicit_secondmate_harness_skips_pinned_v2_probe
+test_explicit_v2_secondmate_refuses_unqualified_build_before_state
 
 echo "# all fm-spawn-dispatch-profile tests passed"

@@ -1,4 +1,6 @@
-// Exact shared-worker execution reconciliation. CLI: status|interrupt|teardown|discard RECORD WORKTREE.
+// Exact shared-session reconciliation. CLI: status|interrupt|teardown|discard|started RECORD WORKTREE.
+// started RECORD WORKTREE GENERATION verifies a secondmate launch against its
+// current spawn generation and exact charter message ID.
 // session.get establishes placement/model; session.active is the native execution
 // owner (session.get has no execution-status field on the qualified fork).
 // The sidecar is published before prompt admission; busy evidence contradicts
@@ -182,6 +184,23 @@ export async function reconcileWorker(action, file, worktree) {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  try { console.log(JSON.stringify(await reconcileWorker(...process.argv.slice(2)))); }
+  try {
+    const [action, file, worktree, generation] = process.argv.slice(2);
+    if (action === "started") {
+      const snapshot = workerSnapshot(file, worktree);
+      if (!snapshot.recorded || snapshot.incarnation !== "original") throw new Error("secondmate launch has no current submission binding");
+      if (!/^s[0-9]+\.[0-9]+\.[0-9]+$/.test(generation || "") || snapshot.record.spawnGeneration !== generation) throw new Error("secondmate submission belongs to an earlier spawn generation");
+      if (!/^msg_[a-f0-9]{64}$/.test(snapshot.record.launchMessageID || "")) throw new Error("secondmate launch has no exact charter message binding");
+      const messages = nativeAPI(snapshot.binding, "session.message.list", [...snapshot.args, "--param", "order=desc", "--param", "limit=64"]).data;
+      const charterIndex = Array.isArray(messages) ? messages.findIndex(message => message.id === snapshot.record.launchMessageID && message.type === "user") : -1;
+      // Descending history: only execution between this charter and the next
+      // user message counts. A subsequent startup nudge need not erase proof,
+      // but its own response cannot prove that a queued charter executed.
+      const afterCharter = charterIndex > 0 ? messages.slice(0, charterIndex) : [];
+      const nextUser = afterCharter.findLastIndex(message => message.type === "user");
+      if (!Array.isArray(messages) || charterIndex <= 0 || !afterCharter.slice(nextUser + 1).some(message => ["assistant", "idle"].includes(message.type))) throw new Error("secondmate launch has not started execution after its exact charter");
+      console.log("started");
+    } else console.log(JSON.stringify(await reconcileWorker(action, file, worktree)));
+  }
   catch (error) { console.error(error.message); process.exitCode = 1; }
 }
