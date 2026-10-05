@@ -1369,6 +1369,11 @@ families_for_changed_path() {
       printf '%s\n' __script__:fm-opencode-v2-succession-live.test.sh
       printf '%s\n' __script__:fm-opencode-v2-worker-restart-acceptance.test.sh
       ;;
+    tests/assets/fm-opencode-v2-capability-fixture.mjs)
+      printf '%s\n' __script__:fm-opencode-v2-launch.test.sh
+      printf '%s\n' __script__:fm-control-relaunch.test.sh
+      printf '%s\n' __script__:fm-spawn-dispatch-profile.test.sh
+      ;;
     bin/fm-opencode-v2-launch.sh|bin/fm-opencode-v2-capability.mjs)
       printf '%s\n' __script__:fm-opencode-v2-launch.test.sh
       printf '%s\n' __script__:fm-busy-adapter-wiring.test.sh

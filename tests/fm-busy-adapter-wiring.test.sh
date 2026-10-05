@@ -535,7 +535,7 @@ SH
     fm_test_run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" --secondmate "$id" opencode-v2) && {
     fail "an unqualified opencode-v2 build must be refused: $out"
   }
-  assert_contains "$out" 'unqualified target' \
+  assert_contains "$out" 'below the supported floor' \
     "a positional V2 secondmate must probe capabilities, not parse the harness as a home: $out"
   assert_absent "$HOME_DIR/state/.spawn-$id.lock" 'V2 secondmate refusal must release the spawn lock'
   assert_absent "$HOME_DIR/state/$id.meta" 'V2 secondmate refusal must precede task metadata'
@@ -555,7 +555,7 @@ echo 'shuvcode v1.0.0'
 SH
   chmod +x "$FAKEBIN_DIR/shuvcode"
   out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$id" "$PROJ_DIR" opencode-v2) && fail "unqualified V2 target dispatched: $out"
-  assert_contains "$out" 'unqualified target' 'V2 refusal must name the unsupported installed build'
+  assert_contains "$out" 'unsupported target' 'V2 refusal must name the unsupported installed build'
   assert_absent "$HOME_DIR/state/.spawn-$id.lock" 'probe must precede the task runtime lock'
   assert_absent "$HOME_DIR/state/$id.meta" 'probe must precede task metadata'
   assert_absent "$HOME_DIR/state/$id.busy-gen" 'probe must precede execution wiring'

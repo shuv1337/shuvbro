@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Real shuvcode exit/relaunch through a real Treehouse nested login shell on
 # Herdr. Opt in with FM_CONTROL_HERDR_V2_LIVE=1 (submits diagnostic prompts).
+# FM_HERDR_LAB_HELPER and FM_HERDR_LAB_LABEL select the guarded helper and lab label.
 # Every Herdr call uses the guarded named-session helper, including backend
 # calls routed through a lab-only CLI shim. XDG, mise approval, service and
 # worker registry settings are confined to the lab subshell and task pane.
@@ -11,7 +12,7 @@ fm_live_gate opt-in FM_CONTROL_HERDR_V2_LIVE shuvcode herdr treehouse jq git nod
 LAB=$(mktemp -d "${TMPDIR:-/tmp}/fm-control-herdr-v2.XXXXXX")
 LAB=$(cd "$LAB" && pwd -P)
 HERDR_LAB_HELPER=${FM_HERDR_LAB_HELPER:-"$ROOT/bin/fm-herdr-lab.sh"}
-HERDR_LAB_SESSION=$("$HERDR_LAB_HELPER" name control-v2-live)
+HERDR_LAB_SESSION=$("$HERDR_LAB_HELPER" name "${FM_HERDR_LAB_LABEL:-control-v2-live}")
 ORIGINAL_PATH=$PATH
 export HERDR_LAB_HELPER HERDR_LAB_SESSION ORIGINAL_PATH
 cleanup_lab() {
