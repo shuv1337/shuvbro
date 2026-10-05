@@ -21,9 +21,9 @@
 #          that needs one: not while nobody is asking, and not again while the
 #          backlog, heads-up notes, secondmate registry, task metadata, and
 #          status logs are unchanged unless the last rebuild is at least
-#          60 seconds old (or FM_BOARD_INTERVAL, when that is longer). An answer always rebuilds
-#          after its write, so the page never keeps the question it just
-#          answered. While it runs it keeps a private serve record,
+#          60 seconds old (or FM_BOARD_INTERVAL, when that is longer). An
+#          answer always rebuilds after its write, so the page never keeps the
+#          question it just answered. While it runs it keeps a private serve record,
 #          state/board/serve.json (pid, port, instance), removed on exit.
 #          bin/fm-board.mjs owns the persistent answer-confirmation records.
 # status   Exit 0 and print the local URL when this home's board answers its

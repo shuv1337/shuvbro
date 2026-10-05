@@ -1172,7 +1172,7 @@ FM_INBOX_ASK_MODEL=     # overrides config/inbox-ask-model for fm-inbox.sh ask
 FM_INBOX_PROFILE=       # overrides config/inbox-profile; explicitly empty forces ambient credentials
 # live board; see "Live board" above
 FM_BOARD_PORT=          # overrides config/board-port; 0 picks a free loopback port
-FM_BOARD_INTERVAL=10         # seconds between open-page checks, 2..300; see "Live board"
+FM_BOARD_INTERVAL=10    # seconds between open-page checks, 2..300
 ```
 
 `fm-teardown.sh` retries only Git's `Unable to create '...index.lock': File exists` return failure up to `FM_TREEHOUSE_RETURN_LOCK_RETRIES` times.
