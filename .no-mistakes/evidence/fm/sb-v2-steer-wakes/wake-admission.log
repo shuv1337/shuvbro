@@ -1,0 +1,3 @@
+ok - lead wakes, startup and repairs steer with stable IDs; exact receipts and canonical acknowledgements remain distinct
+ok - helper contract: handoff confirmed before the lead acknowledges is accepted and the episode retires
+ok - helper contract: a handoff confirmed after the lead acknowledged is rejected, so confirmation must precede admission

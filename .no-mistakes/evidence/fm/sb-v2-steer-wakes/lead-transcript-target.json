@@ -1,0 +1,260 @@
+[
+  {
+    "type": "user",
+    "text": "RUN: touch /tmp/fm-opencode-v2-shared-live.s5pzMU/worker-2-ran"
+  },
+  {
+    "type": "assistant",
+    "text": ""
+  },
+  {
+    "type": "assistant",
+    "text": ""
+  },
+  {
+    "type": "idle",
+    "text": ""
+  },
+  {
+    "type": "user",
+    "text": "RUN: printf 'done: w2 finished\\n' >> /tmp/fm-opencode-v2-shared-live.s5pzMU/home-a/state/t2.status"
+  },
+  {
+    "type": "assistant",
+    "text": ""
+  },
+  {
+    "type": "assistant",
+    "text": ""
+  },
+  {
+    "type": "idle",
+    "text": ""
+  }
+]
+[
+  {
+    "type": "user",
+    "text": "RUN: touch /tmp/fm-opencode-v2-shared-live.s5pzMU/worker-1-ran"
+  },
+  {
+    "type": "assistant",
+    "text": ""
+  },
+  {
+    "type": "assistant",
+    "text": ""
+  },
+  {
+    "type": "idle",
+    "text": ""
+  },
+  {
+    "type": "user",
+    "text": "RUN: FM_HOME=/tmp/fm-opencode-v2-shared-live.s5pzMU/home-a FM_STATE_OVERRIDE=/tmp/fm-opencode-v2-shared-live.s5pzMU/home"
+  },
+  {
+    "type": "assistant",
+    "text": ""
+  },
+  {
+    "type": "assistant",
+    "text": ""
+  },
+  {
+    "type": "idle",
+    "text": ""
+  },
+  {
+    "type": "user",
+    "text": "RUN: printf 'done: w1 finished\\n' >> /tmp/fm-opencode-v2-shared-live.s5pzMU/home-a/state/t1.status"
+  },
+  {
+    "type": "assistant",
+    "text": ""
+  },
+  {
+    "type": "assistant",
+    "text": ""
+  },
+  {
+    "type": "idle",
+    "text": ""
+  }
+]
+[
+  {
+    "type": "user",
+    "text": "⁣FIRSTMATE_OP: v1 session-start: Run `bin/fm-session-start.sh` now, exactly once, before executing any other instruction"
+  },
+  {
+    "type": "assistant",
+    "text": ""
+  },
+  {
+    "type": "assistant",
+    "text": ""
+  },
+  {
+    "type": "idle",
+    "text": ""
+  },
+  {
+    "type": "user",
+    "text": "RUN: touch /tmp/fm-opencode-v2-shared-live.s5pzMU/reg-allow"
+  },
+  {
+    "type": "assistant",
+    "text": ""
+  },
+  {
+    "type": "assistant",
+    "text": ""
+  },
+  {
+    "type": "idle",
+    "text": ""
+  },
+  {
+    "type": "user",
+    "text": "RUN: cd projects/x && touch /tmp/fm-opencode-v2-shared-live.s5pzMU/reg-deny"
+  },
+  {
+    "type": "assistant",
+    "text": ""
+  },
+  {
+    "type": "assistant",
+    "text": ""
+  },
+  {
+    "type": "idle",
+    "text": ""
+  },
+  {
+    "type": "user",
+    "text": "RUN: echo ok; bin/fm-watch-arm.sh --restart &"
+  },
+  {
+    "type": "assistant",
+    "text": ""
+  },
+  {
+    "type": "assistant",
+    "text": ""
+  },
+  {
+    "type": "idle",
+    "text": ""
+  },
+  {
+    "type": "user",
+    "text": "RUN: touch /tmp/fm-opencode-v2-shared-live.s5pzMU/busy-start; sleep 12; touch /tmp/fm-opencode-v2-shared-live.s5pzMU/bus"
+  },
+  {
+    "type": "assistant",
+    "text": ""
+  },
+  {
+    "type": "user",
+    "text": "⁣FIRSTMATE_OP: v1 watcher: WATCHER FIRED - drain queued wakes with bin/fm-wake-drain.sh and handle the reported wake. Wa"
+  },
+  {
+    "type": "assistant",
+    "text": ""
+  },
+  {
+    "type": "assistant",
+    "text": ""
+  },
+  {
+    "type": "idle",
+    "text": ""
+  },
+  {
+    "type": "user",
+    "text": "⁣FIRSTMATE_OP: v1 watcher: WATCHER FIRED - drain queued wakes with bin/fm-wake-drain.sh and handle the reported wake. Wa"
+  },
+  {
+    "type": "assistant",
+    "text": ""
+  },
+  {
+    "type": "assistant",
+    "text": ""
+  },
+  {
+    "type": "idle",
+    "text": ""
+  }
+]
+[
+  {
+    "type": "user",
+    "text": "RUN: cd projects/x && touch /tmp/fm-opencode-v2-shared-live.s5pzMU/marker-child"
+  },
+  {
+    "type": "assistant",
+    "text": ""
+  },
+  {
+    "type": "assistant",
+    "text": ""
+  },
+  {
+    "type": "idle",
+    "text": ""
+  }
+]
+[
+  {
+    "type": "user",
+    "text": "RUN: cd projects/x && touch /tmp/fm-opencode-v2-shared-live.s5pzMU/marker-unrelated"
+  },
+  {
+    "type": "assistant",
+    "text": ""
+  },
+  {
+    "type": "assistant",
+    "text": ""
+  },
+  {
+    "type": "idle",
+    "text": ""
+  },
+  {
+    "type": "user",
+    "text": "RUN: printf '%s %s %s\\n' \"$OPENCODE_SESSION_ID\" \"$(ps -o ppid= -p $$ | tr -d ' ')\" \"${FM_LIVE_FIRST_CLIENT:-none}\" > /tm"
+  },
+  {
+    "type": "assistant",
+    "text": ""
+  },
+  {
+    "type": "assistant",
+    "text": ""
+  },
+  {
+    "type": "idle",
+    "text": ""
+  }
+]
+[
+  {
+    "type": "user",
+    "text": "RUN: cd projects/x && touch /tmp/fm-opencode-v2-shared-live.s5pzMU/marker-lead"
+  },
+  {
+    "type": "assistant",
+    "text": ""
+  },
+  {
+    "type": "assistant",
+    "text": ""
+  },
+  {
+    "type": "idle",
+    "text": ""
+  }
+]
