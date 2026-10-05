@@ -1,0 +1,14 @@
+## 2026-10-04 20:30:00 PDT real capability probe, installed shuvcode
+$ shuvcode --version
+shuvcode v2.0.22-shuv.2
+$ node bin/fm-opencode-v2-capability.mjs "$ROOT"
+{"version":"shuvcode v2.0.22-shuv.2","runtime":"effect","qualified":true}
+exit=0
+
+## adversarial: PATH shuvcode reports v2.0.22-shuv.1
+opencode-v2 capability probe: unqualified target shuvcode v2.0.22-shuv.1; use qualified shuvcode v2.0.22-shuv.2 or qualify the new build first
+exit=1
+
+## adversarial: PATH shuvcode reports v2.0.22-shuv.3
+opencode-v2 capability probe: unqualified target shuvcode v2.0.22-shuv.3; use qualified shuvcode v2.0.22-shuv.2 or qualify the new build first
+exit=1

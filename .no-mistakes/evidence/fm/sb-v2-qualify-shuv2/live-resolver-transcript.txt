@@ -1,0 +1,9 @@
+## 2026-10-04 20:30:10 PDT real install: dispatch resolver vs live-guard resolver
+dispatch fm_shuvcode_native_binary: /home/shuv/.npm-global/lib/node_modules/shuvcode/node_modules/shuvcode-linux-x64/bin/shuvcode
+live v2_resolve_live_binary: /home/shuv/.npm-global/lib/node_modules/shuvcode/node_modules/shuvcode-linux-x64/bin/shuvcode (exit=0)
+shuvcode v2.0.22-shuv.2
+
+## adversarial: AVX2 host, preferred shuvcode-linux-x64 is a broken ELF, -baseline works
+dispatch picks: <fixture>/lib/node_modules/shuvcode/node_modules/shuvcode-linux-x64/bin/shuvcode
+cannot run dispatch-selected shuvcode binary: <fixture>/lib/node_modules/shuvcode/node_modules/shuvcode-linux-x64/bin/shuvcode
+live resolver exit=1 stdout=[]
