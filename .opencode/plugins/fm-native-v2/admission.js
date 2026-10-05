@@ -50,16 +50,15 @@ export function createAdmissionJournal(paths, sessionID, admit, report = console
     if (value.phase === "acknowledged") return true;
     if (!value.rows.length) {
       // Recovery has no row identities. Exact-generation ack retires a
-      // confirmed obligation. Once admitted, a valid successor generation also
-      // releases its slot: the canonical owner has replaced that episode.
-      // Missing or malformed state cannot release an outstanding doorbell.
+      // confirmed obligation. An admitted doorbell stays outstanding while any
+      // generation is unacked: its drain presents current state and prints the
+      // later ack, which then retires it. Missing or malformed state retains it.
       const generation = value.context?.recovery?.generation;
-      if (value.kind !== "wake" || !["confirmed", "admitted"].includes(value.phase) || typeof generation !== "string" || !/^[A-Za-z0-9._-]{1,200}$/.test(generation)) return value.phase === "acknowledged";
+      if (value.kind !== "wake" || !["confirmed", "admitted"].includes(value.phase) || typeof generation !== "string" || !/^[A-Za-z0-9._-]{1,200}$/.test(generation)) return false;
       let marker;
       try { marker = readFileSync(join(paths.state, ".watcher-down"), "utf8").trim(); } catch { return false; }
-      const episode = marker.match(/^(pending|announced|acked):(handling|downtime):([A-Za-z0-9._-]{1,200})$/);
-      if (!episode) return false;
-      if (episode[3] === generation ? episode[1] !== "acked" : value.phase !== "admitted") return false;
+      const episode = marker.match(/^acked:(?:handling|downtime):([A-Za-z0-9._-]{1,200})$/);
+      if (!episode || value.phase === "confirmed" && episode[1] !== generation) return false;
       save({ ...value, phase: "acknowledged" });
       return true;
     }
@@ -77,7 +76,8 @@ export function createAdmissionJournal(paths, sessionID, admit, report = console
     if (!existsSync(dir)) return false;
     for (const name of readdirSync(dir).filter(name => /^msg_[a-f0-9]{64}\.json$/.test(name))) {
       const value = validate(readPrivate(join(dir, name)));
-      if (value.id === exceptId || value.kind !== "wake" || value.phase !== "admitted") continue;
+      // A doorbell admitted by an older claim cannot hold this owner's slot.
+      if (value.id === exceptId || value.kind !== "wake" || value.phase !== "admitted" || value.claim !== options.claim) continue;
       if (!acknowledged(value)) return true;
     }
     return false;
@@ -102,7 +102,7 @@ export function createAdmissionJournal(paths, sessionID, admit, report = console
           // remains occupied until canonical handling, not the native receipt.
           const result = await admit({ sessionID, id: value.id, text: value.text, delivery: "steer" });
           if (result?.id !== value.id) throw new Error("native admission did not acknowledge the exact message ID");
-          save({ ...value, phase: "admitted" });
+          save({ ...value, phase: "admitted", claim: options.claim });
           retries.delete(value.id);
           return true;
         } catch (error) {

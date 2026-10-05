@@ -26,9 +26,9 @@ When this session owns supervision and away mode is not active:
    Worker briefs remain queued through the separate worker launch path.
    Rejected or unknown acknowledgements retry the same ID/text; admission never acknowledges wake rows.
    The wake doorbell contains only a generic instruction to drain and acknowledge the durable queue; authoritative reasons come from that drain.
-   While an admitted wake still names canonical rows or an admitted no-row recovery still names the current unacknowledged recovery generation, later wakes stay journaled behind that outstanding steer.
-   Canonical row removal or exact-generation recovery acknowledgement releases the slot; a valid successor generation also retires an admitted no-row episode, while missing or malformed marker state retains it.
-   A parked wake then admits if its obligation remains, or retires without another prompt if canonical handling already settled it.
+   While an admitted wake still names canonical rows, or an admitted no-row recovery still sees an unacknowledged recovery marker of any generation, later wakes from the same claim stay journaled behind that outstanding steer without handoff confirmation.
+   Canonical row removal or an acknowledged marker for that generation or any later one releases the slot; an unacknowledged successor generation, missing or malformed marker state retain it, and a doorbell admitted by an older claim never holds a new owner's slot.
+   A parked wake then admits if its obligation remains, or retires without another prompt if canonical handling already settled it; rows that arrived after an acknowledged episode's drain admit without a stale handoff confirmation.
    Only canonically retired wake records expire after seven days; outstanding recovery records remain retained.
    An exhausted admission remains pending and produces a bounded diagnostic, not an unguarded recovery-marker reopen.
    Subsequent attempts continue with capped backoff while ownership remains valid; confirmed canonical queue acknowledgement retires the obsolete transport obligation without reporting it as admitted.

@@ -136,8 +136,12 @@ echo safe >> '${state}/check-probes'
   }
   assert.equal(admitted.length, 1, "a preparation failure admitted a second presentation");
   await coordinator.cleanup(); coordinator = null; await until(() => !running(retained), "preparation-error successor survived cleanup");
-  // Completed no-row records expire, but pending recoveries and claim startup
-  // deduplication survive the same age-based cleanup pass.
+  // An admitted no-row doorbell stays outstanding under a later unacked
+  // generation. Once acked, it expires, but pending recoveries and claim
+  // startup deduplication survive the same age-based cleanup pass.
+  fs.utimesSync(journalPath(prepared[0].value), 1, 1);
+  journal.pending(); assert.equal(owner.readPrivate(journalPath(prepared[0].value)).phase, "admitted");
+  fs.writeFileSync(state + "/.watcher-down", "acked:downtime:gen-preparation-error\n");
   fs.utimesSync(journalPath(prepared[0].value), 1, 1);
   const pending = journal.prepare("pending recovery", "wake", { recovery: { generation: "gen-pending" } }); fs.utimesSync(journalPath(pending), 1, 1);
   const startup = journal.prepare("startup", "startup:retention"); fs.utimesSync(journalPath(startup), 1, 1);

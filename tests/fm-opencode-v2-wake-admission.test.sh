@@ -107,7 +107,7 @@ function fixture(name, onAdmission = async () => {}) {
   const queue=paths.state+'/.wake-queue',marker=paths.state+'/.watcher-down',calls=[];
   fs.writeFileSync(queue,'');
   const admit=async input=>{calls.push(input);assert.equal(input.delivery,'steer');await onAdmission({input,queue,marker});return {id:input.id};};
-  const reload=()=>createAdmissionJournal(paths,'ses_recovery',admit,()=>{});
+  const reload=claim=>createAdmissionJournal(paths,'ses_recovery',admit,()=>{},claim?{claim}:{});
   const journal=reload();
   const recovery=(generation)=>journal.confirm(journal.prepare('drain only','wake',{recovery:{generation}}),{generation});
   const phase=value=>JSON.parse(fs.readFileSync(paths.state+'/.opencode-v2-admissions/'+fs.readdirSync(paths.state+'/.opencode-v2-admissions')[0]+'/'+value.id+'.json')).phase;
@@ -178,18 +178,47 @@ for (const handled of [false,true]) {
   assert.equal(f.phase(later),handled?'acknowledged':'admitted');
   assert.equal(f.reload().pending().length,0,'a parked recovery must retire or admit after handling');
 }
-// A new canonical generation can replace an old episode before the adapter
-// observes its ack. Its admitted record cannot permanently hold the next one.
+// An unacked successor generation keeps the admitted recovery doorbell
+// outstanding: its drain presents current state and prints the later ack.
 {
-  const f=fixture('generation-advanced');
+  const f=fixture('generation-unacked');
   fs.writeFileSync(f.marker,'announced:handling:first\n');
   const first=f.recovery('first');await f.journal.deliver(first);
-  fs.writeFileSync(f.marker,'pending:downtime:next\n');
-  assert.equal(f.reload().acknowledged(first),true);
-  const next=f.recovery('next');await f.reload().deliver(next);
+  fs.writeFileSync(f.marker,'pending:downtime:second\n');
+  assert.equal(f.reload().acknowledged(first),false);
+  const second=f.recovery('second');
+  assert.equal(await f.reload().deliver(second),false,'an unacked successor generation must not steer a second doorbell');
+  fs.writeFileSync(f.marker,'announced:downtime:third\n');
+  assert.equal(f.reload().acknowledged(first),false,'the first doorbell stays outstanding across generations');
+  const third=f.recovery('third');
+  assert.equal(await f.reload().deliver(third),false);
+  assert.equal(f.reload().pending().length,2);
+  assert.equal(f.calls.length,1);
+  fs.writeFileSync(f.marker,'acked:downtime:third\n');
+  const after=f.reload();
+  assert.deepEqual(after.pending().map(value=>value.id),[second.id],'only the superseded unacked generation remains journaled');
+  assert.equal(after.acknowledged(first),true);assert.equal(after.acknowledged(third),true);
+  assert.equal(await after.deliver(third),true);assert.equal(after.parked(second),false);
+  assert.equal(f.calls.length,1,'a later-generation ack retires the outstanding doorbell and its own episode without another admission');
+}
+// A doorbell admitted by an older claim never blocks the new owner.
+{
+  const f=fixture('claim-change');
+  const recovery=(journal,generation)=>journal.confirm(journal.prepare('drain only','wake',{recovery:{generation}}),{generation});
+  fs.writeFileSync(f.marker,'pending:handling:first\n');
+  const previous=f.reload('claim-a');
+  await previous.deliver(recovery(previous,'first'));
+  fs.writeFileSync(f.marker,'pending:downtime:second\n');
+  const owner=f.reload('claim-b');
+  const second=recovery(owner,'second');
+  assert.equal(f.reload('claim-a').parked(second),true);
+  assert.equal(owner.parked(second),false);
+  assert.equal(await owner.deliver(second),true);
+  assert.equal(f.calls.length,2);assert.equal(f.calls[1].id,second.id);
+  fs.writeFileSync(f.queue,row);
+  const later=owner.confirm(owner.prepare('later row'));
+  assert.equal(await f.reload('claim-b').deliver(later),false,'the new owner keeps its own one-doorbell cap');
   assert.equal(f.calls.length,2);
-  fs.writeFileSync(f.marker,'acked:downtime:next\n');
-  assert.equal(f.reload().acknowledged(next),true);
 }
 // An in-flight no-row admission owns the slot before its native receipt.
 {
@@ -220,7 +249,78 @@ for (const handled of [false,true]) {
   assert.equal(f.calls.length,1);assert.equal(f.phase(first),'acknowledged');
   assert.equal(f.reload().pending().length,0);
 }
-console.log('no-row/row doorbells share one steer cap; canonical ack or generation advance releases parked obligations without consuming rows');
+console.log('no-row/row doorbells share one steer cap per claim; canonical ack of the episode or a later generation releases parked obligations without consuming rows');
+JS
+  ) || fail "$out"
+  pass "$out"
+}
+
+# Through the real coordinator: the lead drains W1{r1} early in a long turn, r2
+# fires a successor whose wake parks behind W1, then the lead acks r1 and G1.
+# The parked wake must not confirm handling while parked, and once released it
+# must admit r2 instead of re-confirming the already acked generation.
+test_parked_row_wake_admits_after_partial_canonical_ack() {
+  local out lab="$TMP_ROOT/partial-ack"
+  mkdir -p "$lab/bin" "$lab/state" "$lab/config"
+  printf '100\t1\tsignal\ttask\tfirst\n' > "$lab/state/.wake-queue"
+  printf 'pending:handling:G1\n' > "$lab/state/.watcher-down"
+  : > "$lab/state/task.meta"
+  cat > "$lab/bin/fm-watch-arm.sh" <<'SH'
+#!/usr/bin/env bash
+s=$FM_STATE_OVERRIDE
+if [ "${1:-}" = --handling-delivered ]; then
+  echo "$2" >> "$s/confirms"
+  case "$(cat "$s/.watcher-down")" in pending:*:"$2"|announced:*:"$2") exit 0 ;; *) exit 1 ;; esac
+fi
+if [ ! -f "$s/first" ]; then
+  touch "$s/first"
+  echo 'signal: task first'
+  exit 0
+fi
+echo "watcher: started pid=$$ recovery-generation=G1"
+trap 'exit 0' TERM
+while :; do
+  if [ -f "$s/fire" ]; then rm -f "$s/fire"; echo 'signal: task second'; exit 0; fi
+  sleep 0.05
+done
+SH
+  chmod +x "$lab/bin/fm-watch-arm.sh"
+  cp "$CODE_ROOT/bin/fm-operational-input.sh" "$lab/bin/fm-operational-input.sh"
+  out=$(CODE_ROOT="$CODE_ROOT" LAB="$lab" node --input-type=module 2>&1 <<'JS'
+import fs from 'node:fs';import assert from 'node:assert/strict';import {pathToFileURL} from 'node:url';
+const root=pathToFileURL(process.env.CODE_ROOT+'/');
+const {createWatchArmCoordinator}=await import(new URL('.opencode/plugins/lib/fm-watch-arm-v2.js',root));
+const {createAdmissionJournal}=await import(new URL('.opencode/plugins/fm-native-v2/admission.js',root));
+const p={root:process.env.LAB,home:process.env.LAB,state:process.env.LAB+'/state',config:process.env.LAB+'/config'};
+const queue=p.state+'/.wake-queue',marker=p.state+'/.watcher-down',confirms=()=>{try{return fs.readFileSync(p.state+'/confirms','utf8').trim().split('\n').length;}catch{return 0;}};
+const admitted=[],failures=[];
+const journal=createAdmissionJournal(p,'ses_partial',async input=>{assert.equal(input.delivery,'steer');admitted.push(input.id);return{id:input.id};});
+const c=createWatchArmCoordinator(p,()=>{throw new Error('unjournaled delivery');},{owns:()=>true,admission:journal,failure:reason=>failures.push(reason)});
+const until=async(predicate,what)=>{for(let i=0;i<200&&!predicate();i++)await new Promise(resolve=>setTimeout(resolve,25));assert.ok(predicate(),what+' '+JSON.stringify(failures));};
+try {
+  await c.ensureArmed('ses_partial');
+  await until(()=>admitted.length===1,'W1 was not admitted');
+  assert.equal(confirms(),1);
+  // The lead drained r1 at turn start; r2 arrives mid-turn and fires again.
+  fs.appendFileSync(queue,'101\t2\tsignal\ttask\tsecond\n');
+  fs.writeFileSync(p.state+'/fire','');
+  await until(()=>!fs.existsSync(p.state+'/fire')&&journal.pending().length===1,'W2 was not journaled');
+  for(let tick=0;tick<3;tick++)await c.resumePending('ses_partial');
+  await new Promise(resolve=>setTimeout(resolve,300));
+  assert.equal(admitted.length,1,'W2 must park behind the undrained W1');
+  assert.equal(journal.parked(journal.pending()[0]),true);
+  assert.equal(confirms(),1,'a parked wake must not confirm handling on reconciliation');
+  // The lead acks only r1 and the recovery generation.
+  fs.writeFileSync(queue,'101\t2\tsignal\ttask\tsecond\n');
+  fs.writeFileSync(marker,'acked:handling:G1\n');
+  await c.resumePending('ses_partial');
+  assert.equal(admitted.length,2,'the released wake for r2 was stranded: '+JSON.stringify(failures));
+  assert.equal(journal.pending().length,0);
+  assert.equal(confirms(),1,'an acked episode must not be re-confirmed');
+  assert.deepEqual(failures,[]);
+  assert.equal(fs.readFileSync(queue,'utf8'),'101\t2\tsignal\ttask\tsecond\n','admission never consumes rows');
+} finally { await c.cleanup(); }
+console.log('coordinator parks W2 without handoff work and admits r2 after a partial canonical ack');
 JS
   ) || fail "$out"
   pass "$out"
@@ -306,6 +406,7 @@ FAILED=0
 for t in \
   test_journal_steers_with_exact_receipts_and_canonical_ack \
   test_recovery_doorbells_share_the_outstanding_cap \
+  test_parked_row_wake_admits_after_partial_canonical_ack \
   test_handoff_before_lead_ack_is_accepted \
   test_handoff_after_lead_ack_is_rejected; do
   ( "$t" ) || FAILED=$((FAILED + 1))

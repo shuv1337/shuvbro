@@ -98,6 +98,11 @@ export function createWatchArmCoordinator(paths, deliverPrompt, options = {}) {
     catch { return undefined; }
   }
 
+  function episodeAcked() {
+    try { return /^acked:(?:handling|downtime):[A-Za-z0-9._-]+$/.test(readFileSync(`${paths.state}/.watcher-down`, "utf8").trim()); }
+    catch { return false; }
+  }
+
   function setArmStatus(status) {
     state.armStatus = status;
   }
@@ -155,8 +160,12 @@ export function createWatchArmCoordinator(paths, deliverPrompt, options = {}) {
   async function deliverActionableWake(sessionID, recovery, saved) {
     if (state.stopped || options.owns && !options.owns()) return;
     if (options.admission?.acknowledged(saved)) return;
+    // A parked wake waits for the outstanding doorbell without handoff work.
+    if (options.admission?.parked(saved)) return;
     if (options.admission && !recovery) throw new Error("V2 successor has no verifiable recovery generation; pending admission retained");
-    if (recovery) {
+    // Once the lead acked the episode there is no handoff left to confirm;
+    // rows that arrived after its drain still need their own doorbell.
+    if (recovery && !(options.admission && episodeAcked())) {
       const confirmed = confirmHandlingDeliveryWithRetry(recovery);
       if (!confirmed.ok) {
         if (options.admission) throw new Error(confirmed.detail);
@@ -471,7 +480,7 @@ export function createWatchArmCoordinator(paths, deliverPrompt, options = {}) {
     hasUnpreparedWake: () => !!state.unpreparedWake,
     async resumePending(sessionID) {
       if (!options.admission || state.restorationInFlight || state.stopped) return;
-      const pending = options.admission.pending().filter(value => value.kind === "wake");
+      const pending = options.admission.pending().filter(value => value.kind === "wake" && !options.admission.parked(value));
       if (!pending.length && !state.unpreparedWake) return;
       const result = await restoreAfterActionableClose(sessionID, "");
       if (result.failure) throw Object.assign(new Error(result.failure), { nonRecoverable: true });
