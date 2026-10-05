@@ -4390,9 +4390,7 @@ test_send_text_submit_slow_transition_within_one_enter_needs_no_extra_enter() {
 }
 
 # A status read that does not report the server running must not make a send
-# or doorbell launch `herdr server`. That start command exits 1 with
-# "herdr server is already running" when the session server is already bound,
-# which used to fail fm-send after the inbox record had already been written.
+# or doorbell launch `herdr server`.
 test_send_does_not_start_server_when_status_reports_down() {
   local dir state log fb err rc
   dir="$TMP_ROOT/send-no-server-start"

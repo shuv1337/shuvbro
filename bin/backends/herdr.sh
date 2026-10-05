@@ -2818,10 +2818,9 @@ fm_backend_herdr_target_ready() {  # <target>
 
 # fm_backend_herdr_client_ready: parse a recorded target for a client call
 # against the server that already hosts it. Never starts a server.
-# Send and doorbell traffic must not run `herdr server`: that command starts a
-# session server, and when one is already bound it prints "herdr server is
-# already running" and exits 1 even though the steer was delivered.
-# Spawn and other lifecycle paths that need a server still go through
+# Send, doorbell, and capture traffic addresses a pane that already exists, so
+# it must not run `herdr server`; a session whose server is down simply fails
+# the call. Spawn and other lifecycle paths that need a server still go through
 # fm_backend_herdr_target_ready.
 fm_backend_herdr_client_ready() {  # <target>
   fm_backend_herdr_parse_target "$1"
