@@ -438,6 +438,10 @@ test_ship_project_memory_wording() {
     "project-memory contract lost pointer-over-copy guidance"
   assert_grep "follow \`$ROOT/bin/fm-ensure-agents-md.sh\`'s self-governance contract" "$brief" \
     "project-memory contract no longer defers to the ensure helper"
+  assert_grep "only when this task produced durable project-intrinsic knowledge to record in \`AGENTS.md\`." "$brief" \
+    "project-memory contract no longer limits the helper to knowledge this task produced"
+  assert_no_grep "already exists, or if this task produced" "$brief" \
+    "project-memory contract still runs the helper because the files already exist"
   pass "fm-brief.sh: ship project-memory wording carries the AGENTS.md authoring bar"
 }
 

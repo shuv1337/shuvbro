@@ -1621,6 +1621,22 @@ heartbeat_scan_finds_actionable() {
 # Waiting on a background sleep lets the trap run at once; watcher_cleanup reaps
 # the sleep so it cannot keep the arm's inherited output pipes open afterwards.
 WATCH_SLEEP_PID=
+WATCH_EVENT_PID=
+WATCH_EVENT_FILE=
+watch_event_stop() {
+  if [ -n "$WATCH_EVENT_PID" ]; then
+    # Herdr spawns a socket reader below the backend shell. The isolated job
+    # group owns both, so neither can survive or retain the arm's pipes.
+    kill -TERM -- "-$WATCH_EVENT_PID" 2>/dev/null || true
+    wait "$WATCH_EVENT_PID" 2>/dev/null || true
+    WATCH_EVENT_PID=
+  fi
+  if [ -n "$WATCH_EVENT_FILE" ]; then
+    rm -f "$WATCH_EVENT_FILE"
+    WATCH_EVENT_FILE=
+  fi
+}
+
 watch_sleep() {
   sleep "$1" &
   WATCH_SLEEP_PID=$!
@@ -1640,7 +1656,7 @@ watch_sleep() {
 # supervision cycle: the reader is a short-lived subprocess of THIS watcher, not
 # a second watcher, so every guard/beacon/arm/turn-end mechanism is unchanged.
 event_wait_or_sleep() {
-  local w b session first_backend="" first_session="" rec rc
+  local w b session first_backend="" first_session="" rec rc monitor_was_on=0
   local windows=()
   while IFS= read -r w; do
     b=$(window_backend "$w")
@@ -1682,8 +1698,26 @@ event_wait_or_sleep() {
     return
   fi
 
-  rec=$(FM_BACKEND_EVENTS_CAPABILITY_CONFIRMED=1 fm_backend_wait_transition "$first_backend" "$first_session" "$POLL" "$STATE" "${windows[@]}")
-  rc=$?
+  rec=
+  if WATCH_EVENT_FILE=$(mktemp "$STATE/.watch-event-output.XXXXXX"); then
+    # Bash's wait builtin is trap-responsive, unlike a foreground command
+    # substitution. Monitor mode creates a private group; disable it inside
+    # that group so the backend's reader and its children stay in the group.
+    case $- in *m*) monitor_was_on=1 ;; esac
+    set -m
+    (
+      set +m
+      FM_BACKEND_EVENTS_CAPABILITY_CONFIRMED=1 fm_backend_wait_transition "$first_backend" "$first_session" "$POLL" "$STATE" "${windows[@]}"
+    ) > "$WATCH_EVENT_FILE" </dev/null 2>/dev/null &
+    WATCH_EVENT_PID=$!
+    [ "$monitor_was_on" -eq 1 ] || set +m
+    if wait "$WATCH_EVENT_PID" 2>/dev/null; then rc=0; else rc=$?; fi
+    WATCH_EVENT_PID=
+    rec=$(cat "$WATCH_EVENT_FILE")
+    watch_event_stop
+  else
+    rc=2
+  fi
   case "$rc" in
     0)
       _event_cap_fails=0
@@ -1817,6 +1851,8 @@ watcher_cleanup() {
     fi
   fi
   [ -z "${WATCH_SLEEP_PID:-}" ] || kill "$WATCH_SLEEP_PID" 2>/dev/null || true
+  [ -z "${WATCH_SLEEP_PID:-}" ] || wait "$WATCH_SLEEP_PID" 2>/dev/null || true
+  watch_event_stop
   fm_active_check_stop || cleanup_status=1
   fm_check_output_cleanup
   fm_custom_check_snapshot_cleanup
