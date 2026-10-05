@@ -13,10 +13,25 @@
 # sections when the task genuinely deviates (e.g. working an existing external
 # PR instead of shipping a new one).
 # Usage: fm-brief.sh <task-id> <repo-name> --mode <no-mistakes|direct-PR|local-only> [--herdr-lab]
-#        fm-brief.sh <task-id> <repo-name> --scout [--herdr-lab]
+#        fm-brief.sh <task-id> <repo-name> --scout [--herdr-lab] [--allow-write <path>]
 #        fm-brief.sh <task-id> --secondmate {<project>...|--no-projects}
 #   --scout writes the scout contract instead: the deliverable is a report at
 #   data/<task-id>/report.md (no branch, no push, no PR) and the worktree is scratch.
+#   --allow-write <path> is repeatable on scout scaffolds only.
+#   It rewrites the scout stay-inside rule so the worker may also write the
+#   named path and the files inside it, and nothing broader.
+#   A leading ~/ expands to $HOME; every other relative form is refused.
+#   Refuses `/`, $HOME itself, the primary checkout, and any projects/ clone,
+#   including a path inside one, a path that contains one, and this home's
+#   projects/ directory even when no clone is there yet.
+#   Those roots and the allowed path are resolved physically, the same way pwd -P
+#   does, so a symlink or a later .. segment cannot name a broader tree.
+#   A newline, carriage return, or backtick is refused on the flag, on each
+#   symlink target, and on the resolved path.
+#   The primary checkout is this repo's main worktree and the physical path of
+#   the checkout these scripts run from, plus the main worktree of a projects/
+#   clone when that clone is a linked worktree of another checkout.
+#   Ship scaffolds and secondmate charters refuse the flag.
 #   --secondmate writes a persistent secondmate charter. The project list
 #   is cloned into the secondmate home, while the natural-language scope
 #   tells the main firstmate when to route work there; routine churn stays in its own home;
@@ -111,6 +126,340 @@ resolve_directory_input() {
   printf '%s\n' "$resolved"
 }
 
+# --allow-write contract: header comment above is the owner. These helpers only
+# enforce it. The allowed path is walked in order and resolved physically, so a
+# symlink is followed before a later .. segment, matching pwd -P.
+lexical_abs_path() {
+  local input=$1 part out
+  case "$input" in
+    /*) ;;
+    *) echo "error: --allow-write requires an absolute path (got '$input')" >&2; return 1 ;;
+  esac
+  input=${input#/}
+  out=
+  while [ -n "$input" ]; do
+    case "$input" in
+      /*) input=${input#/}; continue ;;
+    esac
+    part=${input%%/*}
+    case "$input" in
+      */*) input=${input#*/} ;;
+      *) input= ;;
+    esac
+    case "$part" in
+      ''|.) continue ;;
+      ..)
+        if [ -n "$out" ]; then
+          out=${out%/*}
+        fi
+        ;;
+      *) out="$out/$part" ;;
+    esac
+  done
+  [ -n "$out" ] || out=/
+  printf '%s\n' "$out"
+}
+
+expand_allow_write_input() {
+  local input=$1 home rest tilde prefix
+  # Literal tilde, not this shell's HOME. The brief names the expanded path.
+  # shellcheck disable=SC2088
+  tilde='~'
+  prefix="$tilde/"
+  home=${HOME:-}
+  if [ "$input" = "$tilde" ]; then
+    [ -n "$home" ] || { echo "error: --allow-write cannot expand '~' because HOME is unset" >&2; return 1; }
+    printf '%s\n' "$home"
+    return 0
+  fi
+  rest=${input#"$prefix"}
+  if [ "$rest" != "$input" ]; then
+    [ -n "$home" ] || { echo "error: --allow-write cannot expand '~' because HOME is unset" >&2; return 1; }
+    home=${home%/}
+    printf '%s\n' "$home/$rest"
+    return 0
+  fi
+  case "$input" in
+    /*) printf '%s\n' "$input" ;;
+    *) echo "error: --allow-write requires an absolute path (got '$input')" >&2; return 1 ;;
+  esac
+}
+
+allow_write_text_is_unsafe() {
+  # $'\n' cannot be captured with command substitution; that strips the newline
+  # and the pattern then matches every path.
+  case "$1" in
+    *$'\n'*|*$'\r'*|*$'\140'*) return 0 ;;
+  esac
+  return 1
+}
+
+refuse_unsafe_allow_write_text() {
+  if allow_write_text_is_unsafe "$1"; then
+    echo "error: --allow-write path contains a character the brief cannot quote safely" >&2
+    return 1
+  fi
+}
+
+readlink_exact() {
+  local target
+  # Preserve a trailing newline that command substitution would otherwise strip.
+  target=$(readlink "$1"; printf x) || return 1
+  printf '%s' "${target%x}"
+}
+
+canonicalize_allow_path() {
+  local input=$1 depth=${2:-0} out part combined target parent
+  [ "$depth" -lt 40 ] || { echo "error: --allow-write path has a symlink loop" >&2; return 1; }
+  case "$input" in
+    /*) ;;
+    *) echo "error: --allow-write requires an absolute path (got '$input')" >&2; return 1 ;;
+  esac
+  refuse_unsafe_allow_write_text "$input" || return 1
+  input=${input#/}
+  out=
+  while [ -n "$input" ]; do
+    case "$input" in
+      /*) input=${input#/}; continue ;;
+    esac
+    part=${input%%/*}
+    case "$input" in
+      */*) input=${input#*/} ;;
+      *) input= ;;
+    esac
+    case "$part" in
+      ''|.) continue ;;
+      ..)
+        if [ -n "$out" ] && [ -d "$out" ]; then
+          out=$(CDPATH='' cd -P -- "$out" && pwd -P) || {
+            echo "error: --allow-write path cannot be resolved: $out" >&2
+            return 1
+          }
+        fi
+        if [ -n "$out" ]; then
+          out=${out%/*}
+          [ -n "$out" ] || out=/
+        fi
+        continue
+        ;;
+    esac
+    if [ -z "$out" ]; then
+      combined="/$part"
+    else
+      combined="$out/$part"
+    fi
+    if [ -L "$combined" ]; then
+      target=$(readlink_exact "$combined") || {
+        echo "error: --allow-write path cannot be resolved: $combined" >&2
+        return 1
+      }
+      refuse_unsafe_allow_write_text "$target" || return 1
+      case "$target" in
+        /*) ;;
+        *)
+          if [ -n "$out" ]; then
+            target="$out/$target"
+          else
+            target="/$target"
+          fi
+          ;;
+      esac
+      refuse_unsafe_allow_write_text "$target" || return 1
+      if [ -n "$input" ]; then
+        target="$target/$input"
+      fi
+      canonicalize_allow_path "$target" "$((depth + 1))" || return 1
+      return 0
+    fi
+    out=$combined
+  done
+  if [ -n "$out" ] && [ -d "$out" ]; then
+    out=$(CDPATH='' cd -P -- "$out" && pwd -P) || {
+      echo "error: --allow-write path cannot be resolved: $out" >&2
+      return 1
+    }
+  elif [ -n "$out" ] && [ -e "$out" ]; then
+    parent=$(CDPATH='' cd -P -- "$(dirname "$out")" && pwd -P) || {
+      echo "error: --allow-write path cannot be resolved: $out" >&2
+      return 1
+    }
+    if [ "$parent" = / ]; then
+      out="/$(basename "$out")"
+    else
+      out="$parent/$(basename "$out")"
+    fi
+  fi
+  [ -n "$out" ] || out=/
+  refuse_unsafe_allow_write_text "$out" || return 1
+  printf '%s\n' "$out"
+}
+
+allow_write_paths_overlap() {
+  local left=$1 right=$2
+  [ -n "$left" ] && [ -n "$right" ] || return 1
+  [ "$left" = "$right" ] && return 0
+  case "$left" in
+    "$right"/*) return 0 ;;
+  esac
+  case "$right" in
+    "$left"/*) return 0 ;;
+  esac
+  return 1
+}
+
+add_forbidden_write_root() {
+  local kind=$1 path=$2 i
+  [ -n "$path" ] || return 0
+  if [ "${#FORBIDDEN_WRITE_PATH[@]}" -gt 0 ]; then
+    i=0
+    while [ "$i" -lt "${#FORBIDDEN_WRITE_PATH[@]}" ]; do
+      if [ "${FORBIDDEN_WRITE_PATH[$i]}" = "$path" ]; then
+        return 0
+      fi
+      i=$((i + 1))
+    done
+  fi
+  FORBIDDEN_WRITE_KIND+=("$kind")
+  FORBIDDEN_WRITE_PATH+=("$path")
+}
+
+canonical_dir() {
+  local dir=$1
+  [ -d "$dir" ] || return 1
+  CDPATH='' cd -P -- "$dir" && pwd -P
+}
+
+git_primary_worktree() {
+  local repo=$1 line
+  line=$(git -C "$repo" worktree list --porcelain 2>/dev/null | awk '/^worktree /{print substr($0, 10); exit}') || line=
+  [ -n "$line" ] || return 1
+  canonical_dir "$line" || return 1
+}
+
+collect_forbidden_write_roots() {
+  local primary projects clone resolved main home_phys root_phys
+  FORBIDDEN_WRITE_KIND=()
+  FORBIDDEN_WRITE_PATH=()
+  root_phys=$(canonical_dir "$FM_ROOT" || true)
+  add_forbidden_write_root primary "$root_phys"
+  primary=
+  if [ -d "$FM_ROOT" ]; then
+    primary=$(git_primary_worktree "$FM_ROOT" || true)
+  fi
+  if [ -z "$primary" ]; then
+    primary=$root_phys
+  fi
+  add_forbidden_write_root primary "$primary"
+  home_phys=$(canonical_dir "$FM_HOME" || true)
+  if [ -n "$home_phys" ] && [ -d "$home_phys/projects" ]; then
+    projects=$(canonical_dir "$home_phys/projects" || true)
+  elif [ -n "$home_phys" ]; then
+    projects="$home_phys/projects"
+  else
+    projects=$(lexical_abs_path "$FM_HOME/projects" || true)
+  fi
+  add_forbidden_write_root projects "$projects"
+  if [ -n "$projects" ] && [ -d "$projects" ]; then
+    while IFS= read -r clone; do
+      [ -n "$clone" ] || continue
+      [ -d "$clone" ] || continue
+      resolved=$(canonical_dir "$clone" || true)
+      add_forbidden_write_root projects "$resolved"
+      main=$(git_primary_worktree "$clone" || true)
+      add_forbidden_write_root primary "$main"
+    done < <(find "$projects" -mindepth 1 -maxdepth 1 \( -type d -o -type l \) -print 2>/dev/null || true)
+  fi
+}
+
+refuse_allow_write_path() {
+  local canon=$1 home_canon i matched
+  [ "$canon" != / ] || { echo "error: --allow-write refuses '/'" >&2; return 1; }
+  home_canon=
+  if [ -n "${HOME:-}" ]; then
+    if [ -d "$HOME" ]; then
+      home_canon=$(canonical_dir "$HOME" || true)
+    fi
+    if [ -z "$home_canon" ]; then
+      home_canon=$(lexical_abs_path "$HOME" || true)
+    fi
+  fi
+  if [ -n "$home_canon" ] && [ "$canon" = "$home_canon" ]; then
+    echo "error: --allow-write refuses the home directory itself" >&2
+    return 1
+  fi
+  matched=
+  if [ "${#FORBIDDEN_WRITE_PATH[@]}" -gt 0 ]; then
+    i=0
+    while [ "$i" -lt "${#FORBIDDEN_WRITE_PATH[@]}" ]; do
+      if allow_write_paths_overlap "$canon" "${FORBIDDEN_WRITE_PATH[$i]}"; then
+        if [ "${FORBIDDEN_WRITE_KIND[$i]}" = primary ]; then
+          echo "error: --allow-write refuses the primary checkout or a path that contains it" >&2
+          return 1
+        fi
+        matched=projects
+      fi
+      i=$((i + 1))
+    done
+  fi
+  if [ -n "$matched" ]; then
+    echo "error: --allow-write refuses a projects/ clone or a path that contains one" >&2
+    return 1
+  fi
+}
+
+append_allow_write_canon() {
+  local path=$1 i
+  if [ "${#ALLOW_WRITE_CANON[@]}" -gt 0 ]; then
+    i=0
+    while [ "$i" -lt "${#ALLOW_WRITE_CANON[@]}" ]; do
+      [ "${ALLOW_WRITE_CANON[$i]}" = "$path" ] && return 0
+      i=$((i + 1))
+    done
+  fi
+  ALLOW_WRITE_CANON+=("$path")
+}
+
+validate_allow_write() {
+  local raw expanded canon i
+  ALLOW_WRITE_CANON=()
+  if [ "${#ALLOW_WRITE[@]}" -eq 0 ]; then
+    return 0
+  fi
+  if [ "$KIND" != scout ]; then
+    echo "error: --allow-write applies only to scout briefs; ship and secondmate scaffolds refuse it" >&2
+    return 1
+  fi
+  collect_forbidden_write_roots
+  i=0
+  while [ "$i" -lt "${#ALLOW_WRITE[@]}" ]; do
+    raw=${ALLOW_WRITE[$i]}
+    i=$((i + 1))
+    [ -n "$raw" ] || { echo "error: --allow-write requires an absolute path (got '')" >&2; return 1; }
+    refuse_unsafe_allow_write_text "$raw" || return 1
+    expanded=$(expand_allow_write_input "$raw") || return 1
+    refuse_unsafe_allow_write_text "$expanded" || return 1
+    canon=$(canonicalize_allow_path "$expanded") || return 1
+    refuse_unsafe_allow_write_text "$canon" || return 1
+    refuse_allow_write_path "$canon" || return 1
+    append_allow_write_canon "$canon"
+  done
+}
+
+format_stay_inside_rule() {
+  local path i
+  if [ "${#ALLOW_WRITE_CANON[@]}" -eq 0 ]; then
+    printf '%s\n' "2. Stay inside this worktree; the only files you may write outside it are the report and the status file below."
+    return 0
+  fi
+  printf '%s\n' "$FM_BRIEF_ALLOW_WRITE_RULE"
+  i=0
+  while [ "$i" -lt "${#ALLOW_WRITE_CANON[@]}" ]; do
+    path=${ALLOW_WRITE_CANON[$i]}
+    printf '%s\n' "   - \`$path\`"
+    i=$((i + 1))
+  done
+}
+
 FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 FM_HOME=$(resolve_directory_input FM_HOME "${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}") || exit 1
 if [ -n "${FM_DATA_OVERRIDE:-}" ]; then
@@ -128,6 +477,10 @@ HERDR_LAB=0
 NO_PROJECTS=0
 MODE=
 MODE_SET=0
+ALLOW_WRITE=()
+ALLOW_WRITE_CANON=()
+FORBIDDEN_WRITE_KIND=()
+FORBIDDEN_WRITE_PATH=()
 POS=()
 want_value=
 for a in "$@"; do
@@ -137,6 +490,7 @@ for a in "$@"; do
     esac
     case "$want_value" in
       mode) MODE=$a; MODE_SET=1 ;;
+      allow-write) ALLOW_WRITE+=("$a") ;;
       *) echo "error: internal parser state for --$want_value" >&2; exit 1 ;;
     esac
     want_value=
@@ -149,6 +503,8 @@ for a in "$@"; do
     --no-projects) NO_PROJECTS=1 ;;
     --mode) want_value=mode ;;
     --mode=*) MODE=${a#--mode=}; MODE_SET=1 ;;
+    --allow-write) want_value=allow-write ;;
+    --allow-write=*) ALLOW_WRITE+=("${a#--allow-write=}") ;;
     # yolo never reaches the worker: it is firstmate's merge authority, not a
     # brief input. Refuse it loudly so it is never silently dropped here and then
     # believed to have been recorded.
@@ -187,6 +543,8 @@ if [ "$NO_PROJECTS" -eq 1 ] && [ "$KIND" != secondmate ]; then
   echo "error: --no-projects applies only to --secondmate charters" >&2
   exit 1
 fi
+
+validate_allow_write || exit 1
 
 BRIEF="$DATA/$ID/brief.md"
 [ -e "$BRIEF" ] && { echo "error: $BRIEF already exists" >&2; exit 1; }
@@ -377,6 +735,7 @@ TASK_SECTION=${TASK_SECTION%$'\n'}
 ROLE_INTRO=$(fm_brief_agent_intro "$KIND") || exit 1
 
 if [ "$KIND" = scout ]; then
+STAY_INSIDE_RULE=$(format_stay_inside_rule) || exit 1
 cat > "$BRIEF" <<EOF
 $ROLE_INTRO
 
@@ -392,7 +751,7 @@ The report is the only thing that survives, so anything worth keeping must be in
 
 # Rules
 1. Never push to any remote and never open a PR.
-2. Stay inside this worktree; the only files you may write outside it are the report and the status file below.
+$STAY_INSIDE_RULE
 3. Use gh-axi for GitHub operations and chrome-devtools-axi for browser operations.
 4. Report status by appending one line:
    \`echo "{state}: {one short line}" >> $STATUS_FILE\`

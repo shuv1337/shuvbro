@@ -397,6 +397,37 @@ STUB
   pass "fm-promote: a promoted worker receives the same mode-specific delivery contract a briefed one does"
 }
 
+# --allow-write is a scout-only allowance. A promoted scout keeps its original
+# brief's safety rules, so the ship instructions must revoke the allowance
+# explicitly, and only when the scout brief actually carried one.
+test_promotion_revokes_a_scout_allow_write_allowance() {
+  local home id out allowed instructions revoke
+  home="$TMP_ROOT/promote-allow/home"
+  allowed="$TMP_ROOT/promote-allow/outside"
+  mkdir -p "$home/state" "$allowed"
+  revoke="That allowance was scout-only and is revoked now: stay inside this worktree; modify nothing outside it."
+  for id in promote-allow-on promote-allow-off; do
+    printf 'window=fm-%s\nkind=scout\nworktree=/tmp/wt\n' "$id" > "$home/state/$id.meta"
+    if [ "$id" = promote-allow-on ]; then
+      FM_HOME="$home" "$BRIEF" "$id" fixture-project --scout --allow-write "$allowed" >/dev/null 2>&1 \
+        || fail "allow-write scout brief generation should succeed"
+    else
+      FM_HOME="$home" "$BRIEF" "$id" fixture-project --scout >/dev/null 2>&1 \
+        || fail "scout brief generation should succeed"
+    fi
+    fill_brief_subsections "$home/data/$id/brief.md" \
+      "Install the tool locally." "Build and install it."
+    out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$PROMOTE" "$id" --mode local-only --yolo off 2>&1) \
+      || fail "$id: promotion should succeed: $out"
+  done
+  instructions="$home/data/promote-allow-on/ship-instructions.md"
+  assert_grep "$revoke" "$instructions" \
+    "a promoted allow-write scout kept its outside-write allowance"
+  assert_no_grep "$revoke" "$home/data/promote-allow-off/ship-instructions.md" \
+    "a promoted scout without an allowance received a revocation"
+  pass "fm-promote: a promoted allow-write scout has its outside-write allowance revoked"
+}
+
 # The registry parser survives for the mechanical consumers only. It accepts the
 # conditional policy, maps it to its most rigorous leg for them, and exposes the
 # raw annotation for the one caller that must tell a policy from a flat mode.
@@ -799,6 +830,7 @@ test_scout_records_no_delivery_posture
 test_promote_requires_and_records_the_delivery_contract
 test_promote_refuses_a_symlinked_task_record
 test_promotion_delivers_the_real_definition_of_done
+test_promotion_revokes_a_scout_allow_write_allowance
 test_project_mode_maps_the_conditional_policy
 test_spawn_and_promote_require_filled_task_subsections
 echo "# all fm-task-delivery tests passed"

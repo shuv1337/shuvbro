@@ -3466,11 +3466,12 @@ test_capture_preserves_pane_read_failure() {
     bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_capture default:w1:p2 2' "$ROOT" 2>&1 )
   status=$?
   [ "$status" -ne 0 ] || fail "capture should fail when pane read fails, got output '$out'"
-  assert_contains "$(cat "$log")" "HERDR_SESSION=default"$'\x1f''status'$'\x1f''--json' \
-    "capture did not ensure the herdr server before reading the pane"
+  if grep -q $'\x1f''server'$'\x1f' "$log" || grep -q $'\x1f''status'$'\x1f''--json' "$log"; then
+    fail "capture must read the existing server and must not start or probe-start one:"$'\n'"$(cat "$log")"
+  fi
   assert_contains "$(cat "$log")" $'\x1f''pane'$'\x1f''read'$'\x1f''w1:p2' \
     "capture did not try to read the requested pane"
-  pass "fm_backend_herdr_capture: ensures the session and preserves pane read failure"
+  pass "fm_backend_herdr_capture: preserves pane read failure without starting a server"
 }
 
 test_send_key_normalizes_and_targets_pane() {
@@ -4388,6 +4389,169 @@ test_send_text_submit_slow_transition_within_one_enter_needs_no_extra_enter() {
   pass "fm_backend_herdr_send_text_submit: a slow transition landing on a later sample within one Enter's budget is confirmed WITHOUT sending a needless extra Enter"
 }
 
+# Pane commands fail until `herdr server` has run. A watch-shaped capture
+# (fm_backend_capture, what the watcher and peek use) must start that server
+# once and then read. Send and doorbell stay on the no-start path.
+test_supervision_capture_starts_a_down_server_once() {
+  local dir log fb out status server_count
+  dir="$TMP_ROOT/watch-capture-ensure"
+  log="$dir/herdr.log"
+  mkdir -p "$dir/fakebin"
+  : > "$log"
+  cat > "$dir/fakebin/herdr" <<'SH'
+#!/usr/bin/env bash
+set -u
+printf '%s\n' "$*" >> "$FM_HERDR_LOG"
+case "${1:-}" in
+  status)
+    if [ -e "$FM_HERDR_SERVER_MARKER" ]; then
+      printf '%s\n' '{"server":{"running":true}}'
+    else
+      printf '%s\n' '{"server":{"running":false}}'
+    fi
+    exit 0
+    ;;
+  server)
+    : > "$FM_HERDR_SERVER_MARKER"
+    exit 0
+    ;;
+  pane)
+    if [ ! -e "$FM_HERDR_SERVER_MARKER" ]; then
+      echo 'error: herdr server is not running' >&2
+      exit 1
+    fi
+    case "${2:-}" in
+      read) printf 'watched pane\n' ;;
+      send-keys|send-text) ;;
+    esac
+    exit 0
+    ;;
+esac
+exit 0
+SH
+  cat > "$dir/fakebin/sleep" <<'SH'
+#!/usr/bin/env bash
+exit 0
+SH
+  chmod +x "$dir/fakebin/herdr" "$dir/fakebin/sleep"
+  fb="$dir/fakebin"
+  out=$(PATH="$fb:$PATH" FM_HERDR_LOG="$log" FM_HERDR_SERVER_MARKER="$dir/marker" \
+    bash -c '. "$0/bin/fm-backend.sh"; fm_backend_capture herdr default:w1:p2 40' "$ROOT")
+  [ "$out" = "watched pane" ] || fail "a watch-shaped capture should read the pane after starting the server, got '$out'"
+  server_count=$(grep -c '^server\( \|$\)' "$log" || true)
+  [ "$server_count" -eq 1 ] || fail "supervision capture should start the down server once, started $server_count time(s):"$'\n'"$(cat "$log")"
+  : > "$log"
+  out=$(PATH="$fb:$PATH" FM_HERDR_LOG="$log" FM_HERDR_SERVER_MARKER="$dir/marker" \
+    bash -c '. "$0/bin/fm-backend.sh"; fm_backend_capture herdr default:w1:p2 40' "$ROOT")
+  [ "$out" = "watched pane" ] || fail "a second capture should still read the pane, got '$out'"
+  if grep -q '^server\( \|$\)' "$log"; then
+    fail "a second capture must reuse the running server:"$'\n'"$(cat "$log")"
+  fi
+  : > "$log"
+  rm -f "$dir/marker"
+  PATH="$fb:$PATH" FM_HERDR_LOG="$log" FM_HERDR_SERVER_MARKER="$dir/marker" \
+    bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_send_key default:w1:p2 Enter' "$ROOT"
+  status=$?
+  [ "$status" -ne 0 ] || fail "send-key must fail while the server is down instead of starting it"
+  if grep -q '^server\( \|$\)' "$log"; then
+    fail "send-key started a herdr server:"$'\n'"$(cat "$log")"
+  fi
+  pass "herdr supervision capture starts a down server once; send-key never does"
+}
+
+test_peek_names_a_down_herdr_server() {
+  local dir state log fb err rc
+  dir="$TMP_ROOT/peek-down-server"
+  state="$dir/state"
+  log="$dir/herdr.log"
+  err="$dir/peek.err"
+  mkdir -p "$state" "$dir/fakebin"
+  : > "$log"
+  fm_write_meta "$state/t1.meta" "window=default:w1:p2" "backend=herdr" "kind=ship" "harness=codex"
+  touch "$state/.last-watcher-beat"
+  cat > "$dir/fakebin/herdr" <<'SH'
+#!/usr/bin/env bash
+set -u
+printf '%s\n' "$*" >> "$FM_HERDR_LOG"
+case "${1:-}" in
+  status) printf '%s\n' '{"server":{"running":false}}'; exit 0 ;;
+  server) echo 'error: herdr server is already running' >&2; exit 1 ;;
+  pane) echo 'error: herdr server is not running' >&2; exit 1 ;;
+esac
+exit 0
+SH
+  cat > "$dir/fakebin/sleep" <<'SH'
+#!/usr/bin/env bash
+exit 0
+SH
+  chmod +x "$dir/fakebin/herdr" "$dir/fakebin/sleep"
+  fb="$dir/fakebin"
+  PATH="$fb:$PATH" FM_HOME="$dir" FM_ROOT_OVERRIDE="$dir" FM_STATE_OVERRIDE="$state" \
+    FM_HERDR_LOG="$log" \
+    "$ROOT/bin/fm-peek.sh" t1 40 >/dev/null 2>"$err"
+  rc=$?
+  [ "$rc" -ne 0 ] || fail "peek should fail when the herdr server cannot be started"
+  [ "$(grep -c '^error:' "$err")" -eq 1 ] || fail "peek should print one error line when the session server is down:"$'\n'"$(cat "$err")"
+  grep -q "^error: herdr server for session 'default' did not report running" "$err" || fail "peek's error should report the server did not come up:"$'\n'"$(cat "$err")"
+  pass "fm-peek: a down herdr session server is a one-line error"
+}
+
+# A status read that does not report the server running must not make a send
+# or doorbell launch `herdr server`.
+test_send_does_not_start_server_when_status_reports_down() {
+  local dir state log fb err rc
+  dir="$TMP_ROOT/send-no-server-start"
+  state="$dir/state"
+  log="$dir/herdr.log"
+  err="$dir/send.err"
+  mkdir -p "$state" "$dir/fakebin"
+  : > "$log"
+  fm_write_meta "$state/t1.meta" "window=default:w1:p2" "backend=herdr" "kind=ship" "harness=codex"
+  cat > "$dir/fakebin/herdr" <<'SH'
+#!/usr/bin/env bash
+set -u
+printf '%s\n' "$*" >> "$FM_HERDR_LOG"
+case "${1:-}" in
+  status)
+    printf '%s\n' '{"server":{"running":false}}'
+    exit 0
+    ;;
+  pane)
+    case "${2:-}" in
+      get) printf '{"result":{"pane":{"pane_id":"%s"}}}\n' "${3:-}" ;;
+      read) printf '\n' ;;
+    esac
+    exit 0
+    ;;
+  agent)
+    printf '%s\n' '{"result":{"agent":{"agent":"codex","agent_status":"idle"}}}'
+    exit 0
+    ;;
+esac
+exit 0
+SH
+  cat > "$dir/fakebin/sleep" <<'SH'
+#!/usr/bin/env bash
+exit 0
+SH
+  chmod +x "$dir/fakebin/herdr" "$dir/fakebin/sleep"
+  fb="$dir/fakebin"
+  PATH="$fb:$PATH" FM_HOME="$dir" FM_ROOT_OVERRIDE="$dir" FM_STATE_OVERRIDE="$state" \
+    FM_HERDR_LOG="$log" FM_SEND_SETTLE=0 FM_BACKEND_HERDR_SUBMIT_MIN_SLEEP=0 \
+    FM_BACKEND_HERDR_SUBMIT_POLLS=1 \
+    "$ROOT/bin/fm-send.sh" t1 "please continue" >/dev/null 2>"$err"
+  rc=$?
+  expect_code 0 "$rc" "a delivered herdr inbox steer must succeed even when status does not report the server running"$'\n'"$(cat "$err")"
+  grep -qF 'please continue' "$state/t1.inbox/001.msg" \
+    || fail "the steer was not recorded in the inbox"
+  grep -q 'pane send-text' "$log" \
+    || fail "the doorbell was not sent, so this did not exercise the herdr send path:"$'\n'"$(cat "$log")"
+  if grep -q '^server\( \|$\)' "$log"; then
+    fail "fm-send started a herdr server:"$'\n'"$(cat "$log")"$'\n'"$(cat "$err")"
+  fi
+  pass "fm-send herdr: a send and doorbell never run herdr server, even when status reports the server down"
+}
+
 test_send_text_submit_send_failed() {
   local dir log resp fb out
   dir="$TMP_ROOT/submit-fail"; mkdir -p "$dir/responses"; log="$dir/log"; resp="$dir/responses"; : > "$log"
@@ -5204,6 +5368,9 @@ test_send_text_submit_confirms_despite_codex_idle_tip_composer
 test_composer_state_codex_dynamic_idle_tip_reads_empty_when_faint
 test_composer_state_guard_still_refuses_real_pending_text_after_submit_confirmation_change
 test_send_text_submit_slow_transition_within_one_enter_needs_no_extra_enter
+test_supervision_capture_starts_a_down_server_once
+test_peek_names_a_down_herdr_server
+test_send_does_not_start_server_when_status_reports_down
 test_send_text_submit_send_failed
 test_send_text_submit_unknown_on_capture_failure
 test_send_text_submit_unknown_on_composer_capture_failure
