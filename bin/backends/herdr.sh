@@ -2816,6 +2816,17 @@ fm_backend_herdr_target_ready() {  # <target>
   fm_backend_herdr_server_ensure "$FM_BACKEND_HERDR_SESSION" || return 1
 }
 
+# fm_backend_herdr_client_ready: parse a recorded target for a client call
+# against the server that already hosts it. Never starts a server.
+# Send and doorbell traffic must not run `herdr server`: that command starts a
+# session server, and when one is already bound it prints "herdr server is
+# already running" and exits 1 even though the steer was delivered.
+# Spawn and other lifecycle paths that need a server still go through
+# fm_backend_herdr_target_ready.
+fm_backend_herdr_client_ready() {  # <target>
+  fm_backend_herdr_parse_target "$1"
+}
+
 # fm_backend_herdr_current_path: the live FOREGROUND process's cwd, or empty on
 # any error. Mirrors tmux's pane_current_path poll used for worktree-path
 # discovery after `treehouse get`.
@@ -2848,7 +2859,7 @@ fm_backend_herdr_send_text_line() {  # <target> <text>
 # Verified: `pane send-text` does NOT auto-submit (contrary to the addendum's
 # original guess); it behaves exactly like tmux's `-l` literal send.
 fm_backend_herdr_send_literal() {  # <target> <text>
-  fm_backend_herdr_target_ready "$1" || return 1
+  fm_backend_herdr_client_ready "$1" || return 1
   fm_backend_herdr_cli "$FM_BACKEND_HERDR_SESSION" pane send-text "$FM_BACKEND_HERDR_PANE" "$2" >/dev/null 2>&1
 }
 
@@ -2872,7 +2883,7 @@ fm_backend_herdr_normalize_key() {  # <key>
 # fm_backend_herdr_send_key: one named special key. Mirrors fm-send.sh's --key
 # path (tmux's `send-keys -t T key`).
 fm_backend_herdr_send_key() {  # <target> <key>
-  fm_backend_herdr_target_ready "$1" || return 1
+  fm_backend_herdr_client_ready "$1" || return 1
   local key
   key=$(fm_backend_herdr_normalize_key "$2")
   fm_backend_herdr_cli "$FM_BACKEND_HERDR_SESSION" pane send-keys "$FM_BACKEND_HERDR_PANE" "$key" >/dev/null 2>&1
@@ -2892,7 +2903,7 @@ fm_backend_herdr_send_key() {  # <target> <key>
 # always request a generous fetch far above any realistic viewport height, then
 # trim to the caller's requested bound ourselves with `tail`.
 fm_backend_herdr_capture() {  # <target> <lines>
-  fm_backend_herdr_target_ready "$1" || return 1
+  fm_backend_herdr_client_ready "$1" || return 1
   local lines=${2:-200} fetch out
   case "$lines" in ''|*[!0-9]*) lines=200 ;; esac
   fetch=$lines
@@ -2902,7 +2913,7 @@ fm_backend_herdr_capture() {  # <target> <lines>
 }
 
 fm_backend_herdr_capture_ansi() {  # <target> <lines>
-  fm_backend_herdr_target_ready "$1" || return 1
+  fm_backend_herdr_client_ready "$1" || return 1
   local lines=${2:-200} fetch out
   case "$lines" in ''|*[!0-9]*) lines=200 ;; esac
   fetch=$lines
@@ -3285,13 +3296,13 @@ fm_backend_herdr_classify_submit_agent_status() {  # <raw-agent_status>
 
 # fm_backend_herdr_agent_status_raw: one `agent get` read, echoing the raw
 # agent_status string (working/idle/done/blocked/...), or empty on any
-# failure. Deliberately skips fm_backend_herdr_target_ready's server-ensure
-# round trip (an extra `status --json` call) that fm_backend_herdr_busy_state
-# pays on every call: fm_backend_herdr_wait_for_working polls this in a tight
-# loop right after a caller has already parsed the target and confirmed the
-# server is live (e.g. fm_backend_herdr_send_text_submit, immediately after a
-# successful send-text), so re-checking server liveness on every poll would
-# only add latency without adding safety.
+# failure. Deliberately skips a server-liveness round trip (an extra
+# `status --json` call) that fm_backend_herdr_busy_state pays on every call:
+# fm_backend_herdr_wait_for_working polls this in a tight loop right after a
+# caller has already parsed the target and is talking to the existing server
+# (e.g. fm_backend_herdr_send_text_submit, immediately after a successful
+# send-text), so re-checking server liveness on every poll would only add
+# latency without adding safety. This read must not start a server.
 fm_backend_herdr_agent_status_raw() {  # <session> <pane_id>
   local session=$1 pane_id=$2 out
   out=$(fm_backend_herdr_cli "$session" agent get "$pane_id" 2>/dev/null) || { printf ''; return 0; }
