@@ -135,6 +135,7 @@ test_notice_episodes() {
 test_notice_parked_wake_only_when_stuck() {
   tui_case notice-parked 1
   local out="$CASE/out.json" steps state="$HOME_DIR/state"
+  # shellcheck disable=SC2016 # Expanded later by the isolated model shell.
   local strip='for f in '"$state"'/.opencode-v2-admissions/*/msg_*.json; do [ "$(jq -r .phase "$f")" = admitted ] || continue; jq -c "del(.drain)" "$f" > "$f.strip" && chmod 600 "$f.strip" && mv "$f.strip" "$f" && echo stripped; done'
   steps=$(jq -nc --argjson a "$(owned_and_armed "$(lock_step)")" --arg s "$state" --arg strip "$strip" --argjson e "$(lead_env_with_path)" '
     $a + [
