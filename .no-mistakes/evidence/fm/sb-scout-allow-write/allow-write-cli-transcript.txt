@@ -1,19 +1,17 @@
-# scratch=/tmp/tmp.pWM1rfJH3F  HOME=/tmp/tmp.pWM1rfJH3F/uh  FM_HOME=/tmp/tmp.pWM1rfJH3F/home  primary=/tmp/tmp.pWM1rfJH3F/primary
+=== S1: scout brief allowing ~/.cargo/bin and ~/Videos
 
-## 1. Happy path: scout with install + export paths
-$ bin/fm-brief.sh cargo-install shuvbro --scout --allow-write ~/.cargo/bin --allow-write /tmp/tmp.pWM1rfJH3F/uh/Videos/export
-scaffolded: /tmp/tmp.pWM1rfJH3F/home/data/cargo-install/brief.md (scout; replace {TASK} and {FIRSTMATE_SPEC})
+$ /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M46Y3K47KABXMD6Q51HDPRFP/bin/fm-brief.sh install-tool widget --scout --allow-write ~/.cargo/bin --allow-write /tmp/tmp.XVbCXEIW9C/userhome/Videos/export
+scaffolded: /tmp/tmp.XVbCXEIW9C/fmhome/data/install-tool/brief.md (scout; replace {TASK} and {FIRSTMATE_SPEC})
 [exit 0]
-
---- rendered Rules section of data/cargo-install/brief.md ---
+--- # Rules section of generated brief:
 # Rules
 1. Never push to any remote and never open a PR.
 2. Stay inside this worktree; the only files you may write outside it are the report and the status file below, plus these exact paths and the files inside them, and nothing broader:
-   - `/tmp/tmp.pWM1rfJH3F/uh/.cargo/bin`
-   - `/tmp/tmp.pWM1rfJH3F/uh/Videos/export`
+   - `/tmp/tmp.XVbCXEIW9C/userhome/.cargo/bin`
+   - `/tmp/tmp.XVbCXEIW9C/userhome/Videos/export`
 3. Use gh-axi for GitHub operations and chrome-devtools-axi for browser operations.
 4. Report status by appending one line:
-   `echo "{state}: {one short line}" >> '/tmp/tmp.pWM1rfJH3F/home/state/cargo-install.status'`
+   `echo "{state}: {one short line}" >> '/tmp/tmp.XVbCXEIW9C/fmhome/state/install-tool.status'`
    States: working, needs-decision, blocked, paused, done, failed.
    Each append wakes firstmate, so report sparingly: only phase changes a supervisor
    would act on and the needs-decision/blocked/paused/done/failed states. No step-by-step
@@ -26,58 +24,95 @@ scaffolded: /tmp/tmp.pWM1rfJH3F/home/data/cargo-install/brief.md (scout; replace
    firstmate then leaves your idle pane alone and rechecks it on a long cadence instead of
    treating it as a possible wedge. When you know when the wait clears, say so in the line with
    `until <YYYY-MM-DDTHH:MMZ>` (UTC) and firstmate rechecks at that time instead.
-   Use `blocked:` when you are stuck and need help.
-5. If you hit the same obstacle twice, append `blocked: {why}` and stop; firstmate will help.
 
-## 2. Default scout (no flag) unchanged
-$ bin/fm-brief.sh plain-scout shuvbro --scout
-scaffolded: /tmp/tmp.pWM1rfJH3F/home/data/plain-scout/brief.md (scout; replace {TASK} and {FIRSTMATE_SPEC})
+=== S2: default scout brief (no flag) rule 2
+
+$ /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M46Y3K47KABXMD6Q51HDPRFP/bin/fm-brief.sh plain-scout widget --scout
+scaffolded: /tmp/tmp.XVbCXEIW9C/fmhome/data/plain-scout/brief.md (scout; replace {TASK} and {FIRSTMATE_SPEC})
 [exit 0]
-
 23:2. Stay inside this worktree; the only files you may write outside it are the report and the status file below.
 
-## 3. Adversarial refusals
-$ bin/fm-brief.sh r1 shuvbro --scout --allow-write /
+=== S3: refusals of broad roots
+
+$ /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M46Y3K47KABXMD6Q51HDPRFP/bin/fm-brief.sh refuse-x widget --scout --allow-write /
 error: --allow-write refuses '/'
 [exit 1]
 
-$ bin/fm-brief.sh r2 shuvbro --scout --allow-write ~
+$ /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M46Y3K47KABXMD6Q51HDPRFP/bin/fm-brief.sh refuse-x widget --scout --allow-write /tmp/tmp.XVbCXEIW9C/userhome
 error: --allow-write refuses the home directory itself
 [exit 1]
 
-$ bin/fm-brief.sh r3 shuvbro --scout --allow-write relative/dir
-error: --allow-write requires an absolute path (got 'relative/dir')
+$ /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M46Y3K47KABXMD6Q51HDPRFP/bin/fm-brief.sh refuse-x widget --scout --allow-write ~
+error: --allow-write refuses the home directory itself
 [exit 1]
 
-$ bin/fm-brief.sh r4 shuvbro --scout --allow-write /tmp/tmp.pWM1rfJH3F/primary/src
+$ /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M46Y3K47KABXMD6Q51HDPRFP/bin/fm-brief.sh refuse-x widget --scout --allow-write /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M46Y3K47KABXMD6Q51HDPRFP
 error: --allow-write refuses the primary checkout or a path that contains it
 [exit 1]
 
-$ bin/fm-brief.sh r5 shuvbro --scout --allow-write /tmp/tmp.pWM1rfJH3F/uh/Videos/../../primary
+$ /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M46Y3K47KABXMD6Q51HDPRFP/bin/fm-brief.sh refuse-x widget --scout --allow-write /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M46Y3K47KABXMD6Q51HDPRFP/bin
 error: --allow-write refuses the primary checkout or a path that contains it
 [exit 1]
 
-$ bin/fm-brief.sh r6 shuvbro --scout --allow-write /tmp/tmp.pWM1rfJH3F/uh/sneaky/sub
+$ /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M46Y3K47KABXMD6Q51HDPRFP/bin/fm-brief.sh refuse-x widget --scout --allow-write /tmp/tmp.XVbCXEIW9C/link-to-primary
+error: --allow-write refuses the primary checkout or a path that contains it
+[exit 1]
+
+$ /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M46Y3K47KABXMD6Q51HDPRFP/bin/fm-brief.sh refuse-x widget --scout --allow-write /tmp/tmp.XVbCXEIW9C/fmhome/projects/widget
 error: --allow-write refuses a projects/ clone or a path that contains one
 [exit 1]
 
-$ bin/fm-brief.sh r7 shuvbro --scout --allow-write /tmp/tmp.pWM1rfJH3F/home
+$ /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M46Y3K47KABXMD6Q51HDPRFP/bin/fm-brief.sh refuse-x widget --scout --allow-write /tmp/tmp.XVbCXEIW9C/fmhome/projects
 error: --allow-write refuses a projects/ clone or a path that contains one
 [exit 1]
 
-## 4. Ship and secondmate refuse the flag
-$ bin/fm-brief.sh s1 shuvbro --mode no-mistakes --allow-write /tmp/tmp.pWM1rfJH3F/uh/Videos
+$ /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M46Y3K47KABXMD6Q51HDPRFP/bin/fm-brief.sh refuse-x widget --scout --allow-write /tmp/tmp.XVbCXEIW9C/fmhome
+error: --allow-write refuses a projects/ clone or a path that contains one
+[exit 1]
+
+$ /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M46Y3K47KABXMD6Q51HDPRFP/bin/fm-brief.sh refuse-x widget --scout --allow-write relative/path
+error: --allow-write requires an absolute path (got 'relative/path')
+[exit 1]
+
+$ /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M46Y3K47KABXMD6Q51HDPRFP/bin/fm-brief.sh refuse-x widget --scout --allow-write /tmp/tmp.XVbCXEIW9C/userhome/Videos/../../..
+error: --allow-write refuses a projects/ clone or a path that contains one
+[exit 1]
+task dir created by refusals? no
+
+=== S4: ship and secondmate refuse the flag
+
+$ /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M46Y3K47KABXMD6Q51HDPRFP/bin/fm-brief.sh ship-x widget --mode no-mistakes --allow-write /tmp/tmp.XVbCXEIW9C/userhome/Videos
 error: --allow-write applies only to scout briefs; ship and secondmate scaffolds refuse it
 [exit 1]
 
-$ bin/fm-brief.sh s2 shuvbro --mode direct-PR --allow-write=/tmp/tmp.pWM1rfJH3F/uh/Videos
+$ /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M46Y3K47KABXMD6Q51HDPRFP/bin/fm-brief.sh sm-x --secondmate --no-projects --allow-write /tmp/tmp.XVbCXEIW9C/userhome/Videos
 error: --allow-write applies only to scout briefs; ship and secondmate scaffolds refuse it
 [exit 1]
 
-$ bin/fm-brief.sh s3 --secondmate --no-projects --allow-write /tmp/tmp.pWM1rfJH3F/uh/Videos
-error: --allow-write applies only to scout briefs; ship and secondmate scaffolds refuse it
-[exit 1]
+=== S5: promotion revokes the allowance
 
-## task dirs created (expect only cargo-install, plain-scout):
-cargo-install
-plain-scout
+$ env FM_STATE_OVERRIDE=/tmp/tmp.XVbCXEIW9C/fmhome/state /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M46Y3K47KABXMD6Q51HDPRFP/bin/fm-promote.sh install-tool --mode local-only --yolo off
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  watcher supervision needs Stop-owned automatic recovery; inspect the hook registration and startup status before ending the turn.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+promoted install-tool to ship mode=local-only yolo=off (teardown protection restored)
+wrote ship instructions for mode=local-only: /tmp/tmp.XVbCXEIW9C/fmhome/data/install-tool/ship-instructions.md
+next: FM_HOME=/tmp/tmp.XVbCXEIW9C/fmhome bin/fm-send.sh fm-install-tool "$(cat /tmp/tmp.XVbCXEIW9C/fmhome/data/install-tool/ship-instructions.md)"
+[exit 0]
+
+$ env FM_STATE_OVERRIDE=/tmp/tmp.XVbCXEIW9C/fmhome/state /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M46Y3K47KABXMD6Q51HDPRFP/bin/fm-promote.sh plain-scout --mode local-only --yolo off
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+promoted plain-scout to ship mode=local-only yolo=off (teardown protection restored)
+wrote ship instructions for mode=local-only: /tmp/tmp.XVbCXEIW9C/fmhome/data/plain-scout/ship-instructions.md
+next: FM_HOME=/tmp/tmp.XVbCXEIW9C/fmhome bin/fm-send.sh fm-plain-scout "$(cat /tmp/tmp.XVbCXEIW9C/fmhome/data/plain-scout/ship-instructions.md)"
+[exit 0]
+--- install-tool ship-instructions (rules 6-7):
+13:6. These ship instructions supersede the scout delivery rules and report-based Definition of done. Everything else in your original instructions carries over unchanged: the status protocol; the instruction inbox and its acknowledgement; the escalation rules, including ask-user; and every safety rule.
+14:Your scout brief allowed writes to named paths outside the worktree. That allowance was scout-only and is revoked now: stay inside this worktree; modify nothing outside it.
+16:7. Treat the scout-time Firstmate spec and any unmarked legacy `# Task` text as investigation context, not captain intent or ship-time instructions.
+--- plain-scout ship-instructions revocation lines (expect none):
+0
