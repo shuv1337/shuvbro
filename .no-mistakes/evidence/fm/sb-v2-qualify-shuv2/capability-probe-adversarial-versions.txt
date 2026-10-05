@@ -1,0 +1,15 @@
+## fake shuvcode --version => 'shuvcode v2.0.22-shuv.1'
+opencode-v2 capability probe: unqualified target shuvcode v2.0.22-shuv.1; use qualified shuvcode v2.0.22-shuv.2 or qualify the new build first
+exit=1
+## fake shuvcode --version => 'shuvcode v2.0.22-shuv.3'
+opencode-v2 capability probe: unqualified target shuvcode v2.0.22-shuv.3; use qualified shuvcode v2.0.22-shuv.2 or qualify the new build first
+exit=1
+## fake shuvcode --version => 'shuvcode v2.0.22-shuv.2-dirty'
+opencode-v2 capability probe: unqualified target shuvcode v2.0.22-shuv.2-dirty; use qualified shuvcode v2.0.22-shuv.2 or qualify the new build first
+exit=1
+## fake shuvcode --version => 'shuvcode v2.0.22-shuv.2'
+{"version":"shuvcode v2.0.22-shuv.2","runtime":"effect","qualified":true}
+exit=0
+## shuv.2 but --help lacks --server
+opencode-v2 capability probe: missing native --server launch capability
+exit=1

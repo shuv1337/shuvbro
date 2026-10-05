@@ -1,0 +1,3 @@
+$ . tests/fm-opencode-v2-live-binary-lib.sh; b=$(v2_resolve_live_binary); "$b" --version
+resolved=/home/shuv/.npm-global/lib/node_modules/shuvcode/node_modules/shuvcode-linux-x64-baseline/bin/shuvcode
+shuvcode v2.0.22-shuv.2

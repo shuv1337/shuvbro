@@ -1,0 +1,12 @@
+## Installed binary
+$ command -v shuvcode && shuvcode --version
+/home/shuv/.local/bin/shuvcode
+shuvcode v2.0.22-shuv.2
+
+## Target commit f7dd062: node bin/fm-opencode-v2-capability.mjs $ROOT
+{"version":"shuvcode v2.0.22-shuv.2","runtime":"effect","qualified":true}
+exit=0
+
+## Base commit 95d2c20 probe (same installed binary, same root)
+opencode-v2 capability probe: unqualified target shuvcode v2.0.22-shuv.2; use qualified shuvcode v2.0.22-shuv.1 or qualify the new build first
+exit=1
