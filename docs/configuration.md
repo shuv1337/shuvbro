@@ -278,7 +278,7 @@ The tracked `.no-mistakes.yaml` sets `test.evidence.store_in_repo: true` and pin
 Storing evidence in the repo publishes each run's test artifacts to the orphan `no-mistakes/evidence` branch and links them from the PR body, instead of keeping them on local disk under the no-mistakes home.
 That branch shares no history with code branches, so evidence never enters a pushed feature branch or the default branch; the worktree's `.no-mistakes/` stays local and CI rejects tracked entries under that path.
 The [`firstmate-coding-guidelines` skill](../.agents/skills/firstmate-coding-guidelines/SKILL.md#no-mistakes-test-configuration) owns why `commands.test` stays absent and targeted validation belongs to the evidence path.
-The same file's `test.instructions` is the trusted test-step runbook: portable suites only, with the live-suite list owned by `bin/fm-test-run.sh` and the opt-in decision owned by `fm_live_gate` in `tests/lib.sh`.
+The same file's `test.instructions` is the trusted test-step runbook: portable suites only, excluding the `live-harness-optin` and `real-herdr-gated` families whose membership `bin/fm-test-run.sh` owns.
 `commands.test` executes code, so no-mistakes honors it only from the default-branch copy of `.no-mistakes.yaml`; a pushed branch cannot change what the gate runs.
 See [CONTRIBUTING.md](../CONTRIBUTING.md) for the firstmate-specific local test policy and entry points.
 Portable shard evidence and coverage rules are in [fm-test-portable-shards.md](fm-test-portable-shards.md); [herdr-backend.md](herdr-backend.md#destructive-lab-safety) owns the real-Herdr lane's isolation boundary, and [runtime-backends.md](verification/runtime-backends.md#herdr) owns active evidence.
