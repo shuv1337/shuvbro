@@ -1,0 +1,83 @@
+# scratch=/tmp/tmp.pWM1rfJH3F  HOME=/tmp/tmp.pWM1rfJH3F/uh  FM_HOME=/tmp/tmp.pWM1rfJH3F/home  primary=/tmp/tmp.pWM1rfJH3F/primary
+
+## 1. Happy path: scout with install + export paths
+$ bin/fm-brief.sh cargo-install shuvbro --scout --allow-write ~/.cargo/bin --allow-write /tmp/tmp.pWM1rfJH3F/uh/Videos/export
+scaffolded: /tmp/tmp.pWM1rfJH3F/home/data/cargo-install/brief.md (scout; replace {TASK} and {FIRSTMATE_SPEC})
+[exit 0]
+
+--- rendered Rules section of data/cargo-install/brief.md ---
+# Rules
+1. Never push to any remote and never open a PR.
+2. Stay inside this worktree; the only files you may write outside it are the report and the status file below, plus these exact paths and the files inside them, and nothing broader:
+   - `/tmp/tmp.pWM1rfJH3F/uh/.cargo/bin`
+   - `/tmp/tmp.pWM1rfJH3F/uh/Videos/export`
+3. Use gh-axi for GitHub operations and chrome-devtools-axi for browser operations.
+4. Report status by appending one line:
+   `echo "{state}: {one short line}" >> '/tmp/tmp.pWM1rfJH3F/home/state/cargo-install.status'`
+   States: working, needs-decision, blocked, paused, done, failed.
+   Each append wakes firstmate, so report sparingly: only phase changes a supervisor
+   would act on and the needs-decision/blocked/paused/done/failed states. No step-by-step
+   FYI progress lines; firstmate reads your pane for that.
+   Whenever you mention a PR anywhere - a status line, your terminal, a summary - write its full
+   https:// URL exactly as the forge printed it, never a bare number such as "PR 108"; firstmate
+   copies that URL from your line rather than assembling one.
+   Use `paused: {why}` - distinct from `blocked:` - ONLY when you are deliberately idling on a
+   known external wait you expect to clear on its own (an upstream release, a rate-limit reset):
+   firstmate then leaves your idle pane alone and rechecks it on a long cadence instead of
+   treating it as a possible wedge. When you know when the wait clears, say so in the line with
+   `until <YYYY-MM-DDTHH:MMZ>` (UTC) and firstmate rechecks at that time instead.
+   Use `blocked:` when you are stuck and need help.
+5. If you hit the same obstacle twice, append `blocked: {why}` and stop; firstmate will help.
+
+## 2. Default scout (no flag) unchanged
+$ bin/fm-brief.sh plain-scout shuvbro --scout
+scaffolded: /tmp/tmp.pWM1rfJH3F/home/data/plain-scout/brief.md (scout; replace {TASK} and {FIRSTMATE_SPEC})
+[exit 0]
+
+23:2. Stay inside this worktree; the only files you may write outside it are the report and the status file below.
+
+## 3. Adversarial refusals
+$ bin/fm-brief.sh r1 shuvbro --scout --allow-write /
+error: --allow-write refuses '/'
+[exit 1]
+
+$ bin/fm-brief.sh r2 shuvbro --scout --allow-write ~
+error: --allow-write refuses the home directory itself
+[exit 1]
+
+$ bin/fm-brief.sh r3 shuvbro --scout --allow-write relative/dir
+error: --allow-write requires an absolute path (got 'relative/dir')
+[exit 1]
+
+$ bin/fm-brief.sh r4 shuvbro --scout --allow-write /tmp/tmp.pWM1rfJH3F/primary/src
+error: --allow-write refuses the primary checkout or a path that contains it
+[exit 1]
+
+$ bin/fm-brief.sh r5 shuvbro --scout --allow-write /tmp/tmp.pWM1rfJH3F/uh/Videos/../../primary
+error: --allow-write refuses the primary checkout or a path that contains it
+[exit 1]
+
+$ bin/fm-brief.sh r6 shuvbro --scout --allow-write /tmp/tmp.pWM1rfJH3F/uh/sneaky/sub
+error: --allow-write refuses a projects/ clone or a path that contains one
+[exit 1]
+
+$ bin/fm-brief.sh r7 shuvbro --scout --allow-write /tmp/tmp.pWM1rfJH3F/home
+error: --allow-write refuses a projects/ clone or a path that contains one
+[exit 1]
+
+## 4. Ship and secondmate refuse the flag
+$ bin/fm-brief.sh s1 shuvbro --mode no-mistakes --allow-write /tmp/tmp.pWM1rfJH3F/uh/Videos
+error: --allow-write applies only to scout briefs; ship and secondmate scaffolds refuse it
+[exit 1]
+
+$ bin/fm-brief.sh s2 shuvbro --mode direct-PR --allow-write=/tmp/tmp.pWM1rfJH3F/uh/Videos
+error: --allow-write applies only to scout briefs; ship and secondmate scaffolds refuse it
+[exit 1]
+
+$ bin/fm-brief.sh s3 --secondmate --no-projects --allow-write /tmp/tmp.pWM1rfJH3F/uh/Videos
+error: --allow-write applies only to scout briefs; ship and secondmate scaffolds refuse it
+[exit 1]
+
+## task dirs created (expect only cargo-install, plain-scout):
+cargo-install
+plain-scout
