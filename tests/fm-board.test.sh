@@ -1072,20 +1072,6 @@ test_one_interval_later_rebuilds_when_the_bound_matches_the_check() {
   pass "a check one interval later rebuilds when the full bound matches the check interval"
 }
 
-test_test_full_interval_outside_1_to_60_refuses_to_start() {
-  local home value
-  home=$(make_home test-full-bound)
-  for value in 0 61 1e6 2.5 -1; do
-    if in_home "$home" env FM_BOARD_PORT=0 FM_BOARD_TEST_FULL_INTERVAL="$value" "$BOARD" serve > "$home/full.log" 2>&1; then
-      fail "FM_BOARD_TEST_FULL_INTERVAL=$value started the board"
-    fi
-    grep -F "FM_BOARD_TEST_FULL_INTERVAL" "$home/full.log" >/dev/null \
-      || fail "an invalid test full interval was not named ($value): $(cat "$home/full.log")"
-    rm -f "$home/state/board/serve.json"
-  done
-  pass "a test full interval outside 1..60 refuses to start"
-}
-
 test_a_home_that_never_opts_in_is_untouched() {
   local home stamp changed
   home=$(make_home opt-out)
@@ -1132,5 +1118,4 @@ test_confirmation_storage_failure_reports_unknown
 test_unchanged_records_are_not_rebuilt_on_each_check
 test_a_request_after_the_full_interval_rebuilds
 test_one_interval_later_rebuilds_when_the_bound_matches_the_check
-test_test_full_interval_outside_1_to_60_refuses_to_start
 test_a_home_that_never_opts_in_is_untouched

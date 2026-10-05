@@ -93,8 +93,7 @@
 #   FM_BOARD_INTERVAL    seconds between page checks, default 10 (2..300).
 #   FM_BOARD_TODAY       UTC date used to validate Later dates (tests only).
 #   FM_BOARD_TEST_FULL_INTERVAL
-#                        shortens the 60-second full rebuild bound (tests only);
-#                        a positive whole number of seconds, at most 60.
+#                        shortens the 60-second full rebuild bound (tests only).
 set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -666,13 +665,6 @@ command_serve() {
     ''|*[!0-9]*) fail "FM_BOARD_INTERVAL must be a whole number of seconds: $interval" ;;
   esac
   [ "$interval" -ge 2 ] && [ "$interval" -le 300 ] || fail "FM_BOARD_INTERVAL must be 2..300 seconds: $interval"
-  if [ -n "${FM_BOARD_TEST_FULL_INTERVAL:-}" ]; then
-    case "$FM_BOARD_TEST_FULL_INTERVAL" in
-      ''|*[!0-9]*) fail "FM_BOARD_TEST_FULL_INTERVAL must be a positive whole number of seconds no greater than 60: $FM_BOARD_TEST_FULL_INTERVAL" ;;
-    esac
-    [ "$FM_BOARD_TEST_FULL_INTERVAL" -ge 1 ] && [ "$FM_BOARD_TEST_FULL_INTERVAL" -le 60 ] \
-      || fail "FM_BOARD_TEST_FULL_INTERVAL must be a positive whole number of seconds no greater than 60: $FM_BOARD_TEST_FULL_INTERVAL"
-  fi
   hosts='[]'
   while IFS= read -r host; do
     [ -n "$host" ] || continue

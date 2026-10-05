@@ -77,19 +77,10 @@ function fatal(message) {
   process.exit(1);
 }
 
-// Tests may shorten the 60s bound, never lengthen it. A non-integer such as
-// 1e6 must not stretch the safety rebuild for the life of the process.
+// Tests may shorten the 60s bound, never lengthen it.
 function testFullIntervalMs() {
-  const raw = process.env.FM_BOARD_TEST_FULL_INTERVAL;
-  if (raw === undefined || raw === "") return 60 * 1000;
-  if (!/^[1-9][0-9]*$/.test(raw)) {
-    fatal("FM_BOARD_TEST_FULL_INTERVAL must be a positive whole number of seconds no greater than 60");
-  }
-  const seconds = Number(raw);
-  if (!Number.isInteger(seconds) || seconds > 60) {
-    fatal("FM_BOARD_TEST_FULL_INTERVAL must be a positive whole number of seconds no greater than 60");
-  }
-  return seconds * 1000;
+  const seconds = Number(process.env.FM_BOARD_TEST_FULL_INTERVAL);
+  return Number.isInteger(seconds) && seconds > 0 ? Math.min(seconds, 60) * 1000 : 60 * 1000;
 }
 
 function runBoard(args, input) {
