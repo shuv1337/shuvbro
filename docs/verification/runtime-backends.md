@@ -1685,7 +1685,7 @@ Its second and third results are the live guard for `bin/fm-control.sh` on openc
 Only Treehouse allocation is replaced with entry into the disposable worktree.
 The guard submits diagnostic prompts and is opt-in, outside portable CI; this run used the free model and required no paid credentials.
 `bin/fm-opencode-v2-capability.mjs` owns the offline compatibility policy; admission of a newer build is separate from the live evidence recorded here.
-`tests/fm-opencode-v2-launch.test.sh` covers compatible newer releases, V1/non-fork refusal, the minimum build, known-bad exclusion, CLI/API/event capabilities, package-version binding (including npm-normalized versions for binaries reporting build metadata), CLI-only admission of a standalone native executable, and the pinned guard runtime.
+`tests/fm-opencode-v2-launch.test.sh` covers compatible newer releases, V1/non-fork refusal, the minimum build, known-bad exclusion, CLI/API/event capabilities, package-version binding (including npm-normalized versions for binaries reporting build metadata), CLI-only admission of a standalone native executable, refusal of a native package without its matching owner package, and the pinned guard runtime.
 Its fake transport also detects dropped queued/steered delivery and `resume=false` cancellation fields without opening a service.
 Herdr's real Treehouse path was verified on 2026-10-05 at 10:43 PDT on Linux with Herdr client 0.9.1-shuv.6+9059819d8043, Treehouse 2.0.0, and shuvcode v2.0.23-shuv.1:
 
