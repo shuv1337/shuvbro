@@ -21,8 +21,7 @@
 #          that needs one: not while nobody is asking, and not again while the
 #          backlog, heads-up notes, secondmate registry, task metadata, and
 #          status logs are unchanged unless the last rebuild is at least
-#          FM_BOARD_FULL_INTERVAL seconds old (default 60, raised to the refresh
-#          interval when that is longer, at most 300). An answer always rebuilds
+#          60 seconds old (or FM_BOARD_INTERVAL, when that is longer). An answer always rebuilds
 #          after its write, so the page never keeps the question it just
 #          answered. While it runs it keeps a private serve record,
 #          state/board/serve.json (pid, port, instance), removed on exit.
@@ -91,11 +90,9 @@
 #   FM_HOME              operational home whose records are shown.
 #   FM_BOARD_PORT        overrides config/board-port; 0 picks a free port.
 #   FM_BOARD_INTERVAL    seconds between page checks, default 10 (2..300).
-#   FM_BOARD_FULL_INTERVAL
-#                        seconds before an unchanged fleet is fully rebuilt
-#                        while the page is open, default 60 (raised to
-#                        FM_BOARD_INTERVAL when that is longer, at most 300).
 #   FM_BOARD_TODAY       UTC date used to validate Later dates (tests only).
+#   FM_BOARD_TEST_FULL_INTERVAL
+#                        replaces the 60-second full rebuild bound (tests only).
 set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -667,12 +664,6 @@ command_serve() {
     ''|*[!0-9]*) fail "FM_BOARD_INTERVAL must be a whole number of seconds: $interval" ;;
   esac
   [ "$interval" -ge 2 ] && [ "$interval" -le 300 ] || fail "FM_BOARD_INTERVAL must be 2..300 seconds: $interval"
-  full=${FM_BOARD_FULL_INTERVAL:-60}
-  case "$full" in
-    ''|*[!0-9]*) fail "FM_BOARD_FULL_INTERVAL must be a whole number of seconds: $full" ;;
-  esac
-  [ "$full" -ge "$interval" ] || full=$interval
-  [ "$full" -le 300 ] || fail "FM_BOARD_FULL_INTERVAL must be at most 300 seconds: $full"
   hosts='[]'
   while IFS= read -r host; do
     [ -n "$host" ] || continue
@@ -699,10 +690,9 @@ EOF
   config=$(jq -cn \
     --arg home "$FM_HOME" --arg state "$STATE" --arg data "$DATA" --arg board_sh "$SCRIPT_DIR/fm-board.sh" \
     --arg page "$SCRIPT_DIR/fm-board-page.html" --argjson port "$port" --argjson interval "$interval" \
-    --argjson full_interval "$full" \
     --argjson hosts "$hosts" --argjson logins "$logins" \
     '{home: $home, state_dir: $state, data_dir: $data, board_sh: $board_sh, page: $page, port: $port,
-      interval: $interval, full_interval: $full_interval, hosts: $hosts, logins: $logins}')
+      interval: $interval, hosts: $hosts, logins: $logins}')
   FM_BOARD_SERVE_CONFIG=$config exec node "$SCRIPT_DIR/fm-board.mjs"
 }
 

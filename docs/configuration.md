@@ -993,7 +993,6 @@ Each file is local and gitignored and is never inherited by a secondmate home, s
 
 Blank lines and `#` comments are ignored in all three, and a malformed host name, login, or port stops `serve` naming the file to fix.
 `FM_BOARD_INTERVAL` (default 10, 2 to 300) is how many seconds pass between the open page's checks.
-`FM_BOARD_FULL_INTERVAL` (default 60, raised to the refresh interval when that is longer, at most 300) is the longest an unchanged fleet goes without a full rebuild while the page is open.
 `bin/fm-board.sh`'s header owns when a check reuses the last rebuild instead of taking one; [the live board](live-board.md) owns what that looks like.
 
 `data/board-notes.json` is the lead's curated list of notes the fleet records do not carry, a JSON list of objects:
@@ -1174,7 +1173,6 @@ FM_INBOX_PROFILE=       # overrides config/inbox-profile; explicitly empty force
 # live board; see "Live board" above
 FM_BOARD_PORT=          # overrides config/board-port; 0 picks a free loopback port
 FM_BOARD_INTERVAL=10         # seconds between open-page checks, 2..300; see "Live board"
-FM_BOARD_FULL_INTERVAL=60    # unchanged-fleet full rebuild bound while the page is open; see "Live board"
 ```
 
 `fm-teardown.sh` retries only Git's `Unable to create '...index.lock': File exists` return failure up to `FM_TREEHOUSE_RETURN_LOCK_RETRIES` times.

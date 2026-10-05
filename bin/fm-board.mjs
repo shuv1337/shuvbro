@@ -30,6 +30,7 @@ import * as fs from "node:fs";
 import { dirname, join } from "node:path";
 
 const config = parseConfig(process.env.FM_BOARD_SERVE_CONFIG);
+const fullIntervalMs = Math.max(Number(process.env.FM_BOARD_TEST_FULL_INTERVAL) || 60, config.interval) * 1000;
 const token = randomBytes(32).toString("hex");
 const instance = randomBytes(8).toString("hex");
 const pageTemplate = fs.readFileSync(config.page, "utf8");
@@ -63,7 +64,6 @@ function parseConfig(raw) {
     && typeof value.board_sh === "string" && typeof value.page === "string"
     && Number.isInteger(value.port) && value.port >= 0 && value.port <= 65535
     && Number.isInteger(value.interval) && value.interval >= 2 && value.interval <= 300
-    && Number.isInteger(value.full_interval) && value.full_interval >= value.interval && value.full_interval <= 300
     && typeof value.data_dir === "string"
     && Array.isArray(value.hosts) && value.hosts.every((h) => typeof h === "string")
     && Array.isArray(value.logins) && value.logins.every((l) => typeof l === "string");
@@ -123,7 +123,7 @@ function cacheHit() {
     && modelEpoch === refreshEpoch
     && cachedSignature !== null
     && cachedSignature === inputSignature()
-    && (Date.now() - lastFullAt) < config.full_interval * 1000;
+    && (Date.now() - lastFullAt) < fullIntervalMs;
 }
 
 // A full rebuild. Joining one already in flight is safe for a viewer poll.

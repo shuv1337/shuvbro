@@ -3,7 +3,7 @@
 The live board is an optional web page for one home that shows what is waiting on you, what is in flight, heads-up notes, what is queued, and what recently finished, and lets you answer what is waiting on you with a click.
 It does not rebuild while nobody is asking for the page or its data, so a board left running with no one looking stays quiet.
 Opening it shows the current records without waiting for a background timer.
-While the page is open it keeps checking, reuses the last rebuild when the backlog, heads-up notes, secondmate registry, task metadata, and status logs are unchanged, and still fully rebuilds at least as often as the full interval so worker liveness that does not touch those files cannot lag longer than that.
+While the page is open it keeps checking, reuses the last rebuild when the backlog, heads-up notes, secondmate registry, task metadata, and status logs are unchanged, and still fully rebuilds at least once a minute (or once per check, when checks are slower), so worker liveness, secondmate-home questions, and other inputs outside those files can lag up to that long while the page is open.
 The page's update time is that check.
 An in-flight card's checked time is the last full rebuild, which can be older when those records have not changed.
 Answering always rebuilds after the write, so the page does not keep the question you just answered.
