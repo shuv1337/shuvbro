@@ -140,6 +140,9 @@ case "${1:-}" in
     exit 0 ;;
   pane)
     case "${2:-}" in
+      process-info)
+        printf '{"result":{"type":"pane_process_info","process_info":{"pane_id":"w1:p2","shell_pid":22712,"foreground_process_group_id":22712,"foreground_processes":[{"pid":22712,"name":"zsh","argv":["-zsh"]}]}}}\n'
+        exit 0 ;;
       read)
         [ "${FM_FAKE_HERDR_MISSING:-0}" = 1 ] && exit 1
         [ "${FM_FAKE_HERDR_READ_FAIL:-0}" = 1 ] && exit 1
@@ -1575,6 +1578,33 @@ test_no_run_herdr_husk_dead_still_reads_gone() {
   pass "a husk pane (agent gone) still reads gone for reclaim"
 }
 
+test_no_run_herdr_exited_v2_ignores_stale_registration() {
+  reset_fakes
+  local d out
+  d=$(new_case herdr-exited-v2)
+  make_repo_on_branch "$d/wt" fm/exited-v2
+  make_fakebin "$d" >/dev/null
+  fm_write_meta "$d/state/exited-v2.meta" "window=default:w1:p2" "worktree=$d/wt" \
+    "kind=ship" "backend=herdr" "harness=opencode-v2"
+  cat > "$d/ps" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  '-axo pid=,ppid=') printf '1 0\n22712 1\n' ;;
+  '-p 22712 -o stat=') printf 'Ss\n' ;;
+  *) exit 1 ;;
+esac
+SH
+  chmod +x "$d/ps"
+  FM_FAKE_AXI_STATUS=""
+  FM_FAKE_RUNS_LIST=""
+  FM_FAKE_HERDR_READ_FAIL=1
+  FM_FAKE_HERDR_AGENT_STATUS=working
+  out=$(FM_HERDR_PS_BIN="$d/ps" run_crew_state "$d" exited-v2)
+  assert_contains "$out" "agent gone, pane shell remains" "the recorded v2 adapter must defeat a surviving working registration"
+  assert_not_contains "$out" "state: working" "an exited TUI cannot read as a working worker"
+  pass "crew state: recorded opencode-v2 process evidence defeats its stale Herdr registration"
+}
+
 # Regression (2026-07 herdr false-surface incident, now solved semantically):
 # herdr's agent.get reports generation state ("working" only while the model is
 # actively streaming - docs/herdr-backend.md "Busy state"), not "this crew's
@@ -2514,6 +2544,7 @@ test_no_run_herdr_unknown_uses_backend_capture
 test_no_run_herdr_cli_failure_reads_unreachable_not_gone
 test_no_run_herdr_alive_with_failed_read_stays_live
 test_no_run_herdr_husk_dead_still_reads_gone
+test_no_run_herdr_exited_v2_ignores_stale_registration
 test_no_run_herdr_idle_agent_status_outranked_by_record
 test_no_run_herdr_idle_agent_status_and_idle_record_stays_idle
 test_no_run_idle_pane_uses_log
