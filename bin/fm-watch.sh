@@ -1482,6 +1482,11 @@ fm_active_check_stop() {
   FM_ACTIVE_CHECK_PGID=
 }
 
+# shellcheck disable=SC2329 # Invoked only by the signal traps in this file.
+watcher_note_check_signal() { FM_CHECK_SIGNAL_PENDING=1; }
+# shellcheck disable=SC2329 # Invoked only by the signal traps in this file.
+watcher_exit_on_signal() { exit 1; }
+
 run_check_capture() {
   local pgid
   fm_check_output_cleanup
@@ -1489,14 +1494,14 @@ run_check_capture() {
   FM_CHECK_OUTPUT=$(mktemp "$STATE/.fm-check-output.XXXXXX") || return 1
   chmod 0600 "$FM_CHECK_OUTPUT" || { fm_check_output_cleanup; return 1; }
   FM_CHECK_SIGNAL_PENDING=
-  trap 'FM_CHECK_SIGNAL_PENDING=1' HUP INT TERM
+  trap watcher_note_check_signal HUP INT TERM
   set -m
   ( FM_CHECK_OWNED_GROUP=1 run_check_process "$@" ) > "$FM_CHECK_OUTPUT" 2>/dev/null &
   FM_ACTIVE_CHECK_PID=$!
   FM_ACTIVE_CHECK_PGID=$FM_ACTIVE_CHECK_PID
   set +m
   pgid=$(ps -o pgid= -p "$FM_ACTIVE_CHECK_PID" 2>/dev/null | tr -d '[:space:]')
-  trap 'exit 1' HUP INT TERM
+  trap watcher_exit_on_signal HUP INT TERM
   if [ -n "$pgid" ] && [ "$pgid" != "$FM_ACTIVE_CHECK_PGID" ]; then
     fm_active_check_stop || true
     fm_check_output_cleanup
@@ -1863,8 +1868,12 @@ watcher_cleanup() {
   fi
   return "$cleanup_status"
 }
+# Signal traps are function names so the action cannot be an unbalanced
+# interpolated string. Bash 5.2 can still drop the trap while a command
+# substitution is being parsed; bin/fm-watch-arm.sh stop_pid_bounded owns the
+# bounded stop that keeps that race from hanging the arm.
 trap watcher_cleanup EXIT
-trap 'exit 1' HUP INT TERM
+trap watcher_exit_on_signal HUP INT TERM
 # This watcher's own pid, as recorded in the lock by fm_lock_claim (which writes
 # ${BASHPID:-$$} from this same main shell). Read directly, never via a command
 # substitution, so it matches the stored holder pid for the self-eviction check.

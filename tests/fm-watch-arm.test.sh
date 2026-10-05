@@ -157,6 +157,35 @@ start_rearm_arm() {  # <home> <state> <fakebin> <arm-out> [predecessor-arm-pid]
   return 0
 }
 
+# Signal <pid> and reap it without an unbounded wait. Pass NONE to wait only.
+# Bash 5.2 can drop a TERM trap while parsing a command substitution and leave
+# the watcher, and then its arm, alive. Returns 0 when the process died before
+# this helper escalated to KILL, 1 when KILL was required.
+reap_bounded() {  # <pid> [signal]
+  local pid=$1 signal=${2:-TERM} i=0 escalated=0
+  case "$pid" in ''|*[!0-9]*) return 0 ;; esac
+  if [ "$signal" != NONE ]; then
+    kill "-$signal" "$pid" 2>/dev/null || true
+  fi
+  while [ "$i" -lt 120 ] && is_live_non_zombie "$pid"; do
+    sleep 0.1
+    i=$((i + 1))
+  done
+  if is_live_non_zombie "$pid"; then
+    escalated=1
+    kill -KILL "$pid" 2>/dev/null || true
+    i=0
+    while [ "$i" -lt 20 ] && is_live_non_zombie "$pid"; do
+      sleep 0.1
+      i=$((i + 1))
+    done
+  fi
+  if ! is_live_non_zombie "$pid"; then
+    wait "$pid" 2>/dev/null || true
+  fi
+  return "$escalated"
+}
+
 test_attached_arm_reports_the_delivered_wake() {
   local dir state fakebin out armout status
   dir=$(make_case attached-delivered-wake)
@@ -232,8 +261,7 @@ test_attached_arm_still_fails_on_a_wake_it_did_not_deliver() {
   # observed watcher remains uninvolved, so only watcher-bound evidence can
   # distinguish this from a delivered watcher cycle.
   append_wake "$state" check process-event "check: process-event result captured: fixture"
-  kill "$SEED_PID" 2>/dev/null || true
-  wait "$SEED_PID" 2>/dev/null || true
+  reap_bounded "$SEED_PID" || true
   wait_for_exit "$ARM_PID" 120
   status=$?
   grep -qF 'watcher: FAILED - cycle ended without an actionable reason' "$armout" \
@@ -278,7 +306,7 @@ test_rearm_resurfaces_durable_queue_and_remote_open_decision() {
   is_live_non_zombie "$ARM_PID" || fail "pre-outage watcher did not stay live"
   watcher_pid=$(cat "$state/.watch.lock/pid" 2>/dev/null || true)
   kill -KILL "$watcher_pid" 2>/dev/null || fail "could not abruptly stop pre-outage watcher"
-  wait "$ARM_PID" 2>/dev/null || true
+  reap_bounded "$ARM_PID" NONE || true
   [ ! -e "$state/.watcher-down" ] || fail "abrupt watcher exit unexpectedly ran cleanup"
 
   # Two independent durable wakes arrive while no watcher exists. Neither gets
@@ -318,8 +346,7 @@ test_rearm_resurfaces_durable_queue_and_remote_open_decision() {
 
   # A later down interval can have no new queue rows at all. The unchanged
   # remote decision must still trigger a recovery wake and be folded again.
-  kill "$ARM_PID" 2>/dev/null || true
-  wait "$ARM_PID" 2>/dev/null || true
+  reap_bounded "$ARM_PID" || true
   start_rearm_arm "$home" "$state" "$fakebin" "$dir/decision-only-arm.out"
   wait_for_exit "$ARM_PID" 80 || fail "decision-only re-arm did not surface the open decision"
   decision_recovery_arm=$ARM_PID
@@ -341,7 +368,7 @@ test_rearm_resurfaces_durable_queue_and_remote_open_decision() {
     || fail "decision-only handling successor emitted recursive recovery"
 
   kill -TERM "$decision_successor" 2>/dev/null || fail "could not interrupt decision handling successor"
-  wait "$decision_successor" 2>/dev/null || true
+  reap_bounded "$decision_successor" NONE || true
   start_rearm_arm "$home" "$state" "$fakebin" "$dir/interrupted-decision-arm.out"
   wait_for_exit "$ARM_PID" 80 || fail "interrupted decision handling was not recovered on successor re-arm"
   grep -F 'check: rearm-resurface' "$dir/interrupted-decision-arm.out" >/dev/null \
@@ -359,8 +386,7 @@ test_rearm_resurfaces_durable_queue_and_remote_open_decision() {
     || fail "completed decision handling could not acknowledge current recovery"
   start_rearm_arm "$home" "$state" "$fakebin" "$dir/decision-successor-arm.out"
   is_live_non_zombie "$ARM_PID" || fail "acknowledged decision recovery did not leave a live successor"
-  kill "$ARM_PID" 2>/dev/null || true
-  wait "$ARM_PID" 2>/dev/null || true
+  reap_bounded "$ARM_PID" || true
   pass "watch-arm: re-arm surfaces every queued wake and an open remote decision after downtime"
 }
 
@@ -378,7 +404,7 @@ test_marker_publish_failure_retains_recovery_evidence() {
   watcher_pid=$(cat "$state/.watch.lock/pid" 2>/dev/null || true)
   mkdir "$state/.watcher-down"
   kill -TERM "$watcher_pid" 2>/dev/null || fail "could not stop marker-failure fixture watcher"
-  wait "$first_arm" 2>/dev/null || true
+  reap_bounded "$first_arm" NONE || true
 
   [ "$(cat "$state/.watch.lock/pid" 2>/dev/null || true)" = "$watcher_pid" ] \
     || fail "marker publication failure discarded stale-lock recovery evidence"
@@ -428,8 +454,7 @@ test_delivery_gap_wake_is_recovered_once() {
 
   start_rearm_arm "$home" "$state" "$fakebin" "$dir/stable-successor.out"
   is_live_non_zombie "$ARM_PID" || fail "successor looped after the delivery gap was drained"
-  kill "$ARM_PID" 2>/dev/null || true
-  wait "$ARM_PID" 2>/dev/null || true
+  reap_bounded "$ARM_PID" || true
   pass "watch-arm: a wake queued after handling drain is recovered once at successor arm"
 }
 
@@ -501,7 +526,7 @@ test_interrupted_handling_is_redrained_on_rearm() {
   is_live_non_zombie "$ARM_PID" || fail "handling drain stopped its live successor"
 
   kill -TERM "$ARM_PID" 2>/dev/null || fail "could not interrupt the handling successor"
-  wait "$ARM_PID" 2>/dev/null || true
+  reap_bounded "$ARM_PID" NONE || true
   case "$(cat "$state/.watcher-down" 2>/dev/null || true)" in
     pending:downtime:*|announced:downtime:*) ;;
     *) fail "interrupted pre-handling successor did not persist downtime recovery" ;;
@@ -547,8 +572,7 @@ test_malformed_marker_is_quarantined_once() {
   ack_wakes "$state" || fail "malformed-marker handling acknowledgement failed"
   start_rearm_arm "$home" "$state" "$fakebin" "$dir/stable-successor.out"
   is_live_non_zombie "$ARM_PID" || fail "malformed marker caused a persistent recovery loop"
-  kill "$ARM_PID" 2>/dev/null || true
-  wait "$ARM_PID" 2>/dev/null || true
+  reap_bounded "$ARM_PID" || true
   pass "watch-arm: malformed recovery state is quarantined without a successor loop"
 }
 
@@ -602,8 +626,7 @@ test_restart_preserves_recovery_across_reused_pid_lock() {
   grep -F 'check: rearm-resurface' "$armout" >/dev/null \
     || fail "restart cleared reused-pid lock evidence without a recovery wake: $(cat "$armout")"
   is_live_non_zombie "$unrelated" || fail "restart signaled the unrelated process whose pid was reused"
-  kill "$unrelated" 2>/dev/null || true
-  wait "$unrelated" 2>/dev/null || true
+  reap_bounded "$unrelated" || true
   pass "watch-arm: restart publishes recovery before clearing a reused-pid watcher lock"
 }
 
@@ -774,6 +797,56 @@ test_moved_generation_acknowledgement_is_self_healing() {
   pass "watch-arm: a moved recovery generation consumes handled rows and names its remedy"
 }
 
+test_arm_reaps_a_watcher_that_survives_term() {
+  local dir state stub ready armout stub_pid start status i stub_alive elapsed
+  dir=$(make_case arm-reap-term-survivor)
+  state="$dir/state"
+  stub="$dir/survivor.sh"
+  ready="$dir/ready"
+  armout="$dir/arm.out"
+  cat > "$stub" << 'EOF'
+#!/usr/bin/env bash
+trap '' TERM INT HUP
+printf '%s\n' "$$" > "${FM_SURVIVOR_READY:?}"
+while :; do sleep 1; done
+EOF
+  chmod +x "$stub"
+  FM_STATE_OVERRIDE="$state" FM_WATCH_OVERRIDE="$stub" FM_SURVIVOR_READY="$ready" \
+    FM_ARM_CONFIRM_TIMEOUT=60 "$WATCH_ARM" > "$armout" &
+  ARM_PID=$!
+  i=0
+  while [ "$i" -lt 50 ] && [ ! -s "$ready" ]; do
+    sleep 0.05
+    i=$((i + 1))
+  done
+  if [ ! -s "$ready" ]; then
+    reap_bounded "$ARM_PID" || true
+    fail "survivor stub did not start: $(cat "$armout" 2>/dev/null)"
+  fi
+  stub_pid=$(cat "$ready")
+  kill -TERM "$ARM_PID" 2>/dev/null || {
+    reap_bounded "$ARM_PID" || true
+    reap_bounded "$stub_pid" || true
+    fail "could not signal the arm"
+  }
+  start=$SECONDS
+  reap_bounded "$ARM_PID" NONE
+  status=$?
+  elapsed=$((SECONDS - start))
+  if is_live_non_zombie "$stub_pid"; then
+    stub_alive=1
+  else
+    stub_alive=0
+  fi
+  reap_bounded "$stub_pid" || true
+  [ "$status" -eq 0 ] \
+    || fail "arm did not exit after TERM; a watcher that survives TERM must not hang the arm"
+  [ "$elapsed" -lt 12 ] || fail "arm stop did not return promptly"
+  [ "$stub_alive" -eq 0 ] || fail "arm left a TERM-ignoring watcher alive"
+  ! is_live_non_zombie "$ARM_PID" || fail "arm remained live after stop"
+  pass "watch-arm: a watcher that survives TERM is reaped instead of hanging the arm"
+}
+
 test_downtime_marker_does_not_follow_symlink() {
   local dir home state fakebin armout watcher_pid sentinel
   dir=$(make_case downtime-marker-symlink)
@@ -790,7 +863,7 @@ test_downtime_marker_does_not_follow_symlink() {
   printf 'must remain intact\n' > "$sentinel"
   ln -s "$sentinel" "$state/.watcher-down"
   kill -TERM "$watcher_pid" 2>/dev/null || fail "could not stop symlink fixture watcher"
-  wait "$ARM_PID" 2>/dev/null || true
+  reap_bounded "$ARM_PID" NONE || true
 
   [ "$(cat "$sentinel")" = "must remain intact" ] \
     || fail "downtime marker publication followed and truncated a symlink"
@@ -812,4 +885,5 @@ test_restart_preserves_recovery_across_reused_pid_lock
 test_markerless_legacy_queue_is_recovered_on_arm
 test_handling_window_close_keeps_the_acknowledgement_valid
 test_moved_generation_acknowledgement_is_self_healing
+test_arm_reaps_a_watcher_that_survives_term
 test_downtime_marker_does_not_follow_symlink

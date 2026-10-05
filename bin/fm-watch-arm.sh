@@ -64,7 +64,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=bin/fm-wake-lib.sh
 . "$SCRIPT_DIR/fm-wake-lib.sh"
 
-WATCH="$SCRIPT_DIR/fm-watch.sh"
+# Tests inject a stand-in with FM_WATCH_OVERRIDE. Production leaves it unset.
+WATCH="${FM_WATCH_OVERRIDE:-$SCRIPT_DIR/fm-watch.sh}"
 WATCH_LOCK="$STATE/.watch.lock"
 BEAT="$STATE/.last-watcher-beat"
 # "Fresh" reuses the guard's threshold so there is one definition of liveness.
@@ -346,9 +347,15 @@ handle_attached_signal() {
   exit "$rc"
 }
 
-trap 'handle_attached_signal HUP 129' HUP
-trap 'handle_attached_signal TERM 143' TERM
-trap 'handle_attached_signal INT 130' INT
+# shellcheck disable=SC2329 # Invoked indirectly by the signal traps below.
+handle_attached_hup() { handle_attached_signal HUP 129; }
+# shellcheck disable=SC2329 # Invoked indirectly by the signal traps below.
+handle_attached_term() { handle_attached_signal TERM 143; }
+# shellcheck disable=SC2329 # Invoked indirectly by the signal traps below.
+handle_attached_int() { handle_attached_signal INT 130; }
+trap handle_attached_hup HUP
+trap handle_attached_term TERM
+trap handle_attached_int INT
 
 watch_output_has_wake() {
   local out=$1
@@ -407,20 +414,39 @@ if [ "$mode" = handling-delivered ]; then
   exit $?
 fi
 
+# Bash 5.2 can drop a signal trap that fires while a command substitution is
+# being parsed, printing "trap: line 2: unexpected EOF while looking for
+# matching ')'" and leaving the process alive. An unbounded wait on that
+# process hangs this arm. Give TERM a short grace so a trap that can still run
+# persists recovery state, then KILL. Does not reap; a caller that owns the
+# pid waits after this returns.
+stop_pid_bounded() {  # <pid>
+  local pid=$1 i
+  [ -n "$pid" ] && fm_pid_alive "$pid" || return 0
+  kill -TERM "$pid" 2>/dev/null || true
+  i=0
+  while [ "$i" -lt 50 ] && fm_pid_alive "$pid"; do
+    sleep 0.1
+    i=$((i + 1))
+  done
+  if fm_pid_alive "$pid"; then
+    kill -KILL "$pid" 2>/dev/null || true
+    i=0
+    while [ "$i" -lt 20 ] && fm_pid_alive "$pid"; do
+      sleep 0.05
+      i=$((i + 1))
+    done
+  fi
+}
+
 if [ "$mode" = restart ]; then
   # Home-scoped stop: only the watcher pid recorded in THIS home's lock.
   lock_pid=$(cat "$WATCH_LOCK/pid" 2>/dev/null || true)
   if fm_pid_alive "$lock_pid"; then
     if fm_watcher_lock_matches_pid "$STATE" "$WATCH" "$lock_pid" "$FM_HOME"; then
-      kill -TERM "$lock_pid" 2>/dev/null || true
-      # Wait for it to actually exit before relaunching, so the fresh watcher
-      # either takes a released lock or reclaims a now-dead-pid stale lock instead
-      # of seeing the dying one as a live holder and no-opping.
-      i=0
-      while [ "$i" -lt 50 ] && fm_pid_alive "$lock_pid"; do
-        sleep 0.1
-        i=$((i + 1))
-      done
+      # The successor must not see a watcher whose trap was dropped as a live
+      # holder and no-op. stop_pid_bounded escalates to KILL after the grace.
+      stop_pid_bounded "$lock_pid"
     else
       if ! clear_stale_recorded_watcher_lock; then
         echo "watcher: FAILED - stale watcher recovery state could not be persisted" >&2
@@ -450,7 +476,7 @@ child=
 child_out=
 cleanup_child() {
   if [ -n "$child" ] && fm_pid_alive "$child"; then
-    kill -TERM "$child" 2>/dev/null || true
+    stop_pid_bounded "$child"
   fi
   if [ -n "$child_out" ]; then
     rm -f "$child_out" 2>/dev/null || true
@@ -461,18 +487,28 @@ cleanup_child() {
 handle_arm_signal() {
   local signal=$1 rc=$2
   trap - HUP TERM INT
-  if [ -n "$child" ] && fm_pid_alive "$child"; then
-    kill -TERM "$child" 2>/dev/null || true
-    wait "$child" 2>/dev/null || true
+  if [ -n "$child" ]; then
+    stop_pid_bounded "$child"
+    # Skip wait while the pid is still alive: that wait is the hang a dropped
+    # trap used to cause. A dead or zombie child is reaped here.
+    if ! fm_pid_alive "$child"; then
+      wait "$child" 2>/dev/null || true
+    fi
   fi
   cycle_log_append "$rc" "$signal" arm-interrupted none
   cleanup_child
   exit "$rc"
 }
 
-trap 'handle_arm_signal HUP 129' HUP
-trap 'handle_arm_signal TERM 143' TERM
-trap 'handle_arm_signal INT 130' INT
+# shellcheck disable=SC2329 # Invoked indirectly by the signal traps below.
+handle_arm_hup() { handle_arm_signal HUP 129; }
+# shellcheck disable=SC2329 # Invoked indirectly by the signal traps below.
+handle_arm_term() { handle_arm_signal TERM 143; }
+# shellcheck disable=SC2329 # Invoked indirectly by the signal traps below.
+handle_arm_int() { handle_arm_signal INT 130; }
+trap handle_arm_hup HUP
+trap handle_arm_term TERM
+trap handle_arm_int INT
 
 child_out=$(mktemp "$STATE/.watch-arm-output.XXXXXX") || {
   echo "watcher: FAILED - no live watcher with a fresh beacon"

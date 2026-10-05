@@ -306,8 +306,20 @@ wait_for_exit() {
     sleep 0.1
     i=$((i + 1))
   done
+  # Bash 5.2 can drop a TERM trap while parsing a command substitution and
+  # leave the process alive. The final wait must not hang the shard.
   kill "$pid" 2>/dev/null || true
-  wait "$pid" 2>/dev/null || true
+  i=0
+  while [ "$i" -lt 20 ] && is_live_non_zombie "$pid"; do
+    sleep 0.1
+    i=$((i + 1))
+  done
+  if is_live_non_zombie "$pid"; then
+    kill -KILL "$pid" 2>/dev/null || true
+  fi
+  if ! is_live_non_zombie "$pid"; then
+    wait "$pid" 2>/dev/null || true
+  fi
   return 124
 }
 
