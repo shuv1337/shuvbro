@@ -144,22 +144,6 @@ const row='100\t1\tsignal\ttask\tready\n';
   fs.writeFileSync(f.marker,'acked:downtime:second\n');
   assert.equal(f.reload().acknowledged(second),true);
 }
-// A recovery doorbell covers newly arriving rows, without consuming them.
-for (const handled of [false,true]) {
-  const f=fixture('no-row-to-row-'+handled);
-  fs.writeFileSync(f.marker,'pending:handling:first\n');
-  const first=f.recovery('first');await f.journal.deliver(first);
-  fs.writeFileSync(f.queue,row);
-  const later=f.journal.confirm(f.journal.prepare('later row'));
-  assert.equal(await f.journal.deliver(later),false);
-  assert.equal(fs.readFileSync(f.queue,'utf8'),row);
-  if(handled)fs.writeFileSync(f.queue,'');
-  fs.writeFileSync(f.marker,'acked:handling:first\n');
-  await f.reload().deliver(later);
-  assert.equal(f.calls.length,handled?1:2);
-  assert.equal(f.phase(later),handled?'acknowledged':'admitted');
-  assert.equal(f.reload().pending().length,0,'a parked row must retire or admit after handling');
-}
 // A row doorbell also covers a no-row recovery obligation.
 for (const handled of [false,true]) {
   const f=fixture('row-to-no-row-'+handled);
@@ -253,6 +237,106 @@ console.log('no-row/row doorbells share one steer cap per claim; canonical ack o
 JS
   ) || fail "$out"
   pass "$out"
+}
+
+# Through the real coordinator and the real canonical drain/ack: a no-row
+# recovery doorbell holds later wakes until the lead's drain runs after it was
+# admitted, then rows arriving after that drain get their own doorbell, and
+# superseded recoveries the drain presented never replay.
+test_recovery_doorbell_retires_on_real_drain() {
+  local scenario out lab
+  for scenario in mid-turn-row coalesced-row superseded-recoveries; do
+    lab="$TMP_ROOT/real-drain-$scenario"
+    mkdir -p "$lab/bin" "$lab/state" "$lab/config"
+    : > "$lab/state/.wake-queue"
+    printf 'pending:downtime:G1\n' > "$lab/state/.watcher-down"
+    : > "$lab/state/task.meta"
+    cat > "$lab/bin/fm-watch-arm.sh" <<'SH'
+#!/usr/bin/env bash
+s=$FM_STATE_OVERRIDE
+if [ "${1:-}" = --handling-delivered ]; then
+  case "$(cat "$s/.watcher-down")" in pending:*:"$2"|announced:*:"$2") exit 0 ;; *) exit 1 ;; esac
+fi
+marker=$(cat "$s/.watcher-down")
+echo "watcher: started pid=$$ recovery-generation=${marker##*:}"
+trap 'exit 0' TERM
+while :; do
+  if [ -f "$s/fire" ]; then cat "$s/fire"; rm -f "$s/fire"; exit 0; fi
+  sleep 0.05
+done
+SH
+    chmod +x "$lab/bin/fm-watch-arm.sh"
+    cp "$CODE_ROOT/bin/fm-operational-input.sh" "$lab/bin/fm-operational-input.sh"
+    out=$(SCENARIO="$scenario" CODE_ROOT="$CODE_ROOT" DRAIN="$DRAIN" LAB="$lab" node --input-type=module 2>&1 <<'JS'
+import fs from 'node:fs';import assert from 'node:assert/strict';import {spawnSync} from 'node:child_process';import {pathToFileURL} from 'node:url';
+const root=pathToFileURL(process.env.CODE_ROOT+'/');
+const {createWatchArmCoordinator}=await import(new URL('.opencode/plugins/lib/fm-watch-arm-v2.js',root));
+const {createAdmissionJournal}=await import(new URL('.opencode/plugins/fm-native-v2/admission.js',root));
+const p={root:process.env.LAB,home:process.env.LAB,state:process.env.LAB+'/state',config:process.env.LAB+'/config'};
+const queue=p.state+'/.wake-queue',marker=p.state+'/.watcher-down',scenario=process.env.SCENARIO;
+const row='100\t2\tsignal\ttask\tsecond\n';
+const admitted=[],failures=[];
+const journal=createAdmissionJournal(p,'ses_drain',async input=>{assert.equal(input.delivery,'steer');admitted.push(input.id);return{id:input.id};},()=>{},{claim:'claim'});
+const c=createWatchArmCoordinator(p,()=>{throw new Error('unjournaled delivery');},{owns:()=>true,admission:journal,failure:reason=>failures.push(reason)});
+const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+const until=async(predicate,what)=>{for(let i=0;i<200&&!predicate();i++)await sleep(25);assert.ok(predicate(),what+' '+JSON.stringify(failures));};
+const records=()=>fs.readdirSync(p.state+'/.opencode-v2-admissions',{recursive:true}).filter(name=>name.endsWith('.json')).length;
+const fire=async(reason,count)=>{fs.writeFileSync(p.state+'/fire',reason+'\n');await until(()=>!fs.existsSync(p.state+'/fire')&&records()===count,'fire was not journaled');await sleep(400);};
+const lead=(...args)=>{const r=spawnSync(process.env.DRAIN,args,{encoding:'utf8',env:{...process.env,FM_HOME:process.env.LAB,FM_STATE_OVERRIDE:p.state}});assert.equal(r.status,0,r.stderr);return r;};
+const ack=drain=>{const m=drain.stderr.match(/--ack-through ([0-9]+) --recovery-generation ([A-Za-z0-9._-]+)/);assert.ok(m,drain.stderr);return lead('--ack-through',m[1],'--recovery-generation',m[2]);};
+const reconcile=async()=>{for(let tick=0;tick<3;tick++)await c.resumePending('ses_drain');};
+try {
+  assert.equal(await c.ensureArmed('ses_drain'),'armed');
+  await fire('check: rearm-resurface',1);
+  assert.equal(admitted.length,1,'G1 recovery was not admitted');
+  if (scenario==='mid-turn-row') {
+    // The lead drains the recovery at turn start; r2 arrives mid-turn.
+    const drain=lead();
+    fs.appendFileSync(queue,row);
+    await fire('signal: task second',2);
+    assert.equal(admitted.length,2,'a row arriving after the drain was stranded behind the handled recovery');
+    ack(drain);
+    assert.equal(fs.readFileSync(queue,'utf8'),row,'the printed recovery ack never consumes later rows');
+    assert.match(fs.readFileSync(marker,'utf8'),/^pending:/);
+    await reconcile();
+    assert.equal(admitted.length,2);
+    assert.equal(journal.pending().length,0);
+  } else if (scenario==='coalesced-row') {
+    // r2 arrives before the lead drains: it coalesces into the G1 doorbell.
+    fs.appendFileSync(queue,row);
+    await fire('signal: task second',2);
+    await reconcile();
+    assert.equal(admitted.length,1,'an undrained recovery doorbell let a second doorbell stack');
+    assert.equal(journal.pending().length,1);
+    const drain=lead();
+    assert.match(drain.stdout,/second/);
+    ack(drain);
+    await reconcile();
+    assert.equal(admitted.length,1,'the drain presented and acked r2; no extra doorbell');
+    assert.equal(journal.pending().length,0);
+  } else {
+    // G2 and G3 park behind G1; the lead's drain presents G3 and acks it.
+    fs.writeFileSync(marker,'pending:downtime:G2\n');
+    await fire('check: rearm-resurface',2);
+    fs.writeFileSync(marker,'pending:downtime:G3\n');
+    await fire('check: rearm-resurface',3);
+    await reconcile();
+    assert.equal(admitted.length,1,'superseded recoveries stacked doorbells');
+    const drain=lead();
+    assert.match(drain.stderr,/--recovery-generation G3/);
+    ack(drain);
+    assert.equal(fs.readFileSync(marker,'utf8'),'acked:handling:G3\n');
+    await reconcile();
+    assert.equal(admitted.length,1,'a covered recovery replayed after the later drain/ack');
+    assert.equal(journal.pending().length,0,'a covered recovery obligation remained');
+  }
+  assert.deepEqual(failures,[]);
+} finally { await c.cleanup(); }
+console.log('real drain/ack '+scenario+': recovery doorbell coalesces until drained; later rows admit; covered recoveries retire');
+JS
+    ) || fail "$out"
+    pass "$out"
+  done
 }
 
 # Through the real coordinator: the lead drains W1{r1} early in a long turn, r2
@@ -407,6 +491,7 @@ for t in \
   test_journal_steers_with_exact_receipts_and_canonical_ack \
   test_recovery_doorbells_share_the_outstanding_cap \
   test_parked_row_wake_admits_after_partial_canonical_ack \
+  test_recovery_doorbell_retires_on_real_drain \
   test_handoff_before_lead_ack_is_accepted \
   test_handoff_after_lead_ack_is_rejected; do
   ( "$t" ) || FAILED=$((FAILED + 1))

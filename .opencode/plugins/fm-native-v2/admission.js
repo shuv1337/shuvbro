@@ -17,6 +17,12 @@ export function createAdmissionJournal(paths, sessionID, admit, report = console
     if (value.version !== 1 || value.sessionID !== sessionID || !/^msg_[a-f0-9]{64}$/.test(value.id) || typeof value.kind !== "string" || typeof value.text !== "string" || value.text.length > 12000 || !Array.isArray(value.rows) || value.rows.some(row => typeof row !== "string" || !/^[0-9]+\t[0-9]+$/.test(row)) || !["prepared", "confirmed", "admitted", "acknowledged"].includes(value.phase)) throw new Error("invalid V2 admission record");
     return value;
   }
+  // The canonical drain advances this sequence on every main presentation.
+  // Missing means no drain yet; malformed state cannot prove a later drain.
+  function drainSequence() {
+    try { const match = readFileSync(join(paths.state, ".wake-drain-presented"), "utf8").match(/^([0-9]{1,15})\t[A-Za-z0-9._-]{0,200}\n?$/); return match ? Number(match[1]) : null; }
+    catch (error) { return error.code === "ENOENT" ? 0 : null; }
+  }
   function save(value) { writePrivate(join(dir, value.id + ".json"), validate(value)); return value; }
   function prepare(text, kind = "wake", context = {}) {
     let logical = kind;
@@ -41,7 +47,7 @@ export function createAdmissionJournal(paths, sessionID, admit, report = console
     const id = "msg_" + createHash("sha256").update(sessionID + "\0" + logical).digest("hex");
     try { return validate(readPrivate(join(dir, id + ".json"))); }
     catch (error) { if (error.code !== "ENOENT") throw error; }
-    return save({ version: 1, sessionID, id, kind, rows: identities, text, context, phase: "prepared" });
+    return save({ version: 1, sessionID, id, kind, rows: identities, text, context, phase: "prepared", drain: drainSequence() });
   }
   function acknowledged(value) {
     // Callers can retain their pre-admission snapshot across a native receipt
@@ -49,12 +55,18 @@ export function createAdmissionJournal(paths, sessionID, admit, report = console
     value = validate(readPrivate(join(dir, value.id + ".json")));
     if (value.phase === "acknowledged") return true;
     if (!value.rows.length) {
-      // Recovery has no row identities. Exact-generation ack retires a
-      // confirmed obligation. An admitted doorbell stays outstanding while any
-      // generation is unacked: its drain presents current state and prints the
-      // later ack, which then retires it. Missing or malformed state retains it.
+      // Recovery has no row identities. A drain presented after preparation
+      // or admission handled it, even if later rows remain queued. Otherwise
+      // exact-generation ack retires a confirmed obligation, and an admitted
+      // doorbell stays outstanding until any generation is acked. Missing or
+      // malformed state retains it.
       const generation = value.context?.recovery?.generation;
       if (value.kind !== "wake" || !["confirmed", "admitted"].includes(value.phase) || typeof generation !== "string" || !/^[A-Za-z0-9._-]{1,200}$/.test(generation)) return false;
+      const drained = drainSequence();
+      if (Number.isInteger(value.drain) && Number.isInteger(drained) && drained > value.drain) {
+        save({ ...value, phase: "acknowledged" });
+        return true;
+      }
       let marker;
       try { marker = readFileSync(join(paths.state, ".watcher-down"), "utf8").trim(); } catch { return false; }
       const episode = marker.match(/^acked:(?:handling|downtime):([A-Za-z0-9._-]{1,200})$/);
@@ -100,9 +112,10 @@ export function createAdmissionJournal(paths, sessionID, admit, report = console
           if (!allowed()) throw new Error("V2 admission cancelled after ownership loss or retirement");
           // A steer reaches a busy lead at its next step boundary. The slot
           // remains occupied until canonical handling, not the native receipt.
+          const drain = drainSequence();
           const result = await admit({ sessionID, id: value.id, text: value.text, delivery: "steer" });
           if (result?.id !== value.id) throw new Error("native admission did not acknowledge the exact message ID");
-          save({ ...value, phase: "admitted", claim: options.claim });
+          save({ ...value, phase: "admitted", claim: options.claim, drain });
           retries.delete(value.id);
           return true;
         } catch (error) {
