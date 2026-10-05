@@ -1,14 +1,23 @@
 ok - watcher count: a stable watcher excludes its subshell and another home
-ok - watcher count: another home's vanished candidate cannot destabilize this home
 ok - watcher count: two genuine watchers remain two
 ok - watcher count: a parent exiting mid-read triggers a stable rescan
 ok - watcher count: a parent vanishing on every scan never counts its subshell as a root
 ok - watcher count: a vanished candidate is tolerated
 ok - watcher count: run-state changes keep a stable identity
-ok - watcher count: an inaccessible reparenting parent still counts its watcher
+ok - watcher count: an executed watcher may be reparented
+ok - watcher count: an adopted subshell alongside a live root is excluded (parent 1)
+ok - watcher count: an adopted subshell alone is not a watcher (parent 1)
+ok - watcher count: an adopted subshell alongside a live root is excluded (parent 10)
+ok - watcher count: an adopted subshell alone is not a watcher (parent 10)
+ok - watcher count: EACCES during a matching candidate's stat read triggers rescan
+ok - watcher count: EACCES during a matching candidate's cmdline read triggers rescan
+ok - watcher count: EACCES during a matching candidate's environ read triggers rescan
+ok - watcher count: persistent matching-candidate access denial exhausts the bound
+ok - watcher count: unexpected I/O errors abort instead of being treated as churn
 ok - watcher count: PID reuse during a read invalidates the identity
 ok - watcher count: a reused parent cannot hide an older child
 ok - watcher count: continuous churn exhausts the bound instead of reporting singleton success
+ok - watcher count: real Bash orphan alone and alongside a successor
 ok - real TUI setup: ten recovered persistent stalls produce ten notices and wakes, beyond the old lifetime cap
 ok - real TUI setup: stale proof after a stall surfaces its rebind notice once despite repeated failing ticks
 ok - real TUI setup: recovered sub-30-second stall retains diagnostic but never prompts or toasts
@@ -42,4 +51,7 @@ ok - tui: the owner's service credential reaches neither the arm, the watcher no
 ok - tui: on one service a durable wake in home B reaches only lead B, and lead A ignores B's events
 ok - tui: after the real drain/ack the pending wake obligation is retired as acknowledged with no admission or repeated failure; a missing queue does not count
 ok - worker: after the worker latches busy, its child session's events neither clear it nor notify; its own terminal event does
-exit=0
+
+real	5m55.019s
+user	0m40.909s
+sys	0m20.916s

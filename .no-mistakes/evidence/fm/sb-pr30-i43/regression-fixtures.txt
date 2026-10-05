@@ -1,11 +1,20 @@
 ok - watcher count: a stable watcher excludes its subshell and another home
-ok - watcher count: another home's vanished candidate cannot destabilize this home
 ok - watcher count: two genuine watchers remain two
 ok - watcher count: a parent exiting mid-read triggers a stable rescan
 ok - watcher count: a parent vanishing on every scan never counts its subshell as a root
 ok - watcher count: a vanished candidate is tolerated
 ok - watcher count: run-state changes keep a stable identity
-ok - watcher count: an inaccessible reparenting parent still counts its watcher
+ok - watcher count: an executed watcher may be reparented
+ok - watcher count: an adopted subshell alongside a live root is excluded (parent 1)
+ok - watcher count: an adopted subshell alone is not a watcher (parent 1)
+ok - watcher count: an adopted subshell alongside a live root is excluded (parent 10)
+ok - watcher count: an adopted subshell alone is not a watcher (parent 10)
+ok - watcher count: EACCES during a matching candidate's stat read triggers rescan
+ok - watcher count: EACCES during a matching candidate's cmdline read triggers rescan
+ok - watcher count: EACCES during a matching candidate's environ read triggers rescan
+ok - watcher count: persistent matching-candidate access denial exhausts the bound
+ok - watcher count: unexpected I/O errors abort instead of being treated as churn
 ok - watcher count: PID reuse during a read invalidates the identity
 ok - watcher count: a reused parent cannot hide an older child
 ok - watcher count: continuous churn exhausts the bound instead of reporting singleton success
+ok - watcher count: real Bash orphan alone and alongside a successor

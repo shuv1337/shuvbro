@@ -1,0 +1,7 @@
+Live /proc churn: 1 genuine long-lived watcher (constant $(...) subshell churn) + a loop of watchers that fork a 0.4s subshell and exit immediately (orphaned subshells keep the fm-watch.sh cmdline). 40 counts each.
+--- OLD pgrep shell snippet (base c5a5cd4) ---
+     38 watchers=1
+      2 watchers=2
+--- NEW node tests/assets/fm-watch-count.mjs <state> ---
+     40 watchers=1
+after teardown, new helper: watchers=0
