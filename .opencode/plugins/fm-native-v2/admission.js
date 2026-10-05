@@ -128,6 +128,20 @@ export function createAdmissionJournal(paths, sessionID, admit, report = console
   // slot, so parked wakes ring once more. A later drain still retires it.
   function idle() {
     for (const value of outstandingDoorbells()) save({ ...value, idle: true });
+    // The native inbox event can prove acceptance before the HTTP receipt.
+    // Bind idle to that exact ID, including receipt retries; an earlier idle
+    // without acceptance must never release a fresh doorbell.
+    for (const value of pending()) {
+      if (value.kind === "wake" && value.acceptedClaim === options.claim && value.nativeAccepted) save({ ...value, idle: true });
+    }
+  }
+  function accepted(id) {
+    if (!/^msg_[a-f0-9]{64}$/.test(id)) return;
+    let value;
+    try { value = validate(readPrivate(join(dir, id + ".json"))); }
+    catch (error) { if (error.code === "ENOENT") return; throw error; }
+    if (value.kind !== "wake" || value.phase !== "confirmed" || !Object.hasOwn(value, "attemptDrain") || value.attemptClaim !== options.claim || value.nativeAccepted) return;
+    save({ ...value, nativeAccepted: true, acceptedClaim: options.claim, acceptedDrain: value.attemptDrain });
   }
   function parkedBehindDoorbell(value) {
     return value.kind === "wake" && !["admitted", "acknowledged"].includes(value.phase) && ((wakeSlot && wakeSlot !== value.id) || outstandingDoorbells(value.id).length > 0);
@@ -157,9 +171,19 @@ export function createAdmissionJournal(paths, sessionID, admit, report = console
           // A steer reaches a busy lead at its next step boundary. The slot
           // remains occupied until canonical handling, not the native receipt.
           const drain = drainSequence();
+          const current = validate(readPrivate(join(dir, value.id + ".json")));
+          if (current.nativeAccepted && current.acceptedClaim !== options.claim) {
+            delete current.nativeAccepted; delete current.acceptedClaim;
+            delete current.acceptedDrain; delete current.idle;
+          }
+          save({ ...current, attemptClaim: options.claim, attemptDrain: drain });
           const result = await admit({ sessionID, id: value.id, text: value.text, delivery: "steer" });
           if (result?.id !== value.id) throw new Error("native admission did not acknowledge the exact message ID");
-          save({ ...value, phase: "admitted", claim: options.claim, drain });
+          // Reload observations written during the request. A lost receipt
+          // retries this ID without discarding its acceptance/idle history.
+          accepted(value.id);
+          const observed = validate(readPrivate(join(dir, value.id + ".json")));
+          if (observed.phase !== "acknowledged") save({ ...observed, phase: "admitted", claim: options.claim, drain: observed.acceptedDrain ?? drain });
           retries.delete(value.id);
           return true;
         } catch (error) {
@@ -202,6 +226,7 @@ export function createAdmissionJournal(paths, sessionID, admit, report = console
     prepare,
     parked: parkedBehindDoorbell,
     idle,
+    accepted,
     stalled,
     confirm: (value, recovery) => {
       const phase = ["admitted", "acknowledged"].includes(value.phase) ? value.phase : "confirmed";

@@ -2,7 +2,7 @@ import { identity, schema, publish, readRegistration, canonical, live, markerKey
 import { createWatchArmCoordinator } from "../lib/fm-watch-arm-v2.js";
 import { createAdmissionJournal } from "./admission.js";
 import { bindingRPC } from "./rpc.js";
-import { eventSessionID, isIdleEvent } from "../lib/fm-plugin-v2.js";
+import { eventData, eventSessionID, eventType, isIdleEvent } from "../lib/fm-plugin-v2.js";
 import { runProcess } from "../lib/fm-plugin-common.js";
 import { encodeFirstmateOperationalInput } from "../lib/fm-operational-input.js";
 import { existsSync } from "node:fs";
@@ -294,6 +294,7 @@ export default { id: "firstmate.native.v2", async setup(ctx) {
     try {
       for await (const event of ctx.client.event.subscribe({ signal: abort.signal })) {
         if (stopped || eventSessionID(event) !== record.sessionID) continue;
+        if (eventType(event) === "session.inbox.enqueued") journal.accepted(eventData(event).inboxID);
         if (!isIdleEvent(event)) continue;
         journal.idle();
         // Idle/interrupted alone never admits a continuation. The watcher is

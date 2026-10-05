@@ -28,6 +28,7 @@ When this session owns supervision and away mode is not active:
    The wake doorbell contains only a generic instruction to drain and acknowledge the durable queue; authoritative reasons come from that drain.
    While an admitted wake doorbell is still undrained, later wakes from the same claim stay journaled behind that outstanding steer without handoff confirmation.
    If the lead's turn ends (an execution terminal event for the exact lead session) with no drain recorded since a doorbell's admission, that doorbell stops holding the slot, so parked or later wakes admit exactly one new doorbell; a later drain still retires both.
+   The exact-ID native inbox acceptance event also binds a turn end that arrives before the prompt receipt, including lost-receipt retries; an idle event before acceptance never releases a fresh doorbell.
    Every main `bin/fm-wake-drain.sh` presentation advances a monotonic sequence in `state/.wake-drain-presented` with the recovery generation and highest row sequence it presented.
    An admitted doorbell is handled once a drain is recorded after its admission, even if rows remain queued; a confirmed no-row recovery, or an unadmitted row wake whose every row that drain presented, is also covered by a drain recorded after its preparation.
    A later wake names only the rows that arrived after the latest drain, so a covered record cannot absorb them and they get exactly one doorbell; a wake captured only after a drain already presented all its rows is covered without a doorbell.

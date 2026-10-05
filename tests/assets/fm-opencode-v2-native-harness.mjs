@@ -247,6 +247,7 @@ async function tuiRole([codeRoot, socketFile, specFile, outFile]) {
   let outageUntil = 0;
   let outageAttemptStart = 0;
   let lostAcks = spec.lostAckPrompts || 0;
+  let heldWakeReceipts = spec.holdWakeReceipts || 0, releaseWakeReceipt;
   const events = [];
   let notify = null;
   let streamBroken = false;
@@ -326,7 +327,14 @@ async function tuiRole([codeRoot, socketFile, specFile, outFile]) {
           const faulty = new RegExp(spec.faultMatch || ".").test(input.text);
           if (faulty && Date.now() < outageUntil) throw new Error("admission outage");
           if (faulty && rejectPrompts > 0) { rejectPrompts -= 1; throw new Error("admission rejected"); }
-          if (!ids.has(input.id)) { ids.add(input.id); record.admitted.push({ ...input, at: Date.now() }); }
+          if (!ids.has(input.id)) {
+            ids.add(input.id); record.admitted.push({ ...input, at: Date.now() });
+            events.push({ type: "session.inbox.enqueued", data: { sessionID: input.sessionID, inboxID: input.id } }); notify?.();
+          }
+          if (input.text.includes("WATCHER FIRED") && heldWakeReceipts > 0) {
+            heldWakeReceipts--;
+            await new Promise(resolve => { releaseWakeReceipt = resolve; });
+          }
           if (faulty && lostAcks > 0) { lostAcks -= 1; throw new Error("acknowledgement lost"); }
           return { id: input.id };
         },
@@ -365,6 +373,7 @@ async function tuiRole([codeRoot, socketFile, specFile, outFile]) {
     const entry = { step: step.do };
     if (step.do === "sleep") await sleep(step.ms);
     else if (step.do === "event") { events.push(step.event); notify?.(); }
+    else if (step.do === "release-wake-receipt") { releaseWakeReceipt?.(); }
     else if (step.do === "shell") Object.assign(entry, await request(socket(), { op: "shell", sessionID: step.sessionID || spec.sessionID, command: step.command, extraEnv: step.extraEnv }, 60000));
     else if (step.do === "observer-push") Object.assign(entry, await request(socket(), { op: "environment", sessionID: spec.sessionID, variables: step.variables }));
     else if (step.do === "write") writeFileSync(step.path, step.text);

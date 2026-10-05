@@ -293,6 +293,36 @@ for (const ended of [false,true]) {
   assert.equal(after.pending().length,0);
   assert.equal(f.calls.length,2,'the drain after the re-ring retires both doorbells without another prompt');
 }
+// Acceptance is observable before its receipt. Idle must follow that exact
+// acceptance, survive a lost receipt and reload, and never pre-release a fresh
+// doorbell. A busy lead and a canonical drain remain the control cases.
+for (const mode of ['idle','lost-receipt','busy','before-acceptance','drain']) {
+  let release;
+  const receipt=new Promise(resolve=>{release=resolve;});
+  let firstID;
+  const f=fixture('receipt-race-'+mode,async ({input})=>{
+    if(!firstID){firstID=input.id;await receipt;if(mode==='lost-receipt')throw new Error('lost receipt');}
+  });
+  const first=f.recovery('first');
+  if(mode==='before-acceptance')f.journal.idle();
+  const delivery=f.journal.deliver(first);
+  // Even idle during dispatch is too early until native acceptance is proven.
+  if(mode==='before-acceptance')f.journal.idle();
+  f.journal.accepted(first.id);
+  if(['idle','lost-receipt','drain'].includes(mode))f.reload().idle();
+  fs.writeFileSync(f.queue,row+'101\t2\tsignal\ttask\tnext\n');
+  const later=f.journal.confirm(f.journal.prepare('later'));
+  assert.equal(await f.journal.deliver(later),false,'an in-flight request still serializes admission');
+  if(mode==='drain')fs.writeFileSync(f.queue.replace('/.wake-queue','/.wake-drain-presented'),'1\tG\t2\n');
+  release();await delivery;
+  const reloaded=f.reload();
+  const released=['idle','lost-receipt','drain'].includes(mode);
+  assert.equal(await reloaded.deliver(later),released,mode);
+  await reloaded.deliver(later);
+  assert.equal(f.calls.filter(call=>call.id===later.id).length,released&&mode!=='drain'?1:0,mode+' must ring exactly once or remain covered/parked');
+  assert.equal(fs.readFileSync(f.queue,'utf8'),row+'101\t2\tsignal\ttask\tnext\n','idle and admission never consume rows');
+  if(mode==='lost-receipt')assert.equal(f.calls.filter(call=>call.id===first.id).length,2,'lost receipt retries the same exact ID');
+}
 // An in-flight no-row admission owns the slot before its native receipt.
 {
   let release;
