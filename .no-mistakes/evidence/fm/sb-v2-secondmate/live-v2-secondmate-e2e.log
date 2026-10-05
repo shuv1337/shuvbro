@@ -1,8 +1,10 @@
-FM_TEST_BEGIN 2026-10-05T05:59:23Z tests/fm-control-herdr-v2-live-e2e.test.sh family=live-harness-optin expected_gate_skip=live-capability
+2026-10-05 00:15:42 PDT
+Mon Oct  5 12:15:42 AM PDT 2026
+FM_TEST_BEGIN 2026-10-05T07:15:42Z tests/fm-control-herdr-v2-live-e2e.test.sh family=live-harness-optin expected_gate_skip=live-capability
 ok - shuvcode v2.0.22-shuv.2: real Herdr/Treehouse nested-shell exit, in-place relaunch and second exit
 ok - shuvcode v2.0.22-shuv.2: V2 secondmate owns its home, runs startup, delivers parent status, resumes its session/profile and retires cleanly
-FM_TEST_END 2026-10-05T06:01:13Z tests/fm-control-herdr-v2-live-e2e.test.sh exit=0 duration_ms=109460 gate_skip=false
-FM_TEST_SUMMARY total=1 failed=0 skipped_gate=0 duration_ms=109485
-FM_TEST_SUMMARY_FAMILY family=live-harness-optin count=1 duration_ms=109460 failed=0
-FM_TEST_SLOWEST rank=1 script=tests/fm-control-herdr-v2-live-e2e.test.sh duration_ms=109460
-exit=0
+FM_TEST_END 2026-10-05T07:17:47Z tests/fm-control-herdr-v2-live-e2e.test.sh exit=0 duration_ms=124810 gate_skip=false
+FM_TEST_SUMMARY total=1 failed=0 skipped_gate=0 duration_ms=124838
+FM_TEST_SUMMARY_FAMILY family=live-harness-optin count=1 duration_ms=124810 failed=0
+FM_TEST_SLOWEST rank=1 script=tests/fm-control-herdr-v2-live-e2e.test.sh duration_ms=124810
+EXIT=0
