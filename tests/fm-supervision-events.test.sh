@@ -125,6 +125,30 @@ event_wait_or_sleep
 [ "$CAP_CALLS" = 1 ] || fail "capability probe must be memoized across waits, got $CAP_CALLS calls"
 pass "event_wait_or_sleep: one cached capability probe owns validation across bounded waits"
 
+# --- successful records and clean waits retain their existing rc semantics ---
+reset_state
+fm_write_meta "$STATE_DIR/tk3.meta" "window=default:wG:pQ" "backend=herdr" "kind=ship"
+# shellcheck disable=SC2329 # Runtime override called by the isolated watcher.
+fm_backend_wait_transition() { mkrec wG:pQ blocked; return 0; }
+_event_cap_fails=1
+event_wait_or_sleep
+[ "$_event_cap_fails" = 0 ] || fail "a handled transition must clear the failure counter"
+grep -q 'herdr: agent blocked' "$STATE_DIR/.wake-queue" || fail "rc 0 must deliver the captured record"
+[ ! -s "$SLEEP_LOG" ] || fail "a handled transition must not spend another poll budget"
+for WAIT_RC in 1 3; do
+  # shellcheck disable=SC2329 # Runtime override called by the isolated watcher.
+  fm_backend_wait_transition() { return "$WAIT_RC"; }
+  _event_cap_fails=1
+  event_wait_or_sleep
+  [ "$_event_cap_fails" = 0 ] || fail "a full-budget wait must clear the failure counter"
+  [ ! -s "$SLEEP_LOG" ] || fail "a full-budget wait must not sleep twice"
+done
+if compgen -G "$STATE_DIR/.watch-event-output.*" >/dev/null; then
+  fail "normal event waits left output files behind"
+fi
+[ -z "$WATCH_EVENT_PID$WATCH_EVENT_FILE" ] || fail "normal event waits retained cleanup state"
+pass "event_wait_or_sleep: rc 0 handles the record, other clean waits reset failures without sleeping again or leaking output"
+
 # --- event_wait_or_sleep: a tmux-only home never runs the event path ----------
 
 reset_state
@@ -151,6 +175,14 @@ event_wait_or_sleep   # fails=2 -> disable
 event_wait_or_sleep   # disabled: sleeps without calling wait_transition
 WTN=$(wc -l < "$TMP/wtcalls" | tr -d '[:space:]')
 [ "$WTN" = 2 ] || fail "after EVENT_CAP_FAIL_MAX connect failures the event path must be disabled for the process (expected 2 wait_transition calls, got $WTN)"
+[ "$(wc -l < "$SLEEP_LOG" | tr -d '[:space:]')" = 3 ] || fail "each unusable or disabled event wait must sleep one poll budget"
 pass "event_wait_or_sleep: consecutive event-path failures disable the fast-path and revert to pure polling (fail-closed)"
+
+if command -v python3 >/dev/null 2>&1; then
+  python3 "$ROOT/tests/fm-backend-herdr-eventwait.test.py" \
+    || fail "portable watcher/socket-reader shutdown regression failed"
+else
+  echo "skip: python3 not found (required by the Herdr socket reader shutdown regression)"
+fi
 
 echo "# fm-supervision-events.test.sh: all assertions passed"
