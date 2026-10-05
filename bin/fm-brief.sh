@@ -451,7 +451,7 @@ format_stay_inside_rule() {
     printf '%s\n' "2. Stay inside this worktree; the only files you may write outside it are the report and the status file below."
     return 0
   fi
-  printf '%s\n' "2. Stay inside this worktree; the only files you may write outside it are the report and the status file below, plus these exact paths and the files inside them, and nothing broader:"
+  printf '%s\n' "$FM_BRIEF_ALLOW_WRITE_RULE"
   i=0
   while [ "$i" -lt "${#ALLOW_WRITE_CANON[@]}" ]; do
     path=${ALLOW_WRITE_CANON[$i]}
