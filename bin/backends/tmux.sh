@@ -182,9 +182,9 @@ fm_backend_tmux_classify_process_name() {  # <path> [argv0] -> agent|shell|other
         printf 'agent'
       # shuvcode (adapter opencode-v2) is not a substring of any glob above, and
       # a bare `*shuvcode*` would claim shuvcode-helper. Its compiled binary's
-      # process name is exactly `shuvcode` (verified shuvcode v2.0.22-shuv.1:
-      # the worker TUI is .../shuvcode-linux-x64/bin/shuvcode under its node
-      # launcher), so bin/fm-shuvcode-lib.sh's structural rule owns the match.
+      # process name is exactly `shuvcode` (verified shuvcode v2.0.22-shuv.2 by
+      # the tmux exit/relaunch live guard: the worker TUI is
+      # .../shuvcode-linux-x64/bin/shuvcode under its node launcher), so bin/fm-shuvcode-lib.sh's structural rule owns the match.
       elif fm_shuvcode_process_matches "${path:-$argv0}" '' "$argv0"; then
         printf 'agent'
       # cursor-agent runs as a bundled node script, so tmux reports the pane

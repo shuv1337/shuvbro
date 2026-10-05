@@ -533,7 +533,7 @@ SH
   # may depend on whether this host has one installed.
   cat > "$fakebin/shuvcode" <<'SH'
 #!/usr/bin/env bash
-case "${1:-}" in --version) echo 'shuvcode v2.0.22-shuv.1'; exit 0 ;; --help) echo '--server --session --auto'; exit 0 ;; esac
+case "${1:-}" in --version) echo 'shuvcode v2.0.22-shuv.2'; exit 0 ;; --help) echo '--server --session --auto'; exit 0 ;; esac
 exit 93
 SH
   chmod +x "$fakebin/shuvcode"
@@ -732,7 +732,7 @@ make_opencode_v2_native_service() {
   cat > "$FAKEBIN_DIR/shuvcode" <<'SH'
 #!/usr/bin/env bash
 set -eu
-case "$1" in --version) echo 'shuvcode v2.0.22-shuv.1'; exit 0 ;; --help) echo '--server --session --auto'; exit 0 ;; esac
+case "$1" in --version) echo 'shuvcode v2.0.22-shuv.2'; exit 0 ;; --help) echo '--server --session --auto'; exit 0 ;; esac
 if [ "$1" = debug ]; then echo "state $FM_FAKE_V2_NATIVE/native-state"; exit 0; fi
 [ "$1" = api ] && [ "$2" = --server ] && [ "$3" = http://127.0.0.1:12345 ] && [ "$OPENCODE_PASSWORD" = fixture ] || exit 92
 case "$4" in

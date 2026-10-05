@@ -1655,8 +1655,10 @@ The capability probe now accepts exactly `shuvcode v2.0.22-shuv.2`, following it
 Herdr's real Treehouse path was verified on 2026-10-04 at 18:30 PDT on Linux with Herdr client/server 0.9.1-shuv.6+9059819d8043, Treehouse 2.0.0, and shuvcode v2.0.22-shuv.2:
 
 ```sh
-FM_HERDR_LAB_HELPER=/home/shuv/repos/shuvbro/bin/fm-herdr-lab.sh FM_CONTROL_HERDR_V2_LIVE=1 bin/fm-test-run.sh tests/fm-control-herdr-v2-live-e2e.test.sh
+FM_CONTROL_HERDR_V2_LIVE=1 bin/fm-test-run.sh tests/fm-control-herdr-v2-live-e2e.test.sh
 ```
+
+The recorded run executed from an isolated task worktree and set `FM_HERDR_LAB_HELPER` to the main checkout's `bin/fm-herdr-lab.sh`, as that task's isolation contract required; elsewhere the test defaults to the running checkout's own `$ROOT/bin/fm-herdr-lab.sh`, so the portable command above omits the override.
 
 ```text
 ok - shuvcode v2.0.22-shuv.2: real Herdr/Treehouse nested-shell exit, in-place relaunch and second exit
