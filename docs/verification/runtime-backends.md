@@ -1676,4 +1676,20 @@ The native route is implemented but is not yet qualified for the combined issue 
 On 2026-10-02, isolated Linux probes with installed shuvcode v2.0.22-shuv.1 demonstrated native package loading, exact TUI-owned lock and pathless binding RPC, a real typed cd-guard refusal, unrelated-root execution, observer environment recovery, ordinary session-ID spoof refusal, one durable queued wake and shared-worker attachment, plus natural TUI retirement with the shared service surviving.
 Those probes used a deterministic local provider, not a paid/vendor model, and did not qualify the actual two-home/two-worker/Herdr, busy-and-idle delivery or restarted-service positive matrix.
 The isolated worker-live probe was rerun on 2026-10-04 (see above); the endpoint and worker execution-reconciliation changes otherwise have portable regression coverage only until their opt-in live tests are rerun.
+The current [lead steer admission contract](../supervision-protocols/opencode-v2.md) has portable coverage in `tests/fm-opencode-v2-wake-admission.test.sh`, `tests/fm-opencode-v2-plugin.test.sh` and `tests/fm-opencode-v2-tui-acceptance.test.sh`; the earlier queued-wake probe above predates that change.
+The isolated shared-service guard was rerun on 2026-10-04 at 19:51 PDT on Linux with shuvcode v2.0.22-shuv.2 and the 30-second busy-tool window.
+Legs A, C and G passed, including busy-lead steering before the old prompt's final response, idle-lead execution, two wakes and two canonical acknowledgements.
+The [rerun log](https://github.com/shuv1337/shuvbro/pull/45#issuecomment-5987282004) records the exact output from this command:
+
+```sh
+FM_OPENCODE_V2_BIN=/home/shuv/.npm-global/lib/node_modules/shuvcode/node_modules/shuvcode-linux-x64/bin/shuvcode FM_OPENCODE_V2_SHARED_LIVE=1 FM_V2_LIVE_LEGS=CG bin/fm-test-run.sh --jobs 1 tests/fm-opencode-v2-shared-service-live.test.sh
+```
+
+```text
+ok - live leg G: a busy-lead wake steers at the next tool boundary before the old prompt's final response, an idle-lead wake starts execution; two wakes, two canonical acks, no duplicate execution
+not ok - 2 live qualification check(s) failed
+```
+
+The complete guard exited 1 solely because its two capability-probe checks reject the installed v2.0.22-shuv.2 under the v2.0.22-shuv.1 allowlist; qualifying that version remains separate from the passing wake-delivery legs.
+The explicit binary override selects the installed Linux glibc build, because the test's default glob selected a musl build that could not run on this host.
 No upstream `opencode2`, cross-host split or V2 secondmate qualification is claimed.

@@ -27,6 +27,7 @@ Process detection is structural; it never executes a stranger binary during an a
 
 ## Guard runtime
 
+The [native supervision protocol](../../../../../docs/supervision-protocols/opencode-v2.md) owns lead wake, startup and repair steer delivery.
 The historical private-server observations are not qualification of the native shared-service route.
 Shuvcode resolves a project plugin's bare imports natively and shares none of its own modules, so `import("effect")` from `.opencode/plugins/` fails until the dependency pinned in `.opencode/plugins/package.json` is installed.
 Run `npm ci --prefix .opencode/plugins` in the primary checkout before starting a shuvcode lead.
@@ -40,7 +41,7 @@ A project plugin cannot import shuvcode's own `Tool.Error` class; shuvcode match
 Before dispatch publishes task runtime state or acquires an isolated copy, `bin/fm-opencode-v2-capability.mjs` checks the qualified installed version, native launch flags and pinned Effect guard runtime.
 Unsupported builds or missing runtime capabilities refuse with installation/qualification instructions; the probe never discovers or starts a managed service.
 Ship and scout launches use `bin/fm-opencode-v2-launch.sh` for both default and explicit models.
-Its header owns the shared-service creation, exact recorded session, `--auto` attachment and queued admission mechanics.
+Its header owns the shared-service creation, exact recorded session, `--auto` attachment and queued worker-brief admission mechanics.
 The root command accepts only `--standalone`, `--server`, `--auto`, `--continue`, `--session`, `--prompt`, and a directory.
 It rejects `--model` and `--effort` with usage text and exit 1.
 A requested model is validated against the same shared service catalog before creating its worker; an unspecified variant resolves to native `default`.
