@@ -1,0 +1,18 @@
+##### /home/shuv/.cache/agent-ws/watch-arm-live/base
+restart rc=0 in 1s; old watcher alive: no
+-- restart stdout:
+check: rearm-resurface
+-- restart stderr:
+-- first arm rc=1 stdout:
+watcher: started pid=3537572 (beacon fresh)
+watcher: FAILED - watcher cycle exited 1 without an actionable reason
+-- first arm stderr:
+##### /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M46YG5Z1AGWM0JX65W8PH9TX
+restart rc=0 in 0s; old watcher alive: no
+-- restart stdout:
+check: rearm-resurface
+-- restart stderr:
+-- first arm rc=1 stdout:
+watcher: started pid=3540928 (beacon fresh)
+watcher: FAILED - watcher cycle exited 1 without an actionable reason
+-- first arm stderr:

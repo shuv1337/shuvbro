@@ -1,0 +1,37 @@
+
+=== A: real fm-watch.sh watcher, TERM the arm ===
+watcher: started pid=3468026 (beacon fresh)
+watcher pid=3468026 cmd=bash /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M46YG5Z1AGWM0JX65W8PH9TX/bin/fm-watch.sh 
+arm rc=143 stop took .204822759s; watcher alive after? no
+arm stderr:
+watcher-down marker: pending:downtime:3468573.1791234983.fK7bpn
+
+=== B: real watcher, --restart replaces it ===
+first: watcher: started pid=3468722 (beacon fresh) lockpid=3468722
+restart: check: rearm-resurface after 15.187771955s; old alive? no; new lockpid=
+restart stderr:
+first arm rc=1
+/home/shuv/.cache/agent-ws/watch-arm-live/drive.sh: line 34: kill: (3469189) - No such process
+/home/shuv/.cache/agent-ws/watch-arm-live/drive.sh: line 8: $1: unbound variable
+second arm rc=0 new alive? 
+
+=== C (adversarial): watcher drops its TERM trap; TERM the arm ===
+stub watcher pid=3476622
+arm rc=143 returned after 7.248670318s; stub alive? no
+arm stderr:
+watcher: pid 3476622 survived TERM for 7s; sent KILL, so its cleanup was skipped and recovery will use the stale-lock path
+
+=== D (adversarial): --restart over a lock held by a TERM-ignoring process ===
+/home/shuv/.cache/agent-ws/watch-arm-live/drive.sh: line 62: 3482117 Killed                     FM_STUB_READY=$s/ready setsid $s/stub.sh > /dev/null 2>&1
+restart rc=1 after 19.719129791s (timeout 124 would mean hang); holder alive? no
+stdout:
+watcher: FAILED - no live watcher with a fresh beacon
+stderr:
+watcher: pid 3482117 survived TERM for 7s; sent KILL, so its cleanup was skipped and recovery will use the stale-lock path
+watcher: pid 3486762 survived TERM for 7s; sent KILL, so its cleanup was skipped and recovery will use the stale-lock path
+/home/shuv/.no-mistakes/worktrees/8a7692f99431/01M46YG5Z1AGWM0JX65W8PH9TX/bin/fm-watch-arm.sh: line 675: 3486762 Killed                     "$WATCH" > "$child_out"
+
+=== E: watcher cleanup takes 5s (within 7s grace) is not KILLed ===
+arm rc=143 after 5.415486246s; watcher cleanup ran: cleanup-done
+arm stderr:
+no KILL escalation

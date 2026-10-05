@@ -1,25 +1,27 @@
 ok - watch-arm: an attached arm reports the wake its cycle delivered instead of a false failure
 ok - watch-arm: a delivered wake consumed by the handling turn still closes the attached arm cleanly
 ok - watch-arm: a cycle that delivered no wake of its own still fails loudly
-/home/shuv/.no-mistakes/worktrees/8a7692f99431/01M46TH6KZEDJW27M3192J59JB/bin/fm-watch-arm.sh: line 597: 3857455 Killed                     "$WATCH" > "$child_out"
-WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 2 --recovery-generation 3858211.1791231184.BCfHho
+/home/shuv/.no-mistakes/worktrees/8a7692f99431/01M46YG5Z1AGWM0JX65W8PH9TX/bin/fm-watch-arm.sh: line 650: 3353314 Killed                     "$WATCH" > "$child_out"
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 2 --recovery-generation 3354297.1791234867.wgqm4k
 ok - watch-arm: re-arm surfaces every queued wake and an open remote decision after downtime
 watcher: recovery state could not be persisted; retaining stale lock evidence
 ok - watch-arm: marker publication failure retains stale-lock recovery evidence
-WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 2 --recovery-generation 3866149.1791231190.tS3dp2
-WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 3 --recovery-generation 3869587.1791231190.LXS7yc
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 2 --recovery-generation 3369253.1791234873.jsd5IW
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 3 --recovery-generation 3370734.1791234873.7uP3oi
 ok - watch-arm: a wake queued after handling drain is recovered once at successor arm
 ok - watch-arm: interrupted handling leaves its wake durable for successor re-drain
-WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 0 --recovery-generation 3878401.1791231195.D1lflp
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 0 --recovery-generation 3378924.1791234878.tGodyO
 ok - watch-arm: malformed recovery state is quarantined without a successor loop
-WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 1 --recovery-generation 3880500.1791231196.Mc61p7
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 1 --recovery-generation 3380900.1791234879.MYfc1F
 ok - watch-arm: publication after recovery handoff is surfaced
 ok - watch-arm: restart publishes recovery before clearing a reused-pid watcher lock
-WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 7 --recovery-generation 3882683.1791231198.I7Bdf3
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 7 --recovery-generation 3384386.1791234880.SMOhD9
 ok - watch-arm: markerless legacy queues are adopted and recovered
 ok - watch-arm: a watcher close during handling keeps the printed acknowledgement valid
 ok - watch-arm: a moved recovery generation consumes handled rows and names its remedy
 ok - watch-arm: a watcher that survives TERM is reaped instead of hanging the arm
 ok - watch-arm: a watcher cleanup within its lock-wait bound is not KILLed
+ok - watch-arm: a pid whose identity changes during the stop grace is not killed
+ok - watch-arm: restart refuses to launch while a stopped watcher pid is still present
 ok - watch-arm: downtime marker publication does not follow symlinks
-exit=0 elapsed=58s
+rc=0 elapsed=100s
