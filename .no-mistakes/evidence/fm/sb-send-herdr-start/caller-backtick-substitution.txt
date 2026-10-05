@@ -1,0 +1,12 @@
+# Caller shell (bash) evaluating a double-quoted message containing backticked `herdr server`,
+# with a herdr whose server is already running. fm-send is replaced by printf to show it never runs herdr.
+$ printf "argv[1]=%s\n" "check that `herdr server` is up"; echo "exit=$?"
+error: herdr server is already running
+api socket: ~/.config/herdr/herdr.sock
+argv[1]=check that  is up
+exit=0
+
+$ set -e variant (agent shells often run with errexit + pipefail-like wrappers):
+error: herdr server is already running
+api socket: ~/.config/herdr/herdr.sock
+exit=1

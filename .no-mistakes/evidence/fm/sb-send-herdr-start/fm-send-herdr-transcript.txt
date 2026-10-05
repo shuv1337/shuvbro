@@ -1,0 +1,83 @@
+=== [AFTER] server.running=false
+$ fm-send.sh t1 'please continue'
+exit=0
+$ fm-send.sh t1 --key Enter
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+exit=0
+$ fm-peek.sh t1
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+codex> readyexit=0
+--- inbox:
+schema=fm-task-inbox.v1
+at=2026-10-05T20:08:57Z
+--
+--- herdr calls (server-start lines marked):
+      3 agent get w1:p2 --session default
+      1 pane get w1:p2 --session default
+      2 pane read w1:p2 --source recent --lines 200 --format ansi --session default
+      1 pane read w1:p2 --source recent --lines 200 --session default
+      2 pane send-keys w1:p2 enter --session default
+      1 pane send-text w1:p2 : Firstmate instruction waiting: list '/home/shuv/.cache/agent-ws/fmsend.DC9y/state/t1.inbox'/*.msg and, in numeric order, read and act on each, then mv each handled file to '/home/shuv/.cache/agent-ws/fmsend.DC9y/state/t1.inbox'/handled/. --session default
+=== [BEFORE] server.running=false
+$ fm-send.sh t1 'please continue'
+fm-send: doorbell did not reach default:w1:p2; the steer is durably recorded at /home/shuv/.cache/agent-ws/fmsend.Ycz0/state/t1.inbox/001.msg and the watcher will re-ring
+exit=0
+$ fm-send.sh t1 --key Enter
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+error: herdr server for session 'default' did not report running within 10s
+error: key 'Enter' not sent to default:w1:p2 (herdr send failed; tried meta=/home/shuv/.cache/agent-ws/fmsend.Ycz0/state/t1.meta; backend=from-meta)
+exit=1
+$ fm-peek.sh t1
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+error: herdr server for session 'default' did not report running within 10s
+exit=1
+--- inbox:
+schema=fm-task-inbox.v1
+at=2026-10-05T20:08:57Z
+--
+--- herdr calls (server-start lines marked):
+      1 agent get w1:p2 --session default
+      1 pane get w1:p2 --session default
+      5 >>> server --session default   <-- SERVER START
+    105 status --json --session default
+=== [AFTER] server.running=true
+$ fm-send.sh t1 'please continue'
+exit=0
+$ fm-send.sh t1 --key Enter
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+exit=0
+$ fm-peek.sh t1
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+codex> readyexit=0
+--- inbox:
+schema=fm-task-inbox.v1
+at=2026-10-05T20:08:58Z
+--
+--- herdr calls (server-start lines marked):
+      3 agent get w1:p2 --session default
+      1 pane get w1:p2 --session default
+      2 pane read w1:p2 --source recent --lines 200 --format ansi --session default
+      1 pane read w1:p2 --source recent --lines 200 --session default
+      2 pane send-keys w1:p2 enter --session default
+      1 pane send-text w1:p2 : Firstmate instruction waiting: list '/home/shuv/.cache/agent-ws/fmsend.dbIN/state/t1.inbox'/*.msg and, in numeric order, read and act on each, then mv each handled file to '/home/shuv/.cache/agent-ws/fmsend.dbIN/state/t1.inbox'/handled/. --session default
+=== [BEFORE] server.running=true
+$ fm-send.sh t1 'please continue'
+exit=0
+$ fm-send.sh t1 --key Enter
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+exit=0
+$ fm-peek.sh t1
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+codex> readyexit=0
+--- inbox:
+schema=fm-task-inbox.v1
+at=2026-10-05T20:08:58Z
+--
+--- herdr calls (server-start lines marked):
+      3 agent get w1:p2 --session default
+      1 pane get w1:p2 --session default
+      2 pane read w1:p2 --source recent --lines 200 --format ansi --session default
+      1 pane read w1:p2 --source recent --lines 200 --session default
+      2 pane send-keys w1:p2 enter --session default
+      1 pane send-text w1:p2 : Firstmate instruction waiting: list '/home/shuv/.cache/agent-ws/fmsend.lg07/state/t1.inbox'/*.msg and, in numeric order, read and act on each, then mv each handled file to '/home/shuv/.cache/agent-ws/fmsend.lg07/state/t1.inbox'/handled/. --session default
+      6 status --json --session default
