@@ -1632,8 +1632,7 @@ A throwaway scout was spawned through `bin/fm-spawn.sh --scout --harness omp --m
 
 ## Shuvcode explicit-model worker
 
-Verified on 2026-10-04 at 09:25 PDT on Linux with shuvcode v2.0.22-shuv.1 and tmux 3.7c,
-using `opencode/space-bunny-free#low` on the current shared-service launcher:
+Verified on 2026-10-04 at 18:29 PDT on Linux with shuvcode v2.0.22-shuv.2, Node v26.10.0 and tmux 3.7c, using `opencode/space-bunny-free#low` on the current shared-service launcher:
 
 ```sh
 FM_OPENCODE_V2_WORKER_LIVE=1 bash tests/fm-opencode-v2-worker-live-e2e.test.sh
@@ -1642,23 +1641,25 @@ FM_OPENCODE_V2_WORKER_LIVE=1 bash tests/fm-opencode-v2-worker-live-e2e.test.sh
 Observed result:
 
 ```text
-ok - shuvcode v2.0.22-shuv.1 explicit model/variant, unattended ask, explicit deny, busy/idle, turn-end and persistent follow-up
-ok - shuvcode v2.0.22-shuv.1 exit is confirmed only once the TUI has left the pane and the recorded session is idle
-ok - shuvcode v2.0.22-shuv.1 relaunch resumes the recorded session in the same endpoint and worktree and the note is acted on
+ok - shuvcode v2.0.22-shuv.2 explicit model/variant, unattended ask, explicit deny, busy/idle, turn-end and persistent follow-up
+ok - shuvcode v2.0.22-shuv.2 exit is confirmed only once the TUI has left the pane and the recorded session is idle
+ok - shuvcode v2.0.22-shuv.2 relaunch resumes the recorded session in the same endpoint and worktree and the note is acted on
 ```
 
 The test runs relocated XDG native paths, a disposable registered shared service and an explicit non-default ownership namespace.
 Its second and third results are the live guard for `bin/fm-control.sh` on opencode-v2: the tmux classifier attributed the real worker processes, `exit` reported `native-session=idle`, and `relaunch` kept the recorded session ID, the endpoint and the worktree while the resumed worker acted on its progress note.
 Only Treehouse allocation is replaced with entry into the disposable worktree.
-The guard requires configured model credentials and is opt-in, outside portable CI.
-Herdr's real Treehouse path was verified on 2026-10-04 at 15:17 PDT on Linux with Herdr 0.9.1-shuv.5+ecb35624bc44, Treehouse 2.0.0, and shuvcode v2.0.22-shuv.1:
+The guard submits diagnostic prompts and is opt-in, outside portable CI; this run used the free model and required no paid credentials.
+The capability probe now accepts exactly `shuvcode v2.0.22-shuv.2`, following its existing policy of one qualified build at a time.
+`tests/fm-opencode-v2-launch.test.sh` covers acceptance of shuv.2 and refusal of shuv.1, shuv.3, missing launch flags and missing runtime.
+Herdr's real Treehouse path was verified on 2026-10-04 at 18:30 PDT on Linux with Herdr client/server 0.9.1-shuv.6+9059819d8043, Treehouse 2.0.0, and shuvcode v2.0.22-shuv.2:
 
 ```sh
-FM_CONTROL_HERDR_V2_LIVE=1 bin/fm-test-run.sh tests/fm-control-herdr-v2-live-e2e.test.sh
+FM_HERDR_LAB_HELPER=/home/shuv/repos/shuvbro/bin/fm-herdr-lab.sh FM_CONTROL_HERDR_V2_LIVE=1 bin/fm-test-run.sh tests/fm-control-herdr-v2-live-e2e.test.sh
 ```
 
 ```text
-ok - shuvcode v2.0.22-shuv.1: real Herdr/Treehouse nested-shell exit, in-place relaunch and second exit
+ok - shuvcode v2.0.22-shuv.2: real Herdr/Treehouse nested-shell exit, in-place relaunch and second exit
 ```
 
 After exit, the sole foreground process was `zsh -l`, with a foreground process-group ID different from the pane shell PID; the recorded native session was idle and relaunch completed in the same pane and Treehouse worktree.
@@ -1675,5 +1676,49 @@ The current `bin/fm-opencode-v2-launch.sh` creates an exact model-bound session 
 The native route is implemented but is not yet qualified for the combined issue #1 matrix.
 On 2026-10-02, isolated Linux probes with installed shuvcode v2.0.22-shuv.1 demonstrated native package loading, exact TUI-owned lock and pathless binding RPC, a real typed cd-guard refusal, unrelated-root execution, observer environment recovery, ordinary session-ID spoof refusal, one durable queued wake and shared-worker attachment, plus natural TUI retirement with the shared service surviving.
 Those probes used a deterministic local provider, not a paid/vendor model, and did not qualify the actual two-home/two-worker/Herdr, busy-and-idle delivery or restarted-service positive matrix.
-The isolated worker-live probe was rerun on 2026-10-04 (see above); the endpoint and worker execution-reconciliation changes otherwise have portable regression coverage only until their opt-in live tests are rerun.
+On 2026-10-04 at 18:35 PDT on Linux with installed shuvcode v2.0.22-shuv.2, Node v26.10.0 and termctrl 0.6.0, the isolated shared-service guard exited 0 for all requested legs A/B/C/D/E/G/H:
+
+```sh
+FM_OPENCODE_V2_SHARED_LIVE=1 FM_V2_LIVE_LEGS=ABCDEGH bash tests/fm-opencode-v2-shared-service-live.test.sh
+```
+
+```text
+ok - live leg B: two homes on one service each have their own active owner; lead A cannot take home B
+ok - live leg C: two workers (explicit and configured-default model, both mock/echo) ran on the one shared service with exact recorded sessions; a worker shell cannot claim the lead home
+ok - live leg D: with an observer UI attached, the lead keeps its claim and its shell still holds the home lock
+ok - live leg G: a wake raised while the lead was busy was queued and handled after its turn, an idle-lead wake was handled promptly; two wakes, two canonical acks, no duplicate execution
+ok - live leg E: after the service restart and before rebind the lead's command was refused with the rebind diagnostic
+ok - live leg H: teardown refuses the resumed worker
+ok - live leg H: after the confirmed successor cancellation ordinary teardown reconciles the worker
+```
+
+The run also passed package inventory, typed guard refusals, exact TUI-owned lock, owner rebind after service restart, interruption of the successor's resumed worker, and bounded settlement for workers that finished after or before restart.
+On the same host at 18:38 PDT, the complete succession guard exited 0 with its default ten cycles and private-server case enabled:
+
+```sh
+FM_OPENCODE_V2_SUCCESSION_LIVE=1 bash tests/fm-opencode-v2-succession-live.test.sh
+```
+
+```text
+ok - first arm: one watcher, no turn-end-guard prompt, first wake acknowledged
+ok - native TUI entry completed setup
+ok - steady succession: 10 wakes, each one journaled message ID and one canonical ack, one watcher, fresh beacon, empty queue, zero failure prompts
+ok - the watcher SIGTERM mid-idle recovers (1 no-row resurface) and the next wake is handled once
+ok - the watcher SIGKILL mid-idle recovers (1 no-row resurface) and the next wake is handled once
+ok - the arm SIGTERM mid-idle recovers (1 no-row resurface) and the next wake is handled once
+ok - an arm SIGKILL with a surviving watcher does not strand the next wake
+ok - subdirectory, unrelated and child sessions neither take over the watcher nor receive wakes
+ok - a server package reload leaves the TUI process, its claim and its watcher lifetime intact and delivery continues
+ok - a TUI plugin reload keeps the same TUI process and immutable claim, sets up again and delivers the next wake
+ok - the documented rebind owner command is reachable in the TUI
+ok - TUI exit retires the claim and supervision while the shared service keeps running
+ok - a relaunched TUI re-owns .lock, re-arms after session start and handles the held and later wakes
+ok - a lead against a private server is refused at activation
+```
+
+Both guards use a local deterministic provider, isolated XDG services, private termctrl PTYs and disposable non-default ownership namespaces retired through `cleanup-test-namespace`.
+Their shared resolver probes installed package variants with read-only `--version` calls, skipping incompatible loader variants rather than selecting by glob order; the portable launcher regression covers that failure and explicit-override refusal.
+The direct Herdr detach/attach leg F was excluded because its interactive client bypasses the named-session helper required by this qualification's isolation contract.
+The separate real Herdr/Treehouse worker lifecycle guard above passed, but does not qualify that primary detach/attach leg.
+The real-model evidence remains the single-worker free-model guard above; a real-model two-home/two-worker combined Herdr matrix remains pending, so these results qualify worker dispatch on shuv.2 without claiming the complete native shared-service matrix.
 No upstream `opencode2`, cross-host split or V2 secondmate qualification is claimed.

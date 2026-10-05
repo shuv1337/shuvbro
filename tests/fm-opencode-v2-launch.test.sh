@@ -86,18 +86,69 @@ import * as fs from 'node:fs'; import assert from 'node:assert/strict'; import {
 const {probeCapabilities}=await import(pathToFileURL(process.env.ROOT+'/bin/fm-opencode-v2-capability.mjs'));
 const lab=process.env.LAB,runtime=lab+'/.opencode/plugins';fs.mkdirSync(runtime,{recursive:true});
 const binary=lab+'/shuvcode',log=lab+'/calls';
-fs.writeFileSync(binary,`#!/bin/bash\necho "$*" >> '${log}'\ncase "$1" in --version) echo "\${PROBE_VERSION:-shuvcode v2.0.22-shuv.1}" ;; --help) echo "\${PROBE_FLAGS:---server --session --auto}" ;; *) exit 99 ;; esac\n`,{mode:0o700});
-process.env.PROBE_VERSION='shuvcode v1.0.0';await assert.rejects(probeCapabilities(lab,binary),/unqualified target/);delete process.env.PROBE_VERSION;
+fs.writeFileSync(binary,`#!/bin/bash\necho "$*" >> '${log}'\ncase "$1" in --version) echo "\${PROBE_VERSION:-shuvcode v2.0.22-shuv.2}" ;; --help) echo "\${PROBE_FLAGS:---server --session --auto}" ;; *) exit 99 ;; esac\n`,{mode:0o700});
+for (const version of ['shuvcode v1.0.0','shuvcode v2.0.22-shuv.1','shuvcode v2.0.22-shuv.3']) {
+  process.env.PROBE_VERSION=version;
+  await assert.rejects(probeCapabilities(lab,binary),/unqualified target.*use qualified shuvcode v2\.0\.22-shuv\.2/);
+}
+delete process.env.PROBE_VERSION;
 process.env.PROBE_FLAGS='--session --auto';await assert.rejects(probeCapabilities(lab,binary),/missing native --server/);delete process.env.PROBE_FLAGS;
 await assert.rejects(probeCapabilities(lab,binary),/npm ci/);
 fs.mkdirSync(runtime+'/node_modules/effect',{recursive:true});
 fs.writeFileSync(runtime+'/package.json',JSON.stringify({dependencies:{effect:'4.0.0-rc.112'}}));
 fs.writeFileSync(runtime+'/node_modules/effect/package.json',JSON.stringify({name:'effect',version:'4.0.0-rc.112',type:'module',exports:'./index.js'}));
 fs.writeFileSync(runtime+'/node_modules/effect/index.js','export const Data={TaggedError(){}}; export const Effect={gen(){},promise(){},tryPromise(){},runPromise(){},flatMap(){},fail(){}};');
-assert.equal((await probeCapabilities(lab,binary)).qualified,true);
+assert.deepEqual(await probeCapabilities(lab,binary),{version:'shuvcode v2.0.22-shuv.2',runtime:'effect',qualified:true});
 assert.ok(fs.readFileSync(log,'utf8').trim().split('\n').every(line=>['--version','--help'].includes(line)),'probe accessed service or dispatch');
 JS
 pass 'capability probe refuses unqualified version, missing CLI and runtime; qualified stand-in is read-only'
+# The live guard's installed-package resolver must skip an executable musl
+# package whose loader fails on a glibc host, without calling any service API.
+# shellcheck source=tests/fm-opencode-v2-live-binary-lib.sh
+. "$ROOT/tests/fm-opencode-v2-live-binary-lib.sh"
+(
+  unset FM_OPENCODE_V2_BIN
+  resolver="$TMP_ROOT/resolver"
+  mkdir -p "$resolver/bin" "$resolver/node_modules/shuvcode-a-musl/bin" "$resolver/node_modules/shuvcode-b-glibc/bin"
+  export RESOLVER_LOG="$resolver/calls"
+  cat > "$resolver/bin/shuvcode" <<'SH'
+#!/usr/bin/env bash
+printf 'launcher:%s\n' "$*" >> "$RESOLVER_LOG"
+[ "$*" = --version ] || exit 99
+echo 'shuvcode fixture'
+SH
+  cat > "$resolver/node_modules/shuvcode-a-musl/bin/shuvcode" <<'SH'
+#!/usr/bin/env bash
+printf 'musl:%s\n' "$*" >> "$RESOLVER_LOG"
+echo 'fixture incompatible loader' >&2
+exit 127
+SH
+  cat > "$resolver/node_modules/shuvcode-b-glibc/bin/shuvcode" <<'SH'
+#!/usr/bin/env bash
+printf 'glibc:%s\n' "$*" >> "$RESOLVER_LOG"
+[ "$*" = --version ] || exit 99
+echo 'shuvcode fixture'
+SH
+  chmod +x "$resolver/bin/shuvcode" "$resolver"/node_modules/*/bin/shuvcode
+  resolver_call() { PATH="$resolver/bin:$PATH" v2_resolve_live_binary; }
+  good="$resolver/node_modules/shuvcode-b-glibc/bin/shuvcode"
+  bad="$resolver/node_modules/shuvcode-a-musl/bin/shuvcode"
+  [ "$(resolver_call)" = "$good" ] || fail 'live resolver selected an incompatible package'
+  [ "$(cat "$RESOLVER_LOG")" = $'musl:--version\nglibc:--version' ] || fail 'resolver did not probe and skip the failing variant read-only'
+  [ "$(FM_OPENCODE_V2_BIN="$good" resolver_call)" = "$good" ] || fail 'working binary override was ignored'
+  if FM_OPENCODE_V2_BIN="$bad" resolver_call > "$resolver/out" 2> "$resolver/err"; then
+    fail 'invalid explicit binary override silently fell back'
+  fi
+  grep -q 'cannot run explicit shuvcode binary' "$resolver/err" || fail 'invalid binary override lost its diagnostic'
+  rm "$good"
+  [ "$(resolver_call)" = "$resolver/bin/shuvcode" ] || fail 'runnable launcher fallback was lost'
+  rm "$resolver/bin/shuvcode"
+  ln -s "$bad" "$resolver/bin/shuvcode"
+  if resolver_call > "$resolver/out" 2> "$resolver/err"; then
+    fail 'resolver accepted an installation with no runnable binary'
+  fi
+)
+pass 'live binary resolver skips incompatible installed variants and refuses a broken explicit override'
 export PATH="$TMP_ROOT/bin:$PATH"
 export TEST_NATIVE_STATE="$TMP_ROOT/native-state" TEST_SERVICE_PID=$$
 mkdir -p "$TEST_NATIVE_STATE"
