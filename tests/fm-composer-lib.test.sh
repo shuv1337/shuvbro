@@ -758,6 +758,8 @@ test_codex_working_elapsed_reads_status_row() {
   [ "$out" = "69 1" ] || fail "zero-padded 09 seconds must parse as decimal, got '$out'"
   out=$(printf '%s\n' 'Working (1h 08m 09s)' | fm_composer_codex_working_elapsed)
   [ "$out" = "4089 1" ] || fail "zero-padded hour row must parse as decimal, got '$out'"
+  out=$(printf '\033[2m• Working (6s • esc to interrupt)\033[0m\n' | fm_composer_codex_working_elapsed)
+  [ "$out" = "6 1" ] || fail "ANSI around the status row must still parse, got '$out'"
   pass "fm_composer_codex_working_elapsed: Codex Working rows parse to seconds and display resolution"
 }
 
@@ -775,10 +777,18 @@ test_codex_working_elapsed_ignores_non_status_text() {
   [ "$rc" -ne 0 ] || fail "an hour row without seconds must not parse, got '$out'"
   out=$(printf '%s\n' '• Working (5m 03s • esc to inte' | fm_composer_codex_working_elapsed) && rc=0 || rc=$?
   [ "$rc" -ne 0 ] || fail "a row cut off before its closing paren must not parse, got '$out'"
+  out=$(printf '%s\n' 'Working (5m) while stuck' | fm_composer_codex_working_elapsed) && rc=0 || rc=$?
+  [ "$rc" -ne 0 ] || fail "text after the closing paren must not parse, got '$out'"
+  out=$(printf '%s\n' '• Working (5m) while stuck' | fm_composer_codex_working_elapsed) && rc=0 || rc=$?
+  [ "$rc" -ne 0 ] || fail "a hinted-looking prefix with trailing prose must not parse, got '$out'"
   out=$(printf '%s\n' \
     'quoted earlier: Working (9m)' \
     '• Working (1m 02s • esc to interrupt)' | fm_composer_codex_working_elapsed)
   [ "$out" = "62 1" ] || fail "the last status row must win over an earlier mention, got '$out'"
+  out=$(printf '%s\n' \
+    '• Working (1m 02s • esc to interrupt)' \
+    'Working (9m)' | fm_composer_codex_working_elapsed)
+  [ "$out" = "62 1" ] || fail "a later bare minute row must not override the interrupt-hint row, got '$out'"
   pass "fm_composer_codex_working_elapsed: only a status-shaped Working row matches, last row wins"
 }
 
