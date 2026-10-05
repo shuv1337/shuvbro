@@ -1,0 +1,4 @@
+after-first-doorbell: {"phase":"admitted","rows":2,"drain":0} 
+after-second-wake (lead still busy=yes): {"phase":"admitted","rows":2,"drain":0} {"phase":"prepared","rows":4,"drain":0} 
+after-drain: {"phase":"acknowledged","rows":2,"drain":0} {"phase":"acknowledged","rows":4,"drain":0} 
+burst_admitted=1 wake_prompts=1 acks=1 handled=acked 4 1791180898516507813;

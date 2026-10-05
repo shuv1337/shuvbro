@@ -1,0 +1,2 @@
+after-ignored-doorbell (lead idle, no drain; receipt=): {"phase":"admitted","rows":2,"drain":0}  prompts=1
+after-re-ring-and-drain: {"phase":"acknowledged","rows":2,"drain":0} {"phase":"acknowledged","rows":4,"drain":0}  prompts=2 acks=1 receipt=1 2451656.1791180952.uR4a3z 4

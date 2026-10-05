@@ -1,0 +1,1 @@
+⁣FIRSTMATE_OP: v1 watcher: WATCHER FIRED - drain the durable wake queue with bin/fm-wake-drain.sh, handle the presented wakes, and run the acknowledgement command it prints. Watcher continuity is plugin-owned.

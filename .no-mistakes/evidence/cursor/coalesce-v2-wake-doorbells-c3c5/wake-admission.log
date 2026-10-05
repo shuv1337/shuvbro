@@ -1,0 +1,8 @@
+ok - lead wakes, startup and repairs steer with stable IDs; exact receipts and canonical acknowledgements remain distinct
+ok - no-row/row doorbells share one steer cap per claim; canonical ack of the episode or a later generation releases parked obligations without consuming rows
+ok - coordinator parks W2 without handoff work and admits r2 after a partial canonical ack
+ok - real drain/ack mid-turn-row: recovery doorbell coalesces until drained; later rows admit; covered recoveries retire
+ok - real drain/ack coalesced-row: recovery doorbell coalesces until drained; later rows admit; covered recoveries retire
+ok - real drain/ack superseded-recoveries: recovery doorbell coalesces until drained; later rows admit; covered recoveries retire
+ok - helper contract: handoff confirmed before the lead acknowledges is accepted and the episode retires
+ok - helper contract: a handoff confirmed after the lead acknowledged is rejected, so confirmation must precede admission
