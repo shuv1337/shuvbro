@@ -494,7 +494,9 @@ fi
 if leg G && [ -n "${W1:-}" ] && [ -n "${W2:-}" ]; then
   printf 'kind=ship\n' > "$HOME_A/state/t2.meta"
   : > "$LAB/handled.log"
-  api post "/api/session/$LEAD_A/prompt" "$(jq -nc --arg t "RUN: touch $LAB/busy-start; sleep 12; touch $LAB/busy-done" '{text: $t, delivery: "queue"}')" >/dev/null
+  # Leave time for W1's turn, the watcher successor and native admission before
+  # the busy tool completes, including on a loaded shared-service host.
+  api post "/api/session/$LEAD_A/prompt" "$(jq -nc --arg t "RUN: touch $LAB/busy-start; sleep 30; touch $LAB/busy-done" '{text: $t, delivery: "queue"}')" >/dev/null
   busy_started() { [ -e "$LAB/busy-start" ]; }
   wait_until 30 busy_started || live_fail "the busy-lead tool never started"
   run_in_session "$W1" "printf 'done: w1 finished\\n' >> $HOME_A/state/t1.status" || true
