@@ -1,0 +1,40 @@
+*DRYRUN* [CI/Lint shard 1-1] Cleaning up container for job Lint shard 1
+*DRYRUN* [CI/Lint shard 1-1]   🐳  docker create image=catthehacker/ubuntu:full-22.04 platform=linux/amd64 entrypoint=["tail" "-f" "/dev/null"] cmd=[] network="host"
+*DRYRUN* [CI/Lint shard 1-1]   🐳  docker pull image=catthehacker/ubuntu:full-22.04 platform=linux/amd64 username= forcePull=true
+*DRYRUN* [CI/Lint shard 1-1]   🐳  docker run image=catthehacker/ubuntu:full-22.04 platform=linux/amd64 entrypoint=["tail" "-f" "/dev/null"] cmd=[] network="host"
+*DRYRUN* [CI/Lint shard 1-1]   ☁  git clone 'https://github.com/actions/upload-artifact' # ref=v4
+*DRYRUN* [CI/Lint shard 1-1] 🏁  Job succeeded
+*DRYRUN* [CI/Lint shard 1-1] 🧪  Matrix: map[shard:1]
+*DRYRUN* [CI/Lint shard 1-1] ⭐ Run Complete job
+*DRYRUN* [CI/Lint shard 1-1] ⭐ Run Main actions/checkout@v6
+*DRYRUN* [CI/Lint shard 1-1] ⭐ Run Main Install pinned actionlint
+*DRYRUN* [CI/Lint shard 1-1] ⭐ Run Main Install pinned ShellCheck
+*DRYRUN* [CI/Lint shard 1-1] ⭐ Run Main Run full lint partition
+*DRYRUN* [CI/Lint shard 1-1] ⭐ Run Main Upload lint partition timing
+*DRYRUN* [CI/Lint shard 1-1] ⭐ Run Set up job
+*DRYRUN* [CI/Lint shard 1-1] 🚀  Start image=catthehacker/ubuntu:full-22.04
+*DRYRUN* [CI/Lint shard 1-1]   ✅  Success - Complete job
+*DRYRUN* [CI/Lint shard 1-1]   ✅  Success - Main actions/checkout@v6 [1.070319ms]
+*DRYRUN* [CI/Lint shard 1-1]   ✅  Success - Main Install pinned actionlint [11.500143ms]
+*DRYRUN* [CI/Lint shard 1-1]   ✅  Success - Main Install pinned ShellCheck [19.622436ms]
+*DRYRUN* [CI/Lint shard 1-1]   ✅  Success - Main Run full lint partition [15.671541ms]
+*DRYRUN* [CI/Lint shard 1-1]   ✅  Success - Main Upload lint partition timing [5.686892ms]
+*DRYRUN* [CI/Lint shard 1-1]   ✅  Success - Set up job
+*DRYRUN* [CI/Lint shard 1-1] unable to get git ref: failed to identify reference (tag/branch) for the checked-out revision '6c326b6902ca7c7d278cffd459a11697584ba393'
+*DRYRUN* [CI/Lint shard 2-2] Cleaning up container for job Lint shard 2
+*DRYRUN* [CI/Lint shard 2-2]   🐳  docker create image=catthehacker/ubuntu:full-22.04 platform=linux/amd64 entrypoint=["tail" "-f" "/dev/null"] cmd=[] network="host"
+*DRYRUN* [CI/Lint shard 2-2]   🐳  docker pull image=catthehacker/ubuntu:full-22.04 platform=linux/amd64 username= forcePull=true
+*DRYRUN* [CI/Lint shard 2-2]   🐳  docker run image=catthehacker/ubuntu:full-22.04 platform=linux/amd64 entrypoint=["tail" "-f" "/dev/null"] cmd=[] network="host"
+*DRYRUN* [CI/Lint shard 2-2]   ☁  git clone 'https://github.com/actions/upload-artifact' # ref=v4
+*DRYRUN* [CI/Lint shard 2-2] 🏁  Job succeeded
+*DRYRUN* [CI/Lint shard 2-2] 🧪  Matrix: map[shard:2]
+*DRYRUN* [CI/Lint shard 2-2] ⭐ Run Complete job
+*DRYRUN* [CI/Lint shard 2-2] ⭐ Run Main actions/checkout@v6
+*DRYRUN* [CI/Lint shard 2-2] ⭐ Run Main Install pinned actionlint
+*DRYRUN* [CI/Lint shard 2-2] ⭐ Run Main Install pinned ShellCheck
+*DRYRUN* [CI/Lint shard 2-2] ⭐ Run Main Run full lint partition
+*DRYRUN* [CI/Lint shard 2-2] ⭐ Run Main Upload lint partition timing
+*DRYRUN* [CI/Lint shard 2-2] ⭐ Run Set up job
+*DRYRUN* [CI/Lint shard 2-2] 🚀  Start image=catthehacker/ubuntu:full-22.04
+*DRYRUN* [CI/Lint shard 2-2]   ✅  Success - Complete job
+*DRYRUN* [CI/Lint shard 2-2]   ✅  Success - Main actions/checkout@v6 [953.269µs]

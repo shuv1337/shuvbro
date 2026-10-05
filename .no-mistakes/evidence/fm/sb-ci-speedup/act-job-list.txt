@@ -1,0 +1,17 @@
+time="2026-10-05T01:23:12-07:00" level=info msg="Using docker host 'unix:///var/run/docker.sock', and daemon socket 'unix:///var/run/docker.sock'"
+Stage  Job ID                     Job name                                      Workflow name                   Workflow file             Events                        
+0      macos-stock-bash           Stock macOS Bash snapshot compatibility       CI                              ci.yml                    pull_request,workflow_dispatch
+0      invariants                 Repo invariants                               CI                              ci.yml                    pull_request,workflow_dispatch
+0      test-coverage              Test coverage guard                           CI                              ci.yml                    pull_request,workflow_dispatch
+0      tests-portable-parallel-1  Behavior portable parallel 1                  CI                              ci.yml                    pull_request,workflow_dispatch
+0      tests-portable-serial      Behavior portable serial ${{ matrix.shard }}  CI                              ci.yml                    workflow_dispatch,pull_request
+0      tests-herdr                Behavior tests (Herdr)                        CI                              ci.yml                    pull_request,workflow_dispatch
+0      lint-shards                Lint shard ${{ matrix.shard }}                CI                              ci.yml                    pull_request,workflow_dispatch
+0      tests-portable-parallel-2  Behavior portable parallel 2                  CI                              ci.yml                    pull_request,workflow_dispatch
+0      macos-stock-bash           Stock macOS Bash snapshot compatibility       Stock macOS Bash label          macos-label.yml           pull_request                  
+0      check                      PR must be raised via no-mistakes             Require no-mistakes             no-mistakes-required.yml  pull_request                  
+0      measure                    Measure Herdr automation primitives           Windows Herdr automation spike  windows-herdr-spike.yml   workflow_dispatch             
+1      lint                       Lint                                          CI                              ci.yml                    pull_request,workflow_dispatch
+1      tests-timing-aggregate     Behavior timing aggregate                     CI                              ci.yml                    pull_request,workflow_dispatch
+
+Detected multiple jobs with the same job name, use `-W` to specify the path to the specific workflow.

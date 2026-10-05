@@ -1,0 +1,8 @@
+Lint aggregator step: test "$LINT_RESULT" = success
+needs.lint-shards.result=success -> exit 0
+needs.lint-shards.result=failure -> exit 1
+needs.lint-shards.result=cancelled -> exit 1
+needs.lint-shards.result=skipped -> exit 1
+lint.needs= lint-shards if= always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+lint-shards matrix= {'shard': [1, 2, 3, 4, 5]} fail-fast= False timeout= 15
+tests-portable-serial matrix= {'shard': [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]} timeout= 20

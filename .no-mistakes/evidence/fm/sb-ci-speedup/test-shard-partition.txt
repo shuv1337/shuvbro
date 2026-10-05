@@ -1,0 +1,45 @@
+## --list-lanes
+portable-parallel-1
+portable-parallel-2
+portable-serial
+portable-serial-1of10
+portable-serial-2of10
+portable-serial-3of10
+portable-serial-4of10
+portable-serial-5of10
+portable-serial-6of10
+portable-serial-7of10
+portable-serial-8of10
+portable-serial-9of10
+portable-serial-10of10
+real-herdr-gated
+
+## --check-coverage
+FM_TEST_COVERAGE ok total=222 parallel=24 serial=185 serial_shards=10 serial_unhinted=0 herdr=13
+exit=0
+
+## per-shard script count and hint load (ms)
+shard  1:  14 scripts, load  612959 ms (10.2 min), max single 548389 ms
+shard  2:  16 scripts, load  612850 ms (10.2 min), max single 475015 ms
+shard  3:  19 scripts, load  612817 ms (10.2 min), max single 239086 ms
+shard  4:  20 scripts, load  612839 ms (10.2 min), max single 210148 ms
+shard  5:  19 scripts, load  612866 ms (10.2 min), max single 181166 ms
+shard  6:  19 scripts, load  612882 ms (10.2 min), max single 171277 ms
+shard  7:  19 scripts, load  612818 ms (10.2 min), max single 170091 ms
+shard  8:  19 scripts, load  612817 ms (10.2 min), max single 166269 ms
+shard  9:  20 scripts, load  612936 ms (10.2 min), max single 165346 ms
+shard 10:  20 scripts, load  612858 ms (10.2 min), max single 164194 ms
+union of 10 shards == portable-serial lane (185 scripts), dups=0
+
+## slowest hinted scripts
+tests/fm-watch-triage.test.sh 548389
+tests/fm-opencode-v2-tui-acceptance.test.sh 475015
+tests/fm-remote-secondmate-lifecycle-e2e.test.sh 239086
+tests/fm-backlog-atomicity.test.sh 210148
+tests/fm-procevent.test.sh 181166
+
+## adversarial: stale count lane
+fm-test-run: lane 'portable-serial-1of5' asks for 5 portable serial shards but this runner is configured for 10 (see --list-lanes)
+exit=2
+fm-test-run: lane 'portable-serial-11of10' shard index is outside 1..10 (see --list-lanes)
+exit=2
