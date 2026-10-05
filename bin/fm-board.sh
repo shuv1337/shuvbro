@@ -17,7 +17,7 @@
 # serve    Run the board for the active FM_HOME in the foreground, bound to
 #          127.0.0.1 only, through bin/fm-board.mjs (node; no npm dependency).
 #          The page asks for data every FM_BOARD_INTERVAL seconds (default 10,
-#          2..300). A rebuild from `model` runs only for a page or data request
+#          2..300). A rebuild from `model` runs only for a data request
 #          that needs one: not while nobody is asking, and not again while the
 #          backlog, heads-up notes, secondmate registry, task metadata, and
 #          status logs are unchanged unless that rebuild started at least
