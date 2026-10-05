@@ -234,7 +234,7 @@ SH
   grep -Fx -- --auto "$TEST_LOG.primary-args" >/dev/null || fail 'secondmate lost unattended approval'
   grep -Fx -- --prompt "$TEST_LOG.primary-args" >/dev/null || fail 'secondmate did not carry charter into activation'
   grep -Fx -- --prompt-id "$TEST_LOG.primary-args" >/dev/null || fail 'secondmate did not bind native charter admission to its exact message ID'
-  jq -e 'has("launchAfterMessageID") and .launchAfterMessageID==null' "$TEST_RECORD" >/dev/null || fail 'secondmate submission was not bound to this launch'
+  jq -e '.spawnGeneration=="s1.2.3" and (.launchMessageID | test("^msg_[a-f0-9]{64}$"))' "$TEST_RECORD" >/dev/null || fail 'secondmate submission was not bound to this launch'
   export TEST_ACTIVE=idle
   started() { env -u FM_V2_ACTIVATION -u OPENCODE_SESSION_ID node "$ROOT/bin/fm-opencode-v2-session.mjs" started "$TEST_RECORD" "$TEST_WORK" "${1:-s1.2.3}"; }
   if started > /dev/null 2>&1; then fail 'empty native history falsely proved secondmate submission'; fi
@@ -257,21 +257,18 @@ SH
   if started s1.2.4 > /dev/null 2>&1; then fail 'an earlier running generation falsely proved a new launch'; fi
   started > /dev/null || fail 'current-generation active execution should prove submission'
   export TEST_ACTIVE=idle
-  jq '.launchAfterMessageID="msg_new"' "$TEST_RECORD" > "$TEST_RECORD.tmp"
-  chmod 600 "$TEST_RECORD.tmp"
-  mv "$TEST_RECORD.tmp" "$TEST_RECORD"
-  if started > /dev/null 2>&1; then fail 'an earlier resumed turn falsely proved the new launch started'; fi
-  export TEST_ACTIVE=running
-  if started > /dev/null 2>&1; then fail 'current-generation active execution bypassed the pre-launch message baseline'; fi
-  export TEST_ACTIVE=idle
+  stale_charter=$(jq -r .launchMessageID "$TEST_RECORD")
   printf 'kind=secondmate\nspawn_gen=s1.2.4\n' > "$TMP_ROOT/mate.meta"
   : > "$TEST_LOG"
   (cd "$own" && "$own/bin/fm-opencode-v2-launch.sh" --secondmate --resume --model fixture/test-model --prompt 'exact worker brief' --session-record "$TEST_RECORD") \
-    || fail 'secondmate relaunch could not preserve a non-null message baseline'
-  jq -e '.sessionID=="ses_worker_exact" and .launchAfterMessageID=="msg_new" and .spawnGeneration=="s1.2.4"' "$TEST_RECORD" >/dev/null \
-    || fail 'secondmate relaunch lost its exact session, message baseline or new generation'
+    || fail 'secondmate relaunch did not activate its recorded session'
+  jq -e --arg stale "$stale_charter" '.sessionID=="ses_worker_exact" and .spawnGeneration=="s1.2.4" and (.launchMessageID | test("^msg_[a-f0-9]{64}$")) and .launchMessageID!=$stale' "$TEST_RECORD" >/dev/null \
+    || fail 'secondmate relaunch lost its exact session or did not rebind its charter to the new generation'
   [ "$(cat "$TEST_LOG")" = activated ] || fail 'secondmate relaunch created a new session or bypassed activation'
-  if started s1.2.4 > /dev/null 2>&1; then fail 'secondmate relaunch counted the old assistant message as new submission'; fi
+  if started s1.2.4 > /dev/null 2>&1; then fail 'secondmate relaunch counted the prior generation charter execution as new submission'; fi
+  export TEST_ACTIVE=running
+  if started s1.2.4 > /dev/null 2>&1; then fail 'an active old turn with only the prior generation charter falsely proved the new launch started'; fi
+  export TEST_ACTIVE=idle
   TEST_MESSAGES=$(jq -cn --arg charter "$(jq -r .launchMessageID "$TEST_RECORD")" '{data:[{id:"msg_next",type:"assistant"},{id:$charter,type:"user"}]}')
   started s1.2.4 > /dev/null || fail 'secondmate resumed assistant turn did not prove submission'
   : > "$TEST_LOG"

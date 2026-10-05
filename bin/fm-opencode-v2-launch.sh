@@ -4,8 +4,8 @@
 # --secondmate activates a home-local lead TUI, not a worker: its own native
 # plugin admits TEXT only after claiming that home and freezing its environment.
 # The parent-owned FILE still supplies exact-session lifecycle reconciliation.
-# For a secondmate it also binds the spawn generation, prior last-message ID
-# and deterministic charter message ID admitted by that exact home-local TUI.
+# For a secondmate it also binds the spawn generation and deterministic
+# charter message ID admitted by that exact home-local TUI.
 # An exact recorded session is created before prompt admission; no private
 # server/stdin lease is started or killed. --auto applies to this worker TUI.
 # FILE is the home-owned task session sidecar passed by fm-spawn, not an RPC
@@ -171,9 +171,6 @@ temporary=$(mktemp "${record}.XXXXXX")
 jq -c --argjson service "$service" '.data | {version:1,sessionID:.id,location:.location,model:.model} + $service' <<< "$response" > "$temporary"
 mv "$temporary" "$record"
 if [ "$secondmate" -eq 1 ]; then
-  # Bind the submission readback to this launch, never an earlier resumed turn.
-  messages=$(api session.message.list --param "sessionID=$session" --param "location[directory]=$directory" --param order=desc --param limit=1)
-  prior=$(jq -c '.data | if type=="array" then (.[0].id // null) else error("invalid messages") end' <<< "$messages")
   if [ "$resumed" -eq 1 ]; then
     api session.active > "$catalog"
     jq -e --arg id "$session" '(.data | type) == "object" and (.data | has($id) | not)' "$catalog" >/dev/null \
@@ -183,7 +180,7 @@ if [ "$secondmate" -eq 1 ]; then
   generation=$(sed -n 's/^spawn_gen=//p' "$meta")
   [[ "$generation" =~ ^s[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'error: native secondmate requires a current spawn generation' >&2; exit 1; }
   prompt_id=$(node -e 'console.log("msg_"+require("node:crypto").createHash("sha256").update(process.argv[1]+"\0"+process.argv[2]).digest("hex"))' "$session" "$generation")
-  jq --argjson prior "$prior" --arg generation "$generation" --arg prompt_id "$prompt_id" '.launchAfterMessageID=$prior | .spawnGeneration=$generation | .launchMessageID=$prompt_id' "$record" > "$temporary"
+  jq --arg generation "$generation" --arg prompt_id "$prompt_id" '.spawnGeneration=$generation | .launchMessageID=$prompt_id' "$record" > "$temporary"
   mv "$temporary" "$record"
   [ -f "$meta" ] && [ ! -L "$meta" ] && [ "$(cat "$meta")" = "$meta_before" ] \
     || { echo 'error: native secondmate metadata changed before activation' >&2; exit 1; }

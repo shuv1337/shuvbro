@@ -466,7 +466,7 @@ case "${1:-}" in
           if [ -n "${FM_FAKE_V2_SIDECAR:-}" ]; then
             birth=$(node "$FM_FAKE_V2_ROOT/bin/fm-opencode-v2-owner.mjs" identity "$FM_FAKE_V2_SERVICE_PID")
             generation=$(sed -n 's/^spawn_gen=//p' "$FM_FAKE_V2_HOME/state/$FM_FAKE_V2_ID.meta")
-            ( umask 077; jq -cn --argjson birth "$birth" --arg wt "$FM_FAKE_V2_SIDECAR" --arg generation "$generation" --arg charter "msg_$(printf '%064d' 1)" '{version:1,sessionID:"ses_spawned",location:{directory:$wt},model:{providerID:"fixture",id:"echo"},servicePID:$birth.pid,serviceStart:$birth.start,hostBootID:$birth.boot,serviceURL:"http://127.0.0.1:12345",spawnGeneration:$generation,launchAfterMessageID:"msg_prior",launchMessageID:$charter}' \
+            ( umask 077; jq -cn --argjson birth "$birth" --arg wt "$FM_FAKE_V2_SIDECAR" --arg generation "$generation" --arg charter "msg_$(printf '%064d' 1)" '{version:1,sessionID:"ses_spawned",location:{directory:$wt},model:{providerID:"fixture",id:"echo"},servicePID:$birth.pid,serviceStart:$birth.start,hostBootID:$birth.boot,serviceURL:"http://127.0.0.1:12345",spawnGeneration:$generation,launchMessageID:$charter}' \
               > "$FM_FAKE_V2_HOME/state/$FM_FAKE_V2_ID.opencode-v2-session.json" )
           fi ;;
         *'shuvcode --standalone'*) printf 'launch-typed\n' > "$FM_FAKE_V2_STATE" ;;
