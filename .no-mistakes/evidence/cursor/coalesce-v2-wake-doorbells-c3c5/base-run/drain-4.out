@@ -1,0 +1,4 @@
+1791183206	12	signal	lab.status	signal: /tmp/fm-v2-succ-live.2HGQWD/primary/state/lab.status
+wake annotation: latest wake-EVENT observed at drain, not current state: lab.status: done: post-drain
+STATUS OUTCOME BACKSTOP (newest captain-facing task event has no covering branch outcome):
+lab done: post-drain

@@ -1,0 +1,52 @@
+[
+  {
+    "id": "msg_d539c9c43bc279aaa1f20cd79763767a94e82b29d64e6bcbcbd7ff452ca901d2",
+    "delivery": null,
+    "text": "FIRSTMATE_OP: v1 session-start: Run `bin/fm-session-start.sh` now, exactly once, before executing any other instructions."
+  },
+  {
+    "id": "msg_10ad5b4880014o4GNhdcfJiGQb",
+    "delivery": null,
+    "text": "RUN: bin/fm-session-start.sh > /tmp/fm-v2-succ-live.2HGQWD/session-start.out 2>&1"
+  },
+  {
+    "id": "msg_10ad5b84e001Nk55vWr7zy45UG",
+    "delivery": null,
+    "text": "RUN: printf 'kind=scout\\n' > state/lab.meta; printf 'working: started\\n' > state/lab.status"
+  },
+  {
+    "id": "msg_c90c86b348347684ac718a02cf24045214e0489b3eed050362a3af78efc8d365",
+    "delivery": null,
+    "text": "FIRSTMATE_OP: v1 watcher: WATCHER FIRED - drain queued wakes with bin/fm-wake-drain.sh and handle the reported wake. Watcher continuity is plugin-owned."
+  },
+  {
+    "id": "msg_10ad5ca19001f90MhxV1oAZgsc",
+    "delivery": null,
+    "text": "RUN: sleep 6; echo busy-done"
+  },
+  {
+    "id": "msg_4554d11adf081e96e40d520617d9dc0b904843e85d7a4818da6b676fef8d4399",
+    "delivery": null,
+    "text": "FIRSTMATE_OP: v1 watcher: WATCHER FIRED - drain queued wakes with bin/fm-wake-drain.sh and handle the reported wake. Watcher continuity is plugin-owned."
+  },
+  {
+    "id": "msg_e96431e305d2b40783ff4d2f000f1e785fb83b6d18da71e640e2c9a037db7c0a",
+    "delivery": null,
+    "text": "FIRSTMATE_OP: v1 watcher: WATCHER FIRED - drain queued wakes with bin/fm-wake-drain.sh and handle the reported wake. Watcher continuity is plugin-owned."
+  },
+  {
+    "id": "msg_b0e3ee0b420873a0b34db32a127a29b09c5b37dc88cf86dde0385e51ee18556e",
+    "delivery": null,
+    "text": "FIRSTMATE_OP: v1 watcher: WATCHER FIRED - drain queued wakes with bin/fm-wake-drain.sh and handle the reported wake. Watcher continuity is plugin-owned."
+  },
+  {
+    "id": "msg_760b2b8b812488a8cc552dbdc77d6a4d449acc0180d304968e5a56c75b00f0fc",
+    "delivery": null,
+    "text": "FIRSTMATE_OP: v1 watcher: WATCHER FIRED - drain queued wakes with bin/fm-wake-drain.sh and handle the reported wake. Watcher continuity is plugin-owned."
+  },
+  {
+    "id": "msg_9c418fb5f18ae2f29a13fc12b91ccc821d58e1cf4c96ff211b8f41dae0d3c53d",
+    "delivery": null,
+    "text": "FIRSTMATE_OP: v1 watcher: WATCHER FIRED - drain queued wakes with bin/fm-wake-drain.sh and handle the reported wake. Watcher continuity is plugin-owned."
+  }
+]

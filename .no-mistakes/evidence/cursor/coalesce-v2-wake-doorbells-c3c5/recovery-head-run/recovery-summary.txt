@@ -1,0 +1,1 @@
+watcher TERM -> recovery doorbell; 2 rows injected while undrained: wake prompts mid=1 total=1 ; handled.log since: acked 2 3915695.1791183282.gwXmi6 1791183283576743635|acked 6 3918105.1791183283.6wA73G 1791183315417542955| ; failure prompts=0 ; queue rows=0 ; watchers=1

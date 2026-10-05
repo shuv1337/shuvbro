@@ -1,0 +1,3 @@
+lead busy on ordinary prompt; burst-1 injected, burst-2..4 injected while doorbell undrained (handler sleeps 40s before drain)
+wake prompts while doorbell undrained (after burst-4): 1 ; durable queue rows then: 8
+wake prompts for whole burst: 4 ; canonical acks: 1 ; WATCHER FAILURE prompts: 0 ; queue rows after: 0

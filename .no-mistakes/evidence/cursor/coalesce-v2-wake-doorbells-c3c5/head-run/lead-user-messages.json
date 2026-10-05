@@ -1,0 +1,37 @@
+[
+  {
+    "id": "msg_fcad1d38d2bed693d091ea3383c2ed204315cda12609d86da614a59c5d920097",
+    "delivery": null,
+    "text": "FIRSTMATE_OP: v1 session-start: Run `bin/fm-session-start.sh` now, exactly once, before executing any other instructions."
+  },
+  {
+    "id": "msg_10ad4782a001u4RQ8A43bqrNgY",
+    "delivery": null,
+    "text": "RUN: bin/fm-session-start.sh > /tmp/fm-v2-succ-live.HlM1w9/session-start.out 2>&1"
+  },
+  {
+    "id": "msg_10ad47be2001VJGztphvuoJzyc",
+    "delivery": null,
+    "text": "RUN: printf 'kind=scout\\n' > state/lab.meta; printf 'working: started\\n' > state/lab.status"
+  },
+  {
+    "id": "msg_fbe790524e6b45d1243ada743be1b7409600f82235bd0b3c5d2449012f59f656",
+    "delivery": null,
+    "text": "FIRSTMATE_OP: v1 watcher: WATCHER FIRED - drain the durable wake queue with bin/fm-wake-drain.sh, handle the presented wakes, and run the acknowledgement command it prints. Watcher continuity is plugin-owned."
+  },
+  {
+    "id": "msg_10ad48cb6001mQmXOx3dquNEFh",
+    "delivery": null,
+    "text": "RUN: sleep 6; echo busy-done"
+  },
+  {
+    "id": "msg_bc07c2549ba42dd55d0e88b01c96f1bcf9d3d92f31b6b75b4e3d0c2288c3aa91",
+    "delivery": null,
+    "text": "FIRSTMATE_OP: v1 watcher: WATCHER FIRED - drain the durable wake queue with bin/fm-wake-drain.sh, handle the presented wakes, and run the acknowledgement command it prints. Watcher continuity is plugin-owned."
+  },
+  {
+    "id": "msg_6a63d547d3bf36f1fab2e5a8a2f47ad6ba884f5281330a4289540b00645f1ba9",
+    "delivery": null,
+    "text": "FIRSTMATE_OP: v1 watcher: WATCHER FIRED - drain the durable wake queue with bin/fm-wake-drain.sh, handle the presented wakes, and run the acknowledgement command it prints. Watcher continuity is plugin-owned."
+  }
+]

@@ -1,0 +1,5 @@
+1791183245	6	signal	lab.status	signal: /tmp/fm-v2-succ-live.Lsy7j7/primary/state/lab.status
+wake annotation: unread wake-EVENT since last drain, not current state: lab.status: done: ignored-1
+wake annotation: latest wake-EVENT observed at drain, not current state: lab.status: done: after-idle
+STATUS OUTCOME BACKSTOP (newest captain-facing task event has no covering branch outcome):
+lab done: after-idle

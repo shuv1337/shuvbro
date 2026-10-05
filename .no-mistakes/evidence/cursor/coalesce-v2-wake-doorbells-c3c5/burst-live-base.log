@@ -1,0 +1,13 @@
+ok - session start makes native .lock the activated TUI process PID (3795403)
+ok - first arm: one watcher, no turn-end-guard prompt, first wake acknowledged
+ok - native TUI entry completed setup
+lead busy on ordinary prompt; burst-1 injected, burst-2..4 injected while doorbell undrained (handler sleeps 40s before drain)
+wake prompts while doorbell undrained (after burst-4): 1 ; durable queue rows then: 8
+wake prompts for whole burst: 4 ; canonical acks: 1 ; WATCHER FAILURE prompts: 0 ; queue rows after: 0
+not ok - live burst coalescing: wake prompts for whole burst: 4 ; canonical acks: 1 ; WATCHER FAILURE prompts: 0 ; queue rows after: 0
+ok - live: a row arriving after the drain gets exactly one new doorbell and ack
+not ok - doorbell text unexpected: FIRSTMATE_OP: v1 watcher: WATCHER FIRED - drain queued wakes with bin/fm-wake-drain.sh and handle the reported wake. Watcher continuity is plugin-owned.
+
+signal: /tmp/fm-v2-succ-live.2HGQWD/primary/state/lab.status
+ok - live: per-wake reasons appear only in the drained durable rows
+note: live evidence retained at /tmp/fm-v2-succ-live.2HGQWD

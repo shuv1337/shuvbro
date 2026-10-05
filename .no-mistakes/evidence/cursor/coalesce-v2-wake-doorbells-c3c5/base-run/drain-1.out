@@ -1,0 +1,2 @@
+1791183143	2	signal	lab.status	signal: /tmp/fm-v2-succ-live.2HGQWD/primary/state/lab.status
+wake annotation: latest wake-EVENT observed at drain, not current state: lab.status: working: started

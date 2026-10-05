@@ -1,0 +1,6 @@
+ok - session start makes native .lock the activated TUI process PID (3908096)
+ok - first arm: one watcher, no turn-end-guard prompt, first wake acknowledged
+ok - native TUI entry completed setup
+watcher TERM -> recovery doorbell; 2 rows injected while undrained: wake prompts mid=1 total=1 ; handled.log since: acked 2 3915695.1791183282.gwXmi6 1791183283576743635|acked 6 3918105.1791183283.6wA73G 1791183315417542955| ; failure prompts=0 ; queue rows=0 ; watchers=1
+ok - live: a no-row recovery doorbell coalesces rows that arrive before its drain; one prompt, one drain, no failure prompt
+ok - live: next row after the recovery drain gets exactly one doorbell (not stuck)

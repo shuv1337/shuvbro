@@ -1,0 +1,10 @@
+ok - session start makes native .lock the activated TUI process PID (3736562)
+ok - first arm: one watcher, no turn-end-guard prompt, first wake acknowledged
+ok - native TUI entry completed setup
+lead busy on ordinary prompt; burst-1 injected, burst-2..4 injected while doorbell undrained (handler sleeps 40s before drain)
+wake prompts while doorbell undrained (after burst-4): 1 ; durable queue rows then: 8
+wake prompts for whole burst: 1 ; canonical acks: 1 ; WATCHER FAILURE prompts: 0 ; queue rows after: 0
+ok - live burst: four wakes during one undrained steer doorbell produce exactly one WATCHER FIRED prompt and one canonical ack; no failure prompt
+ok - live: a row arriving after the drain gets exactly one new doorbell and ack
+ok - live: doorbell text is generic drain-only text
+ok - live: per-wake reasons appear only in the drained durable rows

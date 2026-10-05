@@ -1,0 +1,6 @@
+ok - session start makes native .lock the activated TUI process PID (3870337)
+ok - first arm: one watcher, no turn-end-guard prompt, first wake acknowledged
+ok - native TUI entry completed setup
+doorbell ignored (turn ended idle without drain): wake prompts=1 ; after new row: wake prompts total=2 acks=1 failure prompts=0 queue rows=0
+ok - live: after an idle lead ends its turn without draining, a new row re-rings exactly one doorbell and one drain retires both
+/home/shuv/.no-mistakes/evidence/01M45CKC1DH6BMEHN39BJGSKK8/idle-rering-live.sh: line 80: /proc/3897321/environ: No such file or directory

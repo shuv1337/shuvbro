@@ -1,7 +1,7 @@
 ok - real TUI setup: ten recovered persistent stalls produce ten notices and wakes, beyond the old lifetime cap
 ok - real TUI setup: stale proof after a stall surfaces its rebind notice once despite repeated failing ticks
 ok - tui: a parked wake stays silent, a drain covers its presented rows, a post-drain row gets one doorbell, and only a provably stuck parked wake raises WATCHER FAILURE
-ok - tui: a turn ending without a drain re-rings one parked wake; a later drain retires both without another prompt
+ok - tui: turn end before or after the native receipt re-rings one parked wake; a later drain retires both without another prompt
 ok - real TUI setup: recovered sub-30-second stall retains diagnostic but never prompts or toasts
 ok - real TUI setup: lock acquired after more than 30 s of notice clock stays silent
 ok - real TUI setup: a self-healed startup admission failure before .lock never matures into a notice
