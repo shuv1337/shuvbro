@@ -1,0 +1,31 @@
+$ shuvcode --version
+shuvcode v2.0.22-shuv.2
+
+$ node bin/fm-opencode-v2-capability.mjs "$PWD"   # real installed shuvcode
+{"version":"shuvcode v2.0.22-shuv.2","runtime":"effect","qualified":true}
+exit=0
+
+# adversarial: same probe against fake shuv.1 / shuv.3 builds earlier on PATH
+$ PATH=<fake 'shuvcode v2.0.22-shuv.1'>:$PATH node bin/fm-opencode-v2-capability.mjs
+opencode-v2 capability probe: unqualified target shuvcode v2.0.22-shuv.1; use qualified shuvcode v2.0.22-shuv.2 or qualify the new build first
+exit=1
+$ PATH=<fake 'shuvcode v2.0.22-shuv.3'>:$PATH node bin/fm-opencode-v2-capability.mjs
+opencode-v2 capability probe: unqualified target shuvcode v2.0.22-shuv.3; use qualified shuvcode v2.0.22-shuv.2 or qualify the new build first
+exit=1
+$ PATH=<fake 'shuvcode v2.0.23'>:$PATH node bin/fm-opencode-v2-capability.mjs
+opencode-v2 capability probe: unqualified target shuvcode v2.0.23; use qualified shuvcode v2.0.22-shuv.2 or qualify the new build first
+exit=1
+
+# dispatch-native resolution + live-guard resolver on this host
+fm_shuvcode_platform_package_names:
+shuvcode-linux-x64
+shuvcode-linux-x64-baseline
+shuvcode-linux-x64-musl
+shuvcode-linux-x64-baseline-musl
+fm_shuvcode_native_binary: /home/shuv/.npm-global/lib/node_modules/shuvcode/node_modules/shuvcode-linux-x64/bin/shuvcode
+v2_resolve_live_binary: /home/shuv/.npm-global/lib/node_modules/shuvcode/node_modules/shuvcode-linux-x64/bin/shuvcode (rc=0)
+shuvcode v2.0.22-shuv.2
+
+# adversarial: FM_OPENCODE_V2_BIN pointing at a non-runnable ELF must fail hard (no fallback)
+cannot run dispatch-selected shuvcode binary: /tmp/tmp.oXc4H9Gh7F/shuvcode
+rc=1
