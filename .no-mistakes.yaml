@@ -33,8 +33,21 @@ document:
 commands:
   lint: 'bin/fm-lint.sh'
 
+# Trusted test-step runbook. no-mistakes renders test.instructions only from the
+# default-branch copy of this file, so it takes effect after merge. A pushed
+# branch cannot widen what the test step is allowed to run.
 # Publish each run's test evidence to the orphan no-mistakes/evidence branch linked from the PR.
 # The evidence is not committed to the feature or default branch.
 test:
+  instructions: |
+    Every bin/fm-test-run.sh invocation must pass both --exclude-family live-harness-optin and --exclude-family real-herdr-gated, including --changed, --all, and --lane portable-*.
+    Those selection modes already include the families: portable lanes include live-harness-optin, and a change that maps to real-herdr-gated selects that family.
+    live-harness-optin is governed by fm_live_gate in tests/lib.sh.
+    real-herdr-gated does not use that gate; it runs when herdr is on PATH.
+    Do not set FM_LIVE or any other fm_live_gate control variable.
+    Do not run live OpenCode V2 TUI suites, live Herdr suites, or credentialed harness probes.
+    Do not start, stop, restart, attach to, or otherwise drive the host's real Herdr session or shuvcode service.
+    The live-suite list stays owned by bin/fm-test-run.sh; do not copy it here.
+    If the intent describes behavior only a live suite could exercise, leave that scenario untested and name the family you excluded.
   evidence:
     store_in_repo: true

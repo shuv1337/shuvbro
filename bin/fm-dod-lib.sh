@@ -87,6 +87,16 @@ Other projects retain their own instructions unchanged.
 EOF
 }
 
+# The scout stay-inside rule bin/fm-brief.sh renders for --allow-write. Its
+# allowance is scout-only, so bin/fm-promote.sh revokes it when this line is in
+# the brief's # Rules.
+FM_BRIEF_ALLOW_WRITE_RULE='2. Stay inside this worktree; the only files you may write outside it are the report and the status file below, plus these exact paths and the files inside them, and nothing broader:'
+
+fm_brief_allow_write_present() {  # <file>
+  [ -f "$1" ] || return 1
+  fm_brief_heading_body "$1" "# Rules" | grep -Fqx -- "$FM_BRIEF_ALLOW_WRITE_RULE"
+}
+
 # Return 0 when a Task subsection still consists only of its scaffold
 # placeholder. A missing file and legacy briefs carry no such placeholders.
 fm_brief_task_placeholders_present() {  # <file>
