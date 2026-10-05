@@ -1,0 +1,25 @@
+# base b952627 (before), FM_BOARD_INTERVAL=10, no client
+[base] started on 127.0.0.1:37773; model rebuilds so far: 1
+[base] A idle 60s with no client: model rebuilds=6, CPU ticks=38
+
+# head ed67be6 (after), FM_BOARD_INTERVAL=10
+[head] started on 127.0.0.1:45031; model rebuilds so far: 0
+[head] A idle 60s with no client: model rebuilds=0, CPU ticks=0
+[head] B open after idle: rebuilds on open=1; 'while-idle' visible=true; snapshot=2026-10-05T21:28:09Z
+[head] C 10 checks every 2s, unchanged: rebuilds=0, CPU ticks=1, distinct snapshots=1
+[head] D status log appended -> rebuilds on next check=1
+[head] G1 20 concurrent checks, unchanged: rebuilds=0
+[head] G2 20 concurrent checks after notes file appears: rebuilds=1
+[head] E1 after captain hold: rebuilds=1; sample-ship waiting & answerable=true
+[head] E2 answer 'no' response: {"ok":true,"outcome":"recorded","task":"sample-ship","message":"Recorded. Bro will pick it up.","note":"1791235711-k2ZjLk"} HTTP 200
+[head] E3 after answer: rebuilds since answer=1; sample-ship still answerable=false
+[head] F 75s of checks every 5s, unchanged: rebuilds=1; first forced rebuild at ~60s after start of window
+
+# head model rebuild timestamps (PDT)
+14:28:09.320 model
+14:28:29.445 model
+14:28:29.515 model
+14:28:30.201 model
+14:28:31.473 model
+14:29:31.643 model
+14:29:55.952 model

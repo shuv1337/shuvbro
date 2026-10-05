@@ -18,4 +18,9 @@ ok - a committed result survives server restart and retries never release a re-a
 ok - a committed answer with unavailable confirmation storage reports uncertainty and does not reapply
 ok - an unchanged fleet reuses its snapshot, and a backlog change shows up on the next check
 ok - a request after the full interval rebuilds even when the records are unchanged
+ok - a check one interval later rebuilds when the full bound matches the check interval
 ok - a home that never starts the board gains no board state, notes, wakes, or backlog changes
+
+real	1m24.719s
+user	0m54.858s
+sys	0m24.950s
