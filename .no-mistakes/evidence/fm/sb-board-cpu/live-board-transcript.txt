@@ -1,0 +1,12 @@
+[target] serving pid=3318946 port=42449 (FM_BOARD_INTERVAL default 10s)
+[base] serving pid=3318944 port=33333 (FM_BOARD_INTERVAL default 10s)
+[target] idle 120s with no client connected...
+[base] idle 120s with no client connected...
+[target] CPU (server+children) during idle 120s: 0.00s
+[target] first /data after idle: 0.06s snapshot_generated=2026-10-05T20:06:35Z generated=2026-10-05T20:06:35Z age=0 queued=["sample-ship","sample-plain"]
+[base] CPU (server+children) during idle 120s: 0.72s
+[base] first /data after idle: 0.01s snapshot_generated=2026-10-05T20:06:34Z generated=2026-10-05T20:06:34Z age=1 queued=["sample-ship","sample-plain"]
+[target] unchanged re-check after 3s: 0.005s cpu=0.00s snapshot_generated=2026-10-05T20:06:35Z generated=2026-10-05T20:06:38.427Z age=0
+[target] after editing backlog.md: snapshot_generated=2026-10-05T20:06:38Z queued=["sample-ship","sample-plain","sample-new"]
+[target] waiting 62s with page polling every 10s (unchanged records) ...
+[target] polled snapshot_generated: 2026-10-05T20:06:38Z 2026-10-05T20:06:38Z 2026-10-05T20:06:38Z 2026-10-05T20:06:38Z 2026-10-05T20:06:38Z 2026-10-05T20:06:38Z 2026-10-05T20:07:41Z

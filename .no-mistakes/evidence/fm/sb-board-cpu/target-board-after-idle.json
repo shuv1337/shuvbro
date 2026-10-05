@@ -1,0 +1,33 @@
+{
+  "schema": "fm-board.v1",
+  "generated": "2026-10-05T20:06:35Z",
+  "snapshot_generated": "2026-10-05T20:06:35Z",
+  "product": "shuvbro",
+  "lead": "Bro",
+  "home_label": null,
+  "waiting_on_you": [],
+  "with_lead": [],
+  "in_flight": [],
+  "queued": [
+    {
+      "id": "sample-ship",
+      "title": "Ship the sample widget",
+      "repo": "sample",
+      "links": [],
+      "note": null
+    },
+    {
+      "id": "sample-plain",
+      "title": "Plain queued work",
+      "repo": "sample",
+      "links": [],
+      "note": null
+    }
+  ],
+  "done": [],
+  "fyi": [],
+  "errors": [],
+  "instance": "508d4d29a52ff1aa",
+  "refresh_seconds": 10,
+  "age_seconds": 0
+}
