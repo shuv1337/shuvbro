@@ -112,29 +112,12 @@ fm_shuvcode_is_native_executable() {  # <path>
   [ -f "$1" ] && [ -x "$1" ] && [ "$(head -c 4 -- "$1" 2>/dev/null)" = $'\177ELF' ]
 }
 
-# Print the installed native shuvcode executable for explicit V2 lead
-# activation, or return 1. The npm `shuvcode` command is a node launcher that
-# forks the platform binary as a child, so activation must exec that binary
-# directly. Resolution inspects paths and never executes a shuvcode binary:
-#   1. FM_OPENCODE_V2_BIN, when set, is the only candidate.
-#   2. `shuvcode` on PATH, when it already resolves to a native executable.
-#   3. The launcher's platform packages, nested (<pkg>/node_modules) or hoisted
-#      (sibling of <pkg>), in the launcher's own preference order: baseline
-#      first on x64 without AVX2, musl first on a musl host.
-fm_shuvcode_native_binary() {
-  local launcher dir arch base root name
+# Print Linux platform-package names in the launcher's host preference order.
+# Native activation and live qualification share this order; no shuvcode
+# executable is run while detecting the CPU and libc.
+fm_shuvcode_platform_package_names() {
+  local arch base
   local -a names
-  if [ -n "${FM_OPENCODE_V2_BIN:-}" ]; then
-    fm_shuvcode_is_native_executable "$FM_OPENCODE_V2_BIN" || return 1
-    readlink -f -- "$FM_OPENCODE_V2_BIN"
-    return
-  fi
-  launcher=$(command -v shuvcode 2>/dev/null) || return 1
-  launcher=$(readlink -f -- "$launcher") || return 1
-  if fm_shuvcode_is_native_executable "$launcher"; then
-    printf '%s\n' "$launcher"
-    return 0
-  fi
   [ "$(uname -s)" = Linux ] || return 1
   case "$(uname -m)" in
     x86_64|amd64) arch=x64 ;;
@@ -154,14 +137,39 @@ fm_shuvcode_native_binary() {
   else
     names=("${names[@]}" "${names[@]/%/-musl}")
   fi
+  printf '%s\n' "${names[@]}"
+}
+
+# Print the installed native shuvcode executable for explicit V2 lead
+# activation, or return 1. The npm `shuvcode` command is a node launcher that
+# forks the platform binary as a child, so activation must exec that binary
+# directly. Resolution inspects paths and never executes a shuvcode binary:
+#   1. FM_OPENCODE_V2_BIN, when set, is the only candidate.
+#   2. `shuvcode` on PATH, when it already resolves to a native executable.
+#   3. Nested or hoisted platform packages, in the order owned by
+#      fm_shuvcode_platform_package_names.
+fm_shuvcode_native_binary() {
+  local launcher dir root name names
+  if [ -n "${FM_OPENCODE_V2_BIN:-}" ]; then
+    fm_shuvcode_is_native_executable "$FM_OPENCODE_V2_BIN" || return 1
+    readlink -f -- "$FM_OPENCODE_V2_BIN"
+    return
+  fi
+  launcher=$(command -v shuvcode 2>/dev/null) || return 1
+  launcher=$(readlink -f -- "$launcher") || return 1
+  if fm_shuvcode_is_native_executable "$launcher"; then
+    printf '%s\n' "$launcher"
+    return 0
+  fi
+  names=$(fm_shuvcode_platform_package_names) || return 1
   dir=$(dirname -- "$launcher")
-  for name in "${names[@]}"; do
+  while IFS= read -r name; do
     for root in "$dir/../node_modules" "$dir/../.."; do
       if fm_shuvcode_is_native_executable "$root/$name/bin/shuvcode"; then
         readlink -f -- "$root/$name/bin/shuvcode"
         return
       fi
     done
-  done
+  done <<< "$names"
   return 1
 }
