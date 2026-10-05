@@ -34,9 +34,17 @@ EOF
 }
 
 # run_trust <config> <worktree> <project> [home]: invoke with an isolated store.
+# HOME moves, so the real node goes ahead of any version-manager shim on PATH.
 run_trust() {
   local config=$1 wt=$2 proj=$3 home=${4:-$1}
-  CLAUDE_CONFIG_DIR="$config" HOME="$home" "$TRUST" "$wt" "$proj" 2>&1
+  CLAUDE_CONFIG_DIR="$config" HOME="$home" PATH="$FM_TEST_REAL_NODE_DIR:$PATH" \
+    "$TRUST" "$wt" "$proj" 2>&1
+}
+
+# run_trust_without_node <bindir> <config> <worktree> <project>: same isolated
+# store, but PATH is only <bindir>, so no node is reachable.
+run_trust_without_node() {
+  CLAUDE_CONFIG_DIR="$2" HOME="$2" PATH="$1" "$TRUST" "$3" "$4" 2>&1
 }
 
 trusted_paths() {  # <store>
@@ -329,7 +337,7 @@ test_missing_node_is_refused() {
   rec=$(make_case no-node)
   read_case "$rec"
   bindir=$(node_free_path "$CASE_DIR")
-  out=$(PATH="$bindir" run_trust "$CONFIG" "$WT" "$PROJ")
+  out=$(run_trust_without_node "$bindir" "$CONFIG" "$WT" "$PROJ")
   expect_code 1 $? "a missing node must refuse rather than let the spawn proceed: $out"
   assert_contains "$out" "node" "the refusal did not name the missing interpreter"
   assert_not_trusted "$CONFIG/.claude.json" "$WT" "a worktree was trusted without an interpreter to write the store"
@@ -346,7 +354,7 @@ test_scope_refusal_stays_fail_closed_without_node() {
   rec=$(make_case no-node-refusal)
   read_case "$rec"
   bindir=$(node_free_path "$CASE_DIR")
-  out=$(PATH="$bindir" run_trust "$CONFIG" "$PROJ" "$PROJ")
+  out=$(run_trust_without_node "$bindir" "$CONFIG" "$PROJ" "$PROJ")
   expect_code 1 $? "the primary checkout must still be refused without node: $out"
   assert_contains "$out" "primary checkout" "the refusal did not name the primary checkout"
   pass "fm-claude-trust.sh: a scope refusal stays fail-closed without node"
