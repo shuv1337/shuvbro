@@ -25,8 +25,11 @@ When this session owns supervision and away mode is not active:
    Lead journal prompts (wakes, startup nudges and repair notices) use `delivery: "steer"`: an idle session starts execution, and a busy turn receives the prompt at its next model step boundary, after any active model response or tool execution finishes.
    Worker briefs remain queued through the separate worker launch path.
    Rejected or unknown acknowledgements retry the same ID/text; admission never acknowledges wake rows.
-   While an admitted wake still names rows in the canonical queue, a later wake is journaled and not admitted, so one queued doorbell covers every row that drain will present.
-   A later wake is admitted only after that doorbell is acknowledged and its own rows remain; rows the drain already removed retire that later wake without another prompt.
+   The wake doorbell contains only a generic instruction to drain and acknowledge the durable queue; authoritative reasons come from that drain.
+   While an admitted wake still names canonical rows or an admitted no-row recovery still names the current unacknowledged recovery generation, later wakes stay journaled behind that outstanding steer.
+   Canonical row removal or exact-generation recovery acknowledgement releases the slot; a valid successor generation also retires an admitted no-row episode, while missing or malformed marker state retains it.
+   A parked wake then admits if its obligation remains, or retires without another prompt if canonical handling already settled it.
+   Only canonically retired wake records expire after seven days; outstanding recovery records remain retained.
    An exhausted admission remains pending and produces a bounded diagnostic, not an unguarded recovery-marker reopen.
    Subsequent attempts continue with capped backoff while ownership remains valid; confirmed canonical queue acknowledgement retires the obsolete transport obligation without reporting it as admitted.
 6. Ordinary wake: do not ask the model to re-arm because continuity is plugin-owned.

@@ -6,8 +6,8 @@ import { readPrivate, writePrivate } from "../../../bin/fm-opencode-v2-owner.mjs
 // Admission journal is adapter transport, not wake-row ownership. Only the
 // canonical drain/ack owner consumes queue rows. IDs/text survive replacement
 // successors, owner reload and unknown native prompt acknowledgement.
-// One queued wake doorbell at a time: a later wake stays journaled while an
-// earlier admitted wake still names rows in the canonical queue.
+// One outstanding steer doorbell at a time: native admission is not handling.
+// Canonical rows or the current recovery episode retain the doorbell slot.
 export function createAdmissionJournal(paths, sessionID, admit, report = console.error, options = {}) {
   const dir = join(paths.state, ".opencode-v2-admissions", createHash("sha256").update(sessionID).digest("hex"));
   const inflight = new Map(), retries = new Map();
@@ -44,14 +44,22 @@ export function createAdmissionJournal(paths, sessionID, admit, report = console
     return save({ version: 1, sessionID, id, kind, rows: identities, text, context, phase: "prepared" });
   }
   function acknowledged(value) {
+    // Callers can retain their pre-admission snapshot across a native receipt
+    // or reconciliation. Retirement follows the durable phase, not that copy.
+    value = validate(readPrivate(join(dir, value.id + ".json")));
+    if (value.phase === "acknowledged") return true;
     if (!value.rows.length) {
-      // A confirmed recovery presentation is obsolete only when the canonical
-      // owner acked that exact episode. New rows remain separate obligations.
+      // Recovery has no row identities. Exact-generation ack retires a
+      // confirmed obligation. Once admitted, a valid successor generation also
+      // releases its slot: the canonical owner has replaced that episode.
+      // Missing or malformed state cannot release an outstanding doorbell.
       const generation = value.context?.recovery?.generation;
-      if (value.kind !== "wake" || value.phase !== "confirmed" || typeof generation !== "string" || !/^[A-Za-z0-9._-]{1,200}$/.test(generation)) return value.phase === "acknowledged";
+      if (value.kind !== "wake" || !["confirmed", "admitted"].includes(value.phase) || typeof generation !== "string" || !/^[A-Za-z0-9._-]{1,200}$/.test(generation)) return value.phase === "acknowledged";
       let marker;
       try { marker = readFileSync(join(paths.state, ".watcher-down"), "utf8").trim(); } catch { return false; }
-      if (!["acked:handling:" + generation, "acked:downtime:" + generation].includes(marker)) return false;
+      const episode = marker.match(/^(pending|announced|acked):(handling|downtime):([A-Za-z0-9._-]{1,200})$/);
+      if (!episode) return false;
+      if (episode[3] === generation ? episode[1] !== "acked" : value.phase !== "admitted") return false;
       save({ ...value, phase: "acknowledged" });
       return true;
     }
@@ -65,17 +73,17 @@ export function createAdmissionJournal(paths, sessionID, admit, report = console
     if (value.phase !== "acknowledged") save({ ...value, phase: "acknowledged" });
     return true;
   }
-  function outstandingRowDoorbell(exceptId) {
+  function outstandingDoorbell(exceptId) {
     if (!existsSync(dir)) return false;
     for (const name of readdirSync(dir).filter(name => /^msg_[a-f0-9]{64}\.json$/.test(name))) {
       const value = validate(readPrivate(join(dir, name)));
-      if (value.id === exceptId || value.kind !== "wake" || value.phase !== "admitted" || !value.rows.length) continue;
+      if (value.id === exceptId || value.kind !== "wake" || value.phase !== "admitted") continue;
       if (!acknowledged(value)) return true;
     }
     return false;
   }
   function parkedBehindDoorbell(value) {
-    return value.kind === "wake" && !["admitted", "acknowledged"].includes(value.phase) && ((wakeSlot && wakeSlot !== value.id) || outstandingRowDoorbell(value.id));
+    return value.kind === "wake" && !["admitted", "acknowledged"].includes(value.phase) && ((wakeSlot && wakeSlot !== value.id) || outstandingDoorbell(value.id));
   }
   async function attemptDelivery(value) {
     validate(value);
@@ -124,11 +132,10 @@ export function createAdmissionJournal(paths, sessionID, admit, report = console
     for (const name of readdirSync(dir).filter(name => /^msg_[a-f0-9]{64}\.json$/.test(name))) {
       const path = join(dir, name), value = validate(readPrivate(path));
       // Keep claim startup deduplication and every unadmitted obligation. Old
-      // canonically acked row wakes and admitted no-row recoveries can expire.
+      // canonically retired wakes can expire; outstanding recoveries cannot.
       const old = Date.now() - statSync(path).mtimeMs > 7 * 24 * 60 * 60 * 1000;
       const acked = acknowledged(value);
-      const completedRecovery = value.rows.length === 0 && value.phase === "admitted";
-      if (value.kind === "wake" && (acked || completedRecovery) && old) { unlinkSync(path); continue; }
+      if (value.kind === "wake" && acked && old) { unlinkSync(path); continue; }
       if (value.kind.startsWith("failure:") && old && (value.phase === "admitted" || options.failureClaim && !value.kind.startsWith("failure:" + options.failureClaim + ":"))) { unlinkSync(path); retries.delete(value.id); continue; }
       if (!["admitted", "acknowledged"].includes(value.phase) && !acked) result.push(value);
     }

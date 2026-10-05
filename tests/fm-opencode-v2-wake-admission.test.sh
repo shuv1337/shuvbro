@@ -94,6 +94,138 @@ JS
   pass "$out"
 }
 
+test_recovery_doorbells_share_the_outstanding_cap() {
+  local out
+  out=$(CODE_ROOT="$CODE_ROOT" LAB="$TMP_ROOT/recovery-journal" node --input-type=module 2>&1 <<'JS'
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import {pathToFileURL} from 'node:url';
+const {createAdmissionJournal}=await import(pathToFileURL(process.env.CODE_ROOT+'/.opencode/plugins/fm-native-v2/admission.js'));
+function fixture(name, onAdmission = async () => {}) {
+  const paths={state:process.env.LAB+'/'+name};
+  fs.mkdirSync(paths.state,{recursive:true,mode:0o700});
+  const queue=paths.state+'/.wake-queue',marker=paths.state+'/.watcher-down',calls=[];
+  fs.writeFileSync(queue,'');
+  const admit=async input=>{calls.push(input);assert.equal(input.delivery,'steer');await onAdmission({input,queue,marker});return {id:input.id};};
+  const reload=()=>createAdmissionJournal(paths,'ses_recovery',admit,()=>{});
+  const journal=reload();
+  const recovery=(generation)=>journal.confirm(journal.prepare('drain only','wake',{recovery:{generation}}),{generation});
+  const phase=value=>JSON.parse(fs.readFileSync(paths.state+'/.opencode-v2-admissions/'+fs.readdirSync(paths.state+'/.opencode-v2-admissions')[0]+'/'+value.id+'.json')).phase;
+  return {queue,marker,calls,journal,recovery,reload,phase};
+}
+const row='100\t1\tsignal\ttask\tready\n';
+// Repeated recovery wakes share the same episode identity and doorbell.
+{
+  const f=fixture('no-row-to-no-row');
+  fs.writeFileSync(f.marker,'announced:handling:first\n');
+  const first=f.recovery('first');await f.journal.deliver(first);
+  const repeated=f.recovery('first');
+  assert.equal(repeated.id,first.id);
+  await f.journal.deliver(repeated);
+  const second=f.recovery('second');
+  assert.equal(await f.journal.deliver(second),false);
+  assert.equal(f.calls.length,1);
+  assert.equal(f.journal.parked(second),true);
+  assert.equal(f.reload().parked(second),true,'cap must survive plugin reload');
+  // Unreadable or invalid state never proves retirement, even after TTL.
+  const recordDir=f.queue.replace('/.wake-queue','/.opencode-v2-admissions');
+  const firstPath=recordDir+'/'+fs.readdirSync(recordDir)[0]+'/'+first.id+'.json';
+  fs.utimesSync(firstPath,1,1);fs.unlinkSync(f.marker);
+  f.journal.pending();assert.equal(fs.existsSync(firstPath),true);
+  fs.writeFileSync(f.marker,'invalid:handling:first\n');
+  assert.equal(f.journal.parked(second),true);
+  fs.writeFileSync(f.marker,'acked:handling:first\n');
+  assert.equal(f.journal.acknowledged(first),true);
+  // The next episode remains an obligation until it is admitted or acked.
+  fs.writeFileSync(f.queue,'');
+  fs.writeFileSync(f.marker,'announced:downtime:second\n');
+  await f.reload().deliver(second);
+  assert.equal(f.calls.length,2);assert.equal(f.calls[1].id,second.id);
+  fs.writeFileSync(f.marker,'acked:downtime:second\n');
+  assert.equal(f.reload().acknowledged(second),true);
+}
+// A recovery doorbell covers newly arriving rows, without consuming them.
+for (const handled of [false,true]) {
+  const f=fixture('no-row-to-row-'+handled);
+  fs.writeFileSync(f.marker,'pending:handling:first\n');
+  const first=f.recovery('first');await f.journal.deliver(first);
+  fs.writeFileSync(f.queue,row);
+  const later=f.journal.confirm(f.journal.prepare('later row'));
+  assert.equal(await f.journal.deliver(later),false);
+  assert.equal(fs.readFileSync(f.queue,'utf8'),row);
+  if(handled)fs.writeFileSync(f.queue,'');
+  fs.writeFileSync(f.marker,'acked:handling:first\n');
+  await f.reload().deliver(later);
+  assert.equal(f.calls.length,handled?1:2);
+  assert.equal(f.phase(later),handled?'acknowledged':'admitted');
+  assert.equal(f.reload().pending().length,0,'a parked row must retire or admit after handling');
+}
+// A row doorbell also covers a no-row recovery obligation.
+for (const handled of [false,true]) {
+  const f=fixture('row-to-no-row-'+handled);
+  fs.writeFileSync(f.marker,'announced:handling:recovery\n');
+  const prepared=f.journal.prepare('recovery','wake',{recovery:{generation:'recovery'}});
+  fs.writeFileSync(f.queue,row);
+  const first=f.journal.confirm(f.journal.prepare('first row'));await f.journal.deliver(first);
+  // The earlier no-row preparation finishes successor confirmation after
+  // another actionable close has already admitted a row-bearing doorbell.
+  const later=f.journal.confirm(prepared,{generation:'recovery'});
+  assert.equal(await f.journal.deliver(later),false);
+  fs.writeFileSync(f.queue,'');
+  if(handled)fs.writeFileSync(f.marker,'acked:handling:recovery\n');
+  await f.reload().deliver(later);
+  assert.equal(f.calls.length,handled?1:2);
+  assert.equal(f.phase(later),handled?'acknowledged':'admitted');
+  assert.equal(f.reload().pending().length,0,'a parked recovery must retire or admit after handling');
+}
+// A new canonical generation can replace an old episode before the adapter
+// observes its ack. Its admitted record cannot permanently hold the next one.
+{
+  const f=fixture('generation-advanced');
+  fs.writeFileSync(f.marker,'announced:handling:first\n');
+  const first=f.recovery('first');await f.journal.deliver(first);
+  fs.writeFileSync(f.marker,'pending:downtime:next\n');
+  assert.equal(f.reload().acknowledged(first),true);
+  const next=f.recovery('next');await f.reload().deliver(next);
+  assert.equal(f.calls.length,2);
+  fs.writeFileSync(f.marker,'acked:downtime:next\n');
+  assert.equal(f.reload().acknowledged(next),true);
+}
+// An in-flight no-row admission owns the slot before its native receipt.
+{
+  let release;
+  const receipt=new Promise(resolve=>{release=resolve;});
+  const f=fixture('inflight-recovery',()=>receipt);
+  fs.writeFileSync(f.marker,'pending:handling:inflight\n');
+  const first=f.recovery('inflight'),delivery=f.journal.deliver(first);
+  fs.writeFileSync(f.queue,row);
+  const later=f.journal.confirm(f.journal.prepare('concurrent row'));
+  assert.equal(await f.journal.deliver(later),false);
+  assert.equal(f.calls.length,1);
+  release();await delivery;
+  assert.equal(await f.journal.deliver(later),false,'receipt alone must not release the slot');
+  fs.writeFileSync(f.marker,'acked:handling:inflight\n');
+  await f.journal.deliver(later);
+  assert.equal(f.calls.length,2);assert.equal(f.calls[1].id,later.id);
+}
+// A steer may finish canonical recovery handling before its receipt arrives.
+{
+  const f=fixture('lost-recovery-receipt',({marker})=>{
+    fs.writeFileSync(marker,'acked:handling:lost\n');
+    throw new Error('receipt lost after no-row handling');
+  });
+  fs.writeFileSync(f.marker,'pending:handling:lost\n');
+  const first=f.recovery('lost');
+  assert.equal(await f.journal.deliver(first),true);
+  assert.equal(f.calls.length,1);assert.equal(f.phase(first),'acknowledged');
+  assert.equal(f.reload().pending().length,0);
+}
+console.log('no-row/row doorbells share one steer cap; canonical ack or generation advance releases parked obligations without consuming rows');
+JS
+  ) || fail "$out"
+  pass "$out"
+}
+
 # The lead's handling turn: drain, then the generation-bound acknowledgement.
 lead_drain_and_ack() {  # <state>
   local state=$1
@@ -173,6 +305,7 @@ test_handoff_after_lead_ack_is_rejected() {
 FAILED=0
 for t in \
   test_journal_steers_with_exact_receipts_and_canonical_ack \
+  test_recovery_doorbells_share_the_outstanding_cap \
   test_handoff_before_lead_ack_is_accepted \
   test_handoff_after_lead_ack_is_rejected; do
   ( "$t" ) || FAILED=$((FAILED + 1))

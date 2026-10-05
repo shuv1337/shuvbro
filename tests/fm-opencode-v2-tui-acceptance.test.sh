@@ -658,17 +658,22 @@ test_idle_watcher_term_keeps_a_successor_and_delivers_the_next_wake() {
   tui_case idle-watcher-term 1
   local out="$CASE/out.json" steps state="$HOME_DIR/state"
   # shellcheck disable=SC2016 # expanded by the lead model shell
-  steps=$(jq -nc --argjson a "$(owned_and_armed "$(lock_step)")" --arg s "$state" --arg c "$CASE" --arg st "$state/alpha.status" \
+  local drain_ack='err=$(bin/fm-wake-drain.sh 2>&1); printf "%s\n" "$err"; seq=$(printf "%s\n" "$err" | sed -n "s/^WAKE_ACK_REQUIRED:.*--ack-through \([0-9][0-9]*\) --recovery-generation .*/\1/p"); gen=$(printf "%s\n" "$err" | sed -n "s/^WAKE_ACK_REQUIRED:.*--recovery-generation \([A-Za-z0-9._-][A-Za-z0-9._-]*\)$/\1/p"); [ -n "$seq" ] && [ -n "$gen" ] && bin/fm-wake-drain.sh --ack-through "$seq" --recovery-generation "$gen" && echo acked'
+  # shellcheck disable=SC2016 # expanded by the lead model shell
+  steps=$(jq -nc --argjson a "$(owned_and_armed "$(lock_step)")" --arg s "$state" --arg c "$CASE" --arg st "$state/alpha.status" --arg da "$drain_ack" --argjson e "$(lead_env_with_path)" \
     '$a + [
       {do: "shell", command: ("cat " + $s + "/.watch.lock/pid | tee " + $c + "/old.pid")},
       {do: "shell", command: ("kill -TERM \"$(cat " + $c + "/old.pid)\"")},
       {do: "wait", until: "shell-ok", timeoutMs: 15000, command: ("p=$(cat " + $s + "/.watch.lock/pid 2>/dev/null) && [ \"$p\" != \"$(cat " + $c + "/old.pid)\" ] && kill -0 \"$p\"")},
-      {do: "wait", until: "admitted", match: "rearm-resurface", timeoutMs: 20000},
+      {do: "wait", until: "admitted", match: "WATCHER FIRED", timeoutMs: 20000},
       {do: "shell", command: ("cat " + $s + "/.watch.lock/pid | tee " + $c + "/succ.pid")},
       {do: "sleep", ms: 8000},
       {do: "shell", command: ("p=$(cat " + $s + "/.watch.lock/pid 2>/dev/null) && [ \"$p\" = \"$(cat " + $c + "/succ.pid)\" ] && kill -0 \"$p\" && echo stable; cat " + $s + "/.watcher-down 2>/dev/null")},
       {do: "write", path: $st, text: "done: alpha finished\n"},
-      {do: "wait", until: "admitted", match: "alpha", timeoutMs: 20000}, {do: "sleep", ms: 1500}]')
+      {do: "wait", until: "shell-ok", command: ("grep -q alpha " + $s + "/.wake-queue"), timeoutMs: 20000},
+      {do: "sleep", ms: 3000}, {do: "shell", command: $da, extraEnv: $e},
+      {do: "write", path: ($s + "/beta.status"), text: "done: beta finished\n"},
+      {do: "wait", until: "admitted", match: "WATCHER FIRED", count: 2, timeoutMs: 20000}, {do: "sleep", ms: 1500}]')
   v2_tui "$CASE" "$(spec "$(jq -nc --argjson s "$steps" '{steps: $s}')")" "$out"
   step_ok "$out" 3 "positive control: the lead did not arm"
   jq -e '.steps[4].stdout | test("^[0-9]+")' "$out" >/dev/null || fail "fixture: no idle watcher pid before SIGTERM: $(jq -c '.steps[4]' "$out")"
@@ -678,12 +683,18 @@ test_idle_watcher_term_keeps_a_successor_and_delivers_the_next_wake() {
     || fail "the successor watcher did not stay alive (retire/re-arm loop): $(jq -c '.steps[10]' "$out")"
   [ "$(jq '[.failures[] | select(test("neither durable wake rows nor recovery generation|could not deliver an actionable wake"))] | length' "$out")" = 0 ] \
     || fail "the no-row resurface failed preparation: $(jq -c '[.failures[] | select(test("recovery generation|actionable wake"))] | .[0:3]' "$out")"
-  [ "$(jq '[.admitted[] | select(.text | test("rearm-resurface"))] | length' "$out")" = 1 ] \
-    || fail "expected exactly one no-row resurface admission: $(jq -c '[.admitted[] | .text[0:80]]' "$out")"
-  step_ok "$out" 12 "after the idle watcher's recovery the next real wake was not admitted"
-  [ "$(jq '[.admitted[] | select(.text | test("alpha"))] | length' "$out")" = 1 ] \
-    || fail "the next real wake was not admitted exactly once: $(jq -c '[.admitted[] | .text[0:80]]' "$out")"
-  pass "tui: an idle watcher SIGTERM keeps one live successor, delivers the no-row resurface once and the next real wake once"
+  jq -e --argjson at "$(jq '.steps[14].at' "$out")" '[.admitted[] | select(.text | contains("WATCHER FIRED")) | select(.at < $at)] | length == 1' "$out" >/dev/null \
+    || fail "the undrained recovery admitted a redundant row doorbell"
+  step_ok "$out" 12 "the next real wake never became durable"
+  jq -e ' .steps[14].code == 0 ' "$out" >/dev/null || fail "the canonical drain and acknowledgement failed: $(jq -c ' .steps[14] ' "$out")"
+  jq -e '.steps[14].stdout | contains("alpha") and contains("acked")' "$out" >/dev/null \
+    || fail "the recovery doorbell did not present and acknowledge the arriving row"
+  step_ok "$out" 16 "a later wake stayed parked after canonical acknowledgement"
+  [ "$(wake_admissions "$out")" = 2 ] || fail "expected one recovery and one post-ack row doorbell"
+  jq -e '[.admitted[] | select(.text | contains("WATCHER FIRED"))] | all(.delivery == "steer" and (.text | contains("drain the durable wake queue")) and (.text | test("alpha|beta|rearm-resurface") | not))' "$out" >/dev/null \
+    || fail "a wake doorbell contained a snapshotted reason or used queue delivery"
+  pass "tui: idle watcher recovery keeps one successor, coalesces the arriving row until canonical ack, and admits the next wake"
+
 }
 
 # F4-M1: the owner's service credential never reaches the arm, the watcher or a

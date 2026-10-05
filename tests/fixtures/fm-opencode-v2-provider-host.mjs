@@ -383,7 +383,8 @@ try {
   assert.match(read("launches"), /^2 predecessor=$/m);
   assert.match(read("launches"), /^3 predecessor=[0-9]+$/m);
   assert.equal(read("order"), "confirm fixture-recovery\nadmit");
-  assert.match(admitted[0].text, /check: rearm-resurface/);
+  assert.match(admitted[0].text, /WATCHER FIRED - drain the durable wake queue/);
+  assert.doesNotMatch(admitted[0].text, /check: rearm-resurface/);
   const original = journal.prepare("unchanged", "wake", { recovery: { generation: "fixture-recovery" } });
   assert.equal(original.id, admitted[0].id); assert.equal(original.text, admitted[0].text);
   const other = journal.prepare("another recovery", "wake", { recovery: { generation: "next-generation" } });

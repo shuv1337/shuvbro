@@ -103,7 +103,8 @@ echo safe >> '${state}/check-probes'
   await until(() => admitted.length === 1 && owner.readPrivate(journalPath(prepared[0].value)).phase === "admitted", "real idle watcher death did not admit recovery");
   assert.equal(prepared.length, 1);
   assert.match(prepared[0].token, /^announced:downtime:/, "fixture did not exercise real no-row downtime path");
-  assert.equal(prepared[0].value.rows.length, 0); assert.match(admitted[0].text, /check: rearm-resurface/);
+  assert.equal(prepared[0].value.rows.length, 0); assert.match(admitted[0].text, /WATCHER FIRED - drain the durable wake queue/);
+  assert.doesNotMatch(admitted[0].text, /check: rearm-resurface/);
   const generation = prepared[0].value.context.recovery.generation, successor = read(".watch.lock/pid");
   assert.notEqual(successor, first); verifyProcessEnvironment(successor);
   for (let tick = 0; tick < 3; tick++) {

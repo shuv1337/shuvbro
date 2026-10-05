@@ -225,7 +225,7 @@ assert.equal(reloaded.parked(pending),true);
 fs.writeFileSync(r.state+'/.wake-queue','101\t2\tsignal\ttask\tsecond\n');
 await reloaded.deliver(pending);
 assert.equal(calls.at(-1).id,saved.id);
-assert.equal(calls.at(-1).delivery,'queue');
+assert.equal(calls.at(-1).delivery,'steer');
 assert.equal(reloaded.pending().length,0);
 assert.equal(reloaded.parked(pending),false);
 // The canonical ack owner, not this adapter, removes rows. An old pending
@@ -313,6 +313,7 @@ const p={root:process.env.LAB,home:process.env.LAB,state:process.env.LAB+'/state
 let admitted=false,failures=[];
 const journal=createAdmissionJournal(p,'ses_coordinator',async input=>{
   assert.equal(input.delivery,'steer');
+  assert.equal(input.text,'\u2063FIRSTMATE_OP: v1 watcher: WATCHER FIRED - drain the durable wake queue with bin/fm-wake-drain.sh, handle the presented wakes, and run the acknowledgement command it prints. Watcher continuity is plugin-owned.');
   assert.equal(fs.readFileSync(p.state+'/order','utf8').trim(),'confirmed');
   fs.appendFileSync(p.state+'/order','admitted\n');admitted=true;return{id:input.id};
 });
