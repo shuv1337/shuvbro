@@ -49,21 +49,30 @@ export function createAdmissionJournal(paths, sessionID, admit, report = console
     catch (error) { if (error.code !== "ENOENT") throw error; }
     return save({ version: 1, sessionID, id, kind, rows: identities, text, context, phase: "prepared", drain: drainSequence() });
   }
+  function drainedSince(value) {
+    const drained = drainSequence();
+    return Number.isInteger(value.drain) && Number.isInteger(drained) && drained > value.drain;
+  }
   function acknowledged(value) {
     // Callers can retain their pre-admission snapshot across a native receipt
     // or reconciliation. Retirement follows the durable phase, not that copy.
     value = validate(readPrivate(join(dir, value.id + ".json")));
     if (value.phase === "acknowledged") return true;
+    // A doorbell is handled once a drain is recorded after its admission, even
+    // if rows remain queued; rows arriving after that drain need their own.
+    if (value.kind === "wake" && value.phase === "admitted" && drainedSince(value)) {
+      save({ ...value, phase: "acknowledged" });
+      return true;
+    }
     if (!value.rows.length) {
       // Recovery has no row identities. A drain presented after preparation
-      // or admission handled it, even if later rows remain queued. Otherwise
-      // exact-generation ack retires a confirmed obligation, and an admitted
-      // doorbell stays outstanding until any generation is acked. Missing or
-      // malformed state retains it.
+      // also covers a confirmed obligation. Otherwise exact-generation ack
+      // retires a confirmed obligation, and an admitted doorbell stays
+      // outstanding until any generation is acked. Missing or malformed state
+      // retains it.
       const generation = value.context?.recovery?.generation;
       if (value.kind !== "wake" || !["confirmed", "admitted"].includes(value.phase) || typeof generation !== "string" || !/^[A-Za-z0-9._-]{1,200}$/.test(generation)) return false;
-      const drained = drainSequence();
-      if (Number.isInteger(value.drain) && Number.isInteger(drained) && drained > value.drain) {
+      if (drainedSince(value)) {
         save({ ...value, phase: "acknowledged" });
         return true;
       }
@@ -84,18 +93,28 @@ export function createAdmissionJournal(paths, sessionID, admit, report = console
     if (value.phase !== "acknowledged") save({ ...value, phase: "acknowledged" });
     return true;
   }
-  function outstandingDoorbell(exceptId) {
-    if (!existsSync(dir)) return false;
+  function outstandingDoorbells(exceptId) {
+    if (!existsSync(dir)) return [];
+    const result = [];
     for (const name of readdirSync(dir).filter(name => /^msg_[a-f0-9]{64}\.json$/.test(name))) {
       const value = validate(readPrivate(join(dir, name)));
       // A doorbell admitted by an older claim cannot hold this owner's slot.
       if (value.id === exceptId || value.kind !== "wake" || value.phase !== "admitted" || value.claim !== options.claim) continue;
-      if (!acknowledged(value)) return true;
+      if (!acknowledged(value)) result.push(value);
     }
-    return false;
+    return result;
   }
   function parkedBehindDoorbell(value) {
-    return value.kind === "wake" && !["admitted", "acknowledged"].includes(value.phase) && ((wakeSlot && wakeSlot !== value.id) || outstandingDoorbell(value.id));
+    return value.kind === "wake" && !["admitted", "acknowledged"].includes(value.phase) && ((wakeSlot && wakeSlot !== value.id) || outstandingDoorbells(value.id).length > 0);
+  }
+  // Parking behind a doorbell the lead has not drained yet is coalescing. It
+  // is stuck only if a drain is recorded that cannot be proven to precede the
+  // blocking admission, since that drain should have retired the blocker.
+  function stalled(value) {
+    if (!parkedBehindDoorbell(value)) return false;
+    const drained = drainSequence();
+    if (drained === 0) return false;
+    return outstandingDoorbells(value.id).some(blocker => !Number.isInteger(blocker.drain) || !Number.isInteger(drained) || drained > blocker.drain);
   }
   async function attemptDelivery(value) {
     validate(value);
@@ -157,6 +176,7 @@ export function createAdmissionJournal(paths, sessionID, admit, report = console
   return {
     prepare,
     parked: parkedBehindDoorbell,
+    stalled,
     confirm: (value, recovery) => {
       const phase = ["admitted", "acknowledged"].includes(value.phase) ? value.phase : "confirmed";
       if (value.phase === phase && JSON.stringify(value.context?.confirmedRecovery) === JSON.stringify(recovery || null)) return value;

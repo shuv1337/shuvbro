@@ -204,6 +204,30 @@ for (const handled of [false,true]) {
   assert.equal(await f.reload('claim-b').deliver(later),false,'the new owner keeps its own one-doorbell cap');
   assert.equal(f.calls.length,2);
 }
+// A recorded drain handles an admitted row doorbell even while its rows stay
+// queued. A parked wake stalls only when a recorded drain cannot be proven to
+// precede its blocker's admission; an undrained blocker is coalescing.
+for (const forced of [false,true]) {
+  const f=fixture('drain-stall-'+forced);
+  const drained=f.queue.replace('/.wake-queue','/.wake-drain-presented');
+  fs.writeFileSync(drained,'1\tG\n');
+  fs.writeFileSync(f.queue,row);
+  const first=f.journal.confirm(f.journal.prepare('first row'));await f.journal.deliver(first);
+  fs.writeFileSync(f.queue,row+'101\t2\tsignal\ttask\tnext\n');
+  const later=f.journal.confirm(f.journal.prepare('later row'));
+  assert.equal(await f.journal.deliver(later),false);
+  assert.equal(f.journal.stalled(later),false,'an undrained blocker is healthy coalescing');
+  if(forced){
+    const path=f.queue.replace('/.wake-queue','/.opencode-v2-admissions/')+fs.readdirSync(f.queue.replace('/.wake-queue','/.opencode-v2-admissions'))[0]+'/'+first.id+'.json';
+    const {drain,...legacy}=JSON.parse(fs.readFileSync(path,'utf8'));fs.writeFileSync(path,JSON.stringify(legacy));
+  }
+  fs.writeFileSync(drained,'2\tG\n');
+  assert.equal(f.reload().parked(later),forced);
+  assert.equal(f.reload().stalled(later),forced,'a drain after the blocker admission must expose a still-parked wake');
+  await f.reload().deliver(later);
+  assert.equal(f.calls.length,forced?1:2);
+  assert.equal(fs.readFileSync(f.queue,'utf8'),row+'101\t2\tsignal\ttask\tnext\n','drain retirement never consumes rows');
+}
 // An in-flight no-row admission owns the slot before its native receipt.
 {
   let release;
