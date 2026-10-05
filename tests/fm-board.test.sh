@@ -1019,6 +1019,54 @@ EOF
   pass "a committed answer with unavailable confirmation storage reports uncertainty and does not reapply"
 }
 
+test_unchanged_records_are_not_rebuilt_on_each_check() {
+  local home first snap1 second snap2 third snap3
+  home=$(make_home cache)
+  start_board "$home"
+  first=$(board_data)
+  snap1=$(printf '%s' "$first" | jq -r '.snapshot_generated')
+  [ -n "$snap1" ] && [ "$snap1" != null ] || fail "the first view had no snapshot time: $first"
+  sleep 3
+  second=$(board_data)
+  snap2=$(printf '%s' "$second" | jq -r '.snapshot_generated')
+  [ "$snap1" = "$snap2" ] || fail "unchanged records rebuilt the snapshot: $snap1 then $snap2"
+  printf '%s' "$second" | jq -e '.age_seconds < 5' >/dev/null \
+    || fail "a reused view was not marked checked: $second"
+  hold "$home" sample-ship --reason "Ship the sample widget now?"
+  third=$(board_data)
+  snap3=$(printf '%s' "$third" | jq -r '.snapshot_generated')
+  [ "$snap3" != "$snap1" ] || fail "a backlog change reused the old snapshot: $third"
+  printf '%s' "$third" | jq -e 'any(.waiting_on_you[]; .id == "sample-ship" and .answerable)' >/dev/null \
+    || fail "a backlog change was not on the next check: $third"
+  pass "an unchanged fleet reuses its snapshot, and a backlog change shows up on the next check"
+}
+
+test_a_request_after_the_full_interval_rebuilds() {
+  local home first snap1 second snap2
+  home=$(make_home full-refresh)
+  FM_BOARD_FULL_INTERVAL=2 start_board "$home"
+  first=$(board_data)
+  snap1=$(printf '%s' "$first" | jq -r '.snapshot_generated')
+  sleep 3
+  second=$(board_data)
+  snap2=$(printf '%s' "$second" | jq -r '.snapshot_generated')
+  [ -n "$snap2" ] && [ "$snap2" != "$snap1" ] \
+    || fail "a request after the full interval reused the old snapshot: $snap1 then $snap2"
+  pass "a request after the full interval rebuilds even when the records are unchanged"
+}
+
+test_full_interval_above_300_refuses_to_start() {
+  local home
+  home=$(make_home full-bound)
+  if in_home "$home" env FM_BOARD_PORT=0 FM_BOARD_FULL_INTERVAL=999 "$BOARD" serve > "$home/full.log" 2>&1; then
+    fail "a full interval above 300 started the board"
+  fi
+  grep -F "FM_BOARD_FULL_INTERVAL must be at most 300" "$home/full.log" >/dev/null \
+    || fail "an out-of-range full interval was not named: $(cat "$home/full.log")"
+  [ ! -e "$home/state/board/serve.json" ] || fail "a refused start left a serve record"
+  pass "a full interval above 300 refuses to start"
+}
+
 test_a_home_that_never_opts_in_is_untouched() {
   local home stamp changed
   home=$(make_home opt-out)
@@ -1062,4 +1110,7 @@ test_page_recovers_a_lost_committed_response
 test_page_recovers_a_lost_committed_response reask-after-loss
 test_answer_replay_survives_restart_without_reapplying
 test_confirmation_storage_failure_reports_unknown
+test_unchanged_records_are_not_rebuilt_on_each_check
+test_a_request_after_the_full_interval_rebuilds
+test_full_interval_above_300_refuses_to_start
 test_a_home_that_never_opts_in_is_untouched

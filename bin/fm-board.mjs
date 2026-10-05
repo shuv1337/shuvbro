@@ -45,7 +45,10 @@ const answerFields = new Set(["token", "task", "card", "choice", "text", "until"
 let model = null;
 let refreshError = null;
 let refreshing = null;
-let refreshAfterCurrent = null;
+let refreshEpoch = 0;
+let modelEpoch = -1;
+let cachedSignature = null;
+let lastFullAt = 0;
 let answerChain = Promise.resolve();
 
 function parseConfig(raw) {
@@ -60,6 +63,8 @@ function parseConfig(raw) {
     && typeof value.board_sh === "string" && typeof value.page === "string"
     && Number.isInteger(value.port) && value.port >= 0 && value.port <= 65535
     && Number.isInteger(value.interval) && value.interval >= 2 && value.interval <= 300
+    && Number.isInteger(value.full_interval) && value.full_interval >= value.interval && value.full_interval <= 300
+    && typeof value.data_dir === "string"
     && Array.isArray(value.hosts) && value.hosts.every((h) => typeof h === "string")
     && Array.isArray(value.logins) && value.logins.every((l) => typeof l === "string");
   if (!ok) fatal("invalid board configuration; start the board through bin/fm-board.sh serve");
@@ -85,8 +90,49 @@ function runBoard(args, input) {
   });
 }
 
+// Cheap identity of the records a rebuild reads. A same-second rewrite that
+// keeps the same length is not visible here; an answer invalidates separately.
+function inputSignature() {
+  const parts = [];
+  const statOne = (path) => {
+    try {
+      const st = fs.statSync(path);
+      parts.push(`${path}\t${st.mtimeMs}\t${st.size}`);
+    } catch {
+      parts.push(`${path}\tmissing`);
+    }
+  };
+  statOne(join(config.data_dir, "backlog.md"));
+  statOne(join(config.data_dir, "board-notes.json"));
+  statOne(join(config.data_dir, "secondmates.md"));
+  let names = [];
+  try {
+    names = fs.readdirSync(config.state_dir);
+  } catch {
+    parts.push(`${config.state_dir}\tmissing`);
+  }
+  for (const name of names) {
+    if (name.endsWith(".meta") || name.endsWith(".status")) statOne(join(config.state_dir, name));
+  }
+  parts.sort();
+  return parts.join("\n");
+}
+
+function cacheHit() {
+  return model
+    && modelEpoch === refreshEpoch
+    && cachedSignature !== null
+    && cachedSignature === inputSignature()
+    && (Date.now() - lastFullAt) < config.full_interval * 1000;
+}
+
+// A full rebuild. Joining one already in flight is safe for a viewer poll.
+// freshRefresh refuses that join, because the in-flight snapshot may have
+// started before an answer was written.
 function refresh() {
   if (refreshing) return refreshing;
+  const myEpoch = refreshEpoch;
+  const before = inputSignature();
   refreshing = (async () => {
     const result = await runBoard(["model"]);
     try {
@@ -95,8 +141,17 @@ function refresh() {
       if (!next || next.schema !== "fm-board.v1") throw new Error("unexpected board data");
       model = next;
       refreshError = null;
+      const after = inputSignature();
+      if (myEpoch === refreshEpoch && before === after) {
+        modelEpoch = myEpoch;
+        cachedSignature = after;
+        lastFullAt = Date.now();
+      } else {
+        cachedSignature = null;
+      }
     } catch (error) {
       refreshError = `The board could not refresh: ${String(error.message || error).slice(0, 300)}`;
+      cachedSignature = null;
     } finally {
       refreshing = null;
     }
@@ -104,18 +159,28 @@ function refresh() {
   return refreshing;
 }
 
+function noteChecked() {
+  if (!model) return;
+  model = { ...model, generated: new Date().toISOString() };
+}
+
+// Rebuild when the viewer needs a snapshot; otherwise mark the cached view checked.
+async function ensureFresh() {
+  if (cacheHit()) {
+    noteChecked();
+    return;
+  }
+  await refresh();
+}
+
 // A refresh whose snapshot starts after this call. Joining one already in
 // flight could publish records read before an answer was written, so the page
 // would keep offering the question it just answered.
 function freshRefresh() {
+  refreshEpoch += 1;
+  cachedSignature = null;
   if (!refreshing) return refresh();
-  if (!refreshAfterCurrent) {
-    refreshAfterCurrent = refreshing.then(() => {
-      refreshAfterCurrent = null;
-      return refresh();
-    });
-  }
-  return refreshAfterCurrent;
+  return refreshing.then(() => refresh());
 }
 
 function lastLine(text) {
@@ -206,7 +271,8 @@ function servePage(req, res) {
   res.end(req.method === "HEAD" ? undefined : page);
 }
 
-function serveData(res) {
+async function serveData(res) {
+  await ensureFresh();
   if (!model) {
     refuse(res, 503, "warming_up", refreshError || "The board is still loading.");
     return;
@@ -488,7 +554,6 @@ function removeRecord() {
 async function main() {
   if (!fs.existsSync(dirname(config.board_sh))) fatal("board script directory is missing");
   if (await existingBoardAlive()) fatal(`a board is already serving ${config.home}; see bin/fm-board.sh status`);
-  await refresh();
   const server = http.createServer((req, res) => {
     handle(req, res).catch((error) => {
       process.stderr.write(`fm-board: request failed: ${error.message}\n`);
@@ -503,9 +568,7 @@ async function main() {
     writeRecord(port);
     process.stderr.write(`fm-board: serving http://127.0.0.1:${port}/ for ${config.home}\n`);
   });
-  const timer = setInterval(refresh, config.interval * 1000);
   const stop = () => {
-    clearInterval(timer);
     removeRecord();
     server.close();
     process.exit(0);
