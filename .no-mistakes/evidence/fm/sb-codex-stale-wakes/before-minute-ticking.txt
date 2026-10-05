@@ -1,0 +1,19 @@
+=== [before-fix] scenario=minute-ticking root=/home/shuv/.cache/agent-ws/fm-base ===
+--- pane (real tmux capture) ---
+• Ran cargo test --workspace
+  └ running 412 tests
+• Working (5m • esc to interrupt)
+› Ask Codex to do anything
+--- after 5s: watcher exited=yes ---
+--- pane at end ---
+• Working (5m • esc to interrupt)
+--- watcher stdout (wakes) ---
+stale: fmlive:codex
+--- codex-working observation sidecar ---
+(none)
+--- triage log tail ---
+c1.meta
+home-summary.json
+terminal-outcomes
+--- watcher stderr (octal/arith errors?) ---
+(no arithmetic errors)

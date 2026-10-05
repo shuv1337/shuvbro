@@ -1,0 +1,20 @@
+=== [after-fix] scenario=minute-frozen root=/home/shuv/.no-mistakes/worktrees/8a7692f99431/01M472KXX4XH0X3NG9HV7KKHNW ===
+--- pane (real tmux capture) ---
+• Ran cargo test --workspace
+  └ running 412 tests
+• Working (5m • esc to interrupt)
+› Ask Codex to do anything
+--- after 62s: watcher exited=yes ---
+--- pane at end ---
+• Working (5m • esc to interrupt)
+--- watcher stdout (wakes) ---
+stale: fmlive:codex
+--- codex-working observation sidecar ---
+elapsed=300 grain=60 seen=1791239644
+--- triage log tail ---
+c1.codex-working
+c1.meta
+home-summary.json
+terminal-outcomes
+--- watcher stderr (octal/arith errors?) ---
+(no arithmetic errors)
