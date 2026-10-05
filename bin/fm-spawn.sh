@@ -193,8 +193,11 @@
 #   also receives `export FM_TASK_ID=<task-id>` before the launch command, on
 #   the same channel as GOTMPDIR, and bin/fm-test-run.sh refuses to execute the
 #   behavior suite from the repository primary checkout while that marker is
-#   set (its header owns the refusal). A secondmate runs in its own home and is
-#   not marked.
+#   set (its header owns the refusal). The same channel prepends
+#   bin/worker-guards to PATH. While FM_TASK_ID is set, that directory's
+#   sharkctl shim refuses the notify and ask verbs and otherwise execs the next
+#   sharkctl on PATH; bin/fm-sharkctl-guard.sh owns the refusal. A secondmate
+#   runs in its own home, is not marked, and does not receive the prepend.
 #   Only after this isolation check, every fresh ship or scout requires a clean
 #   task worktree. When an origin configuration is detected, spawn fetches it,
 #   resolves the current remote default branch, and resets to its tip. When none
@@ -239,6 +242,8 @@
 #   CMUX_WORKSPACE_ID CMUX_SURFACE_ID CMUX_TAB_ID CMUX_PANEL_ID CMUX_SOCKET_PATH
 #   ZELLIJ ZELLIJ_SESSION_NAME ZELLIJ_PANE_ID FM_ZELLIJ_SESSION, plus the task
 #   marker FM_TASK_ID that ship and scout panes receive above.
+#   The ship and scout PATH prepend above is already in the pane when this
+#   filtered launch expands PATH, so the retained PATH includes the guard.
 #   An enabled task trace also retains TRACEPARENT. Explicit Firstmate launch
 #   assignments still apply inside the filtered environment. Raw commands must
 #   be POSIX sh compatible under this opt-in; the absent-file path is unchanged.
@@ -4178,6 +4183,15 @@ spawn_send_text_line "$T" "export GOTMPDIR=$TASK_TMP/gotmp"
 # syntax of its own.
 if [ "$KIND" = ship ] || [ "$KIND" = scout ]; then
   spawn_send_text_line "$T" "export FM_TASK_ID=$ID"
+  # Prepend the captain-contact guard before launch so the pane shell, a
+  # filtered launch's retained PATH, and every child share it. The id is a
+  # validated bare slug. The directory is shell-quoted; $PATH expands in the
+  # pane, not in this process.
+  [ -x "$FM_ROOT/bin/worker-guards/sharkctl" ] || {
+    echo "error: captain-contact guard missing at $FM_ROOT/bin/worker-guards/sharkctl" >&2
+    exit 1
+  }
+  spawn_send_text_line "$T" "export PATH=$(shell_quote "$FM_ROOT/bin/worker-guards"):\$PATH"
 fi
 # Send through the exact channel that already ships GOTMPDIR, so every backend
 # and harness - ship, scout, and secondmate - gets it before launch. Skipped

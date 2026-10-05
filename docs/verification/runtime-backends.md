@@ -30,6 +30,38 @@ zsh
 A persistent parent shell waiting for a child remained reported as the parent process, while a shell that directly execed a simple command changed identity with the process itself.
 Pi and pi-signed 0.82.0 were reverified on 2026-07-27 through real isolated `fm-spawn.sh` launches.
 
+### Codex exit popup compatibility
+
+Verified on 2026-10-04 PDT with codex-cli 0.160.0 and tmux 3.7c on Linux.
+The probe used a private tmux socket, a disposable directory and `FM_HOME`, and an idle Codex TUI launched with `codex --no-daemon --no-alt-screen -C "$scratch"`.
+Folder trust was accepted and untrusted hooks were skipped before probing the ready composer; no model prompt was submitted.
+A PATH wrapper forwarded every control-path tmux call to `tmux -L "$socket"`, so the default server was never targeted.
+
+The Enter-only comparison used:
+
+```sh
+tmux -L "$socket" send-keys -t "$target" -l /quit
+sleep 2
+tmux -L "$socket" capture-pane -p -t "$target"
+tmux -L "$socket" send-keys -t "$target" Enter
+```
+
+Before Enter, the visible popup read `/quit  exit Codex` and the composer read `/quit`.
+Enter exited with `CODEX_EXIT_STATUS=0` from the launch wrapper; the reported swallowing failure was not reproduced in this version.
+In a separate ready TUI, Escape removed the popup and preserved the `/quit` draft; the following Enter also exited with status 0.
+
+The actual control path used a disposable task metadata record identifying the same endpoint and `harness=codex`:
+
+```sh
+FM_HOME="$probe_home" PATH="$socket_wrapper_dir:$PATH" bin/fm-control.sh probe exit
+```
+
+Observed key transport was literal `/quit`, Escape, then Enter.
+The backend's `fm_backend_agent_state tmux "$target" codex` returned `alive` before control and `dead` afterward.
+Control returned `stopped probe harness=codex backend=tmux`; the TUI exited with status 0 and `ps` on its terminal showed only the preserved shells, with no Codex process.
+These observations establish idle-tmux compatibility for Escape then Enter, not that Escape is necessary in every version, nor live verification of Herdr or busy interruption.
+Portable regressions for delivery ordering remain `tests/fm-control.test.sh` and `tests/fm-backend-herdr.test.sh`; their simulated swallowing case is not empirical evidence for this Codex version.
+
 ### Agent liveness name sources
 
 The earlier record that every harness is observed under its own `#{pane_current_command}` no longer holds and has been replaced by the per-harness evidence below.
@@ -1678,7 +1710,7 @@ The current `bin/fm-opencode-v2-launch.sh` creates an exact model-bound session 
 The native route is implemented but is not yet qualified for the combined issue #1 matrix.
 On 2026-10-02, isolated Linux probes with installed shuvcode v2.0.22-shuv.1 demonstrated native package loading, exact TUI-owned lock and pathless binding RPC, a real typed cd-guard refusal, unrelated-root execution, observer environment recovery, ordinary session-ID spoof refusal, one durable queued wake and shared-worker attachment, plus natural TUI retirement with the shared service surviving.
 Those probes used a deterministic local provider, not a paid/vendor model, and did not qualify the actual two-home/two-worker/Herdr, busy-and-idle delivery or restarted-service positive matrix.
-On 2026-10-04 at 20:11:16 PDT on Linux with installed shuvcode v2.0.22-shuv.2, Node v26.10.0 and termctrl 0.6.0, the isolated shared-service guard exited 0 for all requested legs A/B/C/D/E/G/H.
+On 2026-10-04 at 21:05:47 PDT on Linux with installed shuvcode v2.0.22-shuv.2, Node v26.10.0 and termctrl 0.6.0, the isolated shared-service guard exited 0 for all requested legs A/B/C/D/E/G/H.
 The guard used the dispatch-selected AVX2 executable `/home/shuv/.npm-global/lib/node_modules/shuvcode/node_modules/shuvcode-linux-x64/bin/shuvcode`, recorded in its output before service startup:
 
 ```sh
@@ -1689,14 +1721,14 @@ FM_OPENCODE_V2_SHARED_LIVE=1 FM_V2_LIVE_LEGS=ABCDEGH bash tests/fm-opencode-v2-s
 ok - live leg B: two homes on one service each have their own active owner; lead A cannot take home B
 ok - live leg C: two workers (explicit and configured-default model, both mock/echo) ran on the one shared service with exact recorded sessions; a worker shell cannot claim the lead home
 ok - live leg D: with an observer UI attached, the lead keeps its claim and its shell still holds the home lock
-ok - live leg G: a wake raised while the lead was busy was queued and handled after its turn, an idle-lead wake was handled promptly; two wakes, two canonical acks, no duplicate execution
+ok - live leg G: a busy-lead wake steers at the next tool boundary before the old prompt's final response, an idle-lead wake starts execution; two wakes, two canonical acks, no duplicate execution
 ok - live leg E: after the service restart and before rebind the lead's command was refused with the rebind diagnostic
 ok - live leg H: teardown refuses the resumed worker
 ok - live leg H: after the confirmed successor cancellation ordinary teardown reconciles the worker
 ```
 
 The run also passed package inventory, typed guard refusals, exact TUI-owned lock, owner rebind after service restart, interruption of the successor's resumed worker, and bounded settlement for workers that finished after or before restart.
-On the same host at 20:13:57 PDT, the complete succession guard exited 0 using the same AVX2 executable, with its default ten cycles and private-server case enabled:
+On the same host at 21:08:28 PDT, the complete succession guard exited 0 using the same AVX2 executable, with its default ten cycles and private-server case enabled:
 
 ```sh
 FM_OPENCODE_V2_SUCCESSION_LIVE=1 bash tests/fm-opencode-v2-succession-live.test.sh
@@ -1725,4 +1757,21 @@ The portable launcher regression exercises the four real x64 package names as na
 The direct Herdr detach/attach leg F was excluded because its interactive client bypasses the named-session helper required by this qualification's isolation contract.
 The separate real Herdr/Treehouse worker lifecycle guard above passed, but does not qualify that primary detach/attach leg.
 The real-model evidence remains the single-worker free-model guard above; a real-model two-home/two-worker combined Herdr matrix remains pending, so these results qualify worker dispatch on shuv.2 without claiming the complete native shared-service matrix.
+
+The current [lead steer admission contract](../supervision-protocols/opencode-v2.md) has portable coverage in `tests/fm-opencode-v2-wake-admission.test.sh`, `tests/fm-opencode-v2-plugin.test.sh` and `tests/fm-opencode-v2-tui-acceptance.test.sh`; the earlier queued-wake probe above predates that change.
+The isolated shared-service guard was rerun on 2026-10-04 at 19:51 PDT on Linux with shuvcode v2.0.22-shuv.2 and the 30-second busy-tool window.
+Legs A, C and G passed, including busy-lead steering before the old prompt's final response, idle-lead execution, two wakes and two canonical acknowledgements.
+The [rerun log](https://github.com/shuv1337/shuvbro/pull/45#issuecomment-5987282004) records the exact output from this command:
+
+```sh
+FM_OPENCODE_V2_BIN=/home/shuv/.npm-global/lib/node_modules/shuvcode/node_modules/shuvcode-linux-x64/bin/shuvcode FM_OPENCODE_V2_SHARED_LIVE=1 FM_V2_LIVE_LEGS=CG bin/fm-test-run.sh --jobs 1 tests/fm-opencode-v2-shared-service-live.test.sh
+```
+
+```text
+ok - live leg G: a busy-lead wake steers at the next tool boundary before the old prompt's final response, an idle-lead wake starts execution; two wakes, two canonical acks, no duplicate execution
+not ok - 2 live qualification check(s) failed
+```
+
+That 19:51 guard exited 1 solely because its two capability-probe checks rejected the installed v2.0.22-shuv.2 under the v2.0.22-shuv.1 allowlist; the complete 21:05:47 run above supersedes those version-probe failures.
+That 19:51 run used an explicit override to select the installed Linux glibc build because the guard's then-default glob selected a musl build that could not run on this host; the shared dispatch resolver above replaces that glob.
 No upstream `opencode2`, cross-host split or V2 secondmate qualification is claimed.

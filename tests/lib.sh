@@ -107,6 +107,30 @@ pass() {
 FM_TEST_CLEANUP_DIRS=()
 FM_TEST_CLEANUP_REGISTRY=$(mktemp "${TMPDIR:-/tmp}/.fm-test-cleanup.$$.XXXXXX") || return 1
 
+# A private directory that contains only the real node binary captured above.
+# Tests that relocate HOME put this directory ahead of PATH. A version-manager
+# shim such as mise resolves its install from the account HOME and fails once
+# HOME moves; the binary from process.execPath does not. The directory holds
+# nothing else, so prepending it cannot shadow git, tmux, or npm.
+FM_TEST_REAL_NODE_DIR=$(mktemp -d "${TMPDIR:-/tmp}/fm-test-node.XXXXXX") || {
+  rm -f "$FM_TEST_CLEANUP_REGISTRY"
+  return 1
+}
+if ! ln -s "$FM_TEST_NATIVE_NODE" "$FM_TEST_REAL_NODE_DIR/node" ||
+  ! printf '%s\n' "$FM_TEST_REAL_NODE_DIR" >> "$FM_TEST_CLEANUP_REGISTRY"; then
+  rm -rf "$FM_TEST_REAL_NODE_DIR"
+  rm -f "$FM_TEST_CLEANUP_REGISTRY"
+  return 1
+fi
+
+# fm_test_path_with_real_node <leading-dir>
+# Echo a PATH for a child whose HOME is about to move. <leading-dir> stays
+# first so stubs win. The real node directory is next, ahead of any shim still
+# on the ambient PATH.
+fm_test_path_with_real_node() {
+  printf '%s\n' "$1:$FM_TEST_REAL_NODE_DIR:${PATH-}"
+}
+
 fm_test_pid_identity() {
   local pid=$1
   FM_STATE_OVERRIDE="${TMPDIR:-/tmp}" bash -c \
@@ -114,9 +138,17 @@ fm_test_pid_identity() {
 }
 
 FM_TEST_OWNER_IDENTITY=$(fm_test_pid_identity "$$") || {
+  rm -rf "$FM_TEST_REAL_NODE_DIR"
   rm -f "$FM_TEST_CLEANUP_REGISTRY"
   return 1
 }
+# Same marker fm_test_tmproot writes, so a run that replaces the EXIT trap
+# still leaves a directory the orphan sweep can reclaim.
+if ! printf '%s\n%s\n' "$$" "$FM_TEST_OWNER_IDENTITY" > "$FM_TEST_REAL_NODE_DIR/.fm-test-fixture"; then
+  rm -rf "$FM_TEST_REAL_NODE_DIR"
+  rm -f "$FM_TEST_CLEANUP_REGISTRY"
+  return 1
+fi
 
 # --- process-event runner reaping -------------------------------------------
 #

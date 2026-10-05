@@ -21,7 +21,9 @@ When this session owns supervision and away mode is not active:
     Merely exporting a lead session ID from an ordinary worker shell is refused, and lead subagents must not perform `fm-*` mutations on the lead's behalf.
     Observer environment replacement can briefly refuse a shell until the next owner reconciliation; that refusal does not transfer ownership.
    The session-lock library's supplemental owner implementation is `bin/fm-opencode-v2-owner.mjs`.
-5. After a genuine actionable close, the coordinator durably saves the logical admission ID/text, verifies its singleton successor and confirms the handoff before native queued admission; `docs/watcher-continuity.md` owns that handoff ordering.
+5. After a genuine actionable close, the coordinator durably saves the logical admission ID/text, verifies its singleton successor and confirms the handoff before native steer admission; `docs/watcher-continuity.md` owns that handoff ordering.
+   Lead journal prompts (wakes, startup nudges and repair notices) use `delivery: "steer"`: an idle session starts execution, and a busy turn receives the prompt at its next model step boundary, after any active model response or tool execution finishes.
+   Worker briefs remain queued through the separate worker launch path.
    Rejected or unknown acknowledgements retry the same ID/text; admission never acknowledges wake rows.
    An exhausted admission remains pending and produces a bounded diagnostic, not an unguarded recovery-marker reopen.
    Subsequent attempts continue with capped backoff while ownership remains valid; confirmed canonical queue acknowledgement retires the obsolete transport obligation without reporting it as admitted.

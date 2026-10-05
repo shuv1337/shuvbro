@@ -235,6 +235,22 @@ fm_control_exit_command() {  # <harness>
   esac
 }
 
+# The named key sent after the exit command is typed and before each submit
+# Enter, or nothing when the adapter needs none. On codex-cli 0.160.0
+# (2026-10-04 PDT), Escape dismissed the /quit popup without editing the draft
+# and Enter then exited. Enter alone also exited: this proves compatibility,
+# not the reported swallow on other versions. The adapter reference and
+# docs/verification/runtime-backends.md own the empirical scope.
+# A harness with no verified mechanics returns nonzero, matching the tables
+# above. fm-control omits the key when the backend cannot deliver it.
+fm_control_exit_dismiss_key() {  # <harness>
+  case "${1-}" in
+    codex) printf 'Escape' ;;
+    claude|opencode|opencode-v2|pi|pi-signed|omp|grok|kimi|cursor|gemini|muse|rovo) ;;
+    *) return 1 ;;
+  esac
+}
+
 # Which named keys a backend adapter can deliver. Every session provider
 # normalizes Enter, Ctrl+C, and the Ctrl+U composer clear; Orca's terminal API
 # exposes only an interrupt and an Enter, so it can deliver neither Escape nor
