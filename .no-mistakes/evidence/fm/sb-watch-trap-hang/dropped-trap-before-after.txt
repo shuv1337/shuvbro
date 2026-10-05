@@ -1,0 +1,14 @@
+=== BEFORE (base b952627) ===
+[b952627] arm pid=3856091 watcher pid=3856105 (watcher ignores TERM)
+[b952627] 13:13:04 kill -TERM arm
+[b952627] arm STILL ALIVE after 30s -> HANG (would stall CI shard)
+[b952627] watcher pid 3856105 still alive
+[b952627] arm stderr:
+
+=== AFTER (target 39566b3) ===
+[39566b3] arm pid=3901556 watcher pid=3901575 (watcher ignores TERM)
+[39566b3] 13:13:35 kill -TERM arm
+[39566b3] arm exited rc=143 after 7s
+[39566b3] watcher pid 3901575 gone
+[39566b3] arm stderr:
+    watcher: pid 3901575 survived TERM for 7s; sent KILL, so its cleanup was skipped and recovery will use the stale-lock path

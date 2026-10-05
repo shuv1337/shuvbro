@@ -1,0 +1,9 @@
+=== Real bin/fm-watch.sh under the real arm (target), normal TERM stop ===
+arm pid=3926417 real watcher pid=3926431
+arm stdout so far:
+    watcher: started pid=3926431 (beacon fresh)
+arm exited rc=143 after 0s
+watcher 3926431 gone
+arm stderr:
+downtime marker (written by the watcher's own cleanup): pending:downtime:3927025.1791231239.VNfRzN
+watch lock after stop: released
