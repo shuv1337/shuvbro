@@ -330,7 +330,7 @@ family_for_basename() {
     fm-harness-liveness-drift-live-e2e.test.sh|\
     fm-muse-signals-live-e2e.test.sh|fm-rovo-signals-live-e2e.test.sh|\
     fm-herdr-version-floor-live-e2e.test.sh|\
-    fm-opencode-primary-live-e2e.test.sh|fm-opencode-v2-worker-live-e2e.test.sh|fm-pi-branch-live-e2e.test.sh|\
+    fm-opencode-primary-live-e2e.test.sh|fm-opencode-v2-worker-live-e2e.test.sh|fm-control-herdr-v2-live-e2e.test.sh|fm-pi-branch-live-e2e.test.sh|\
     fm-opencode-v2-shared-service-live.test.sh|fm-opencode-v2-herdr-detach-live.test.sh|\
     fm-opencode-v2-herdr-transport-smoke-live.test.sh|fm-opencode-v2-succession-live.test.sh|\
     fm-pi-branch-responsiveness-live-e2e.test.sh|\

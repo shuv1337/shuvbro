@@ -988,8 +988,8 @@ Each file is local and gitignored and is never inherited by a secondmate home, s
 | File | Environment | Holds |
 | --- | --- | --- |
 | `config/board-port` | `FM_BOARD_PORT` | Loopback port, default `8795`; `0` picks a free port. |
-| `config/board-hosts` | none | One bare host name per line, beyond the always-accepted loopback names, that the board may be reached by, such as this machine's tailnet name. |
-| `config/board-logins` | none | One Tailscale login per line; when present, a request is served only with an allowlisted `Tailscale-User-Login` header or as a direct loopback request with no proxy headers. |
+| `config/board-hosts` | none | One bare host name per line, beyond the always-accepted loopback names, that the board may be reached by, such as this machine's tailnet name; `serve` refuses to start when it lists a name and `config/board-logins` lists none. |
+| `config/board-logins` | none | One Tailscale login per line; a request is served only with an allowlisted `Tailscale-User-Login` header or as a direct loopback request with no proxy headers, so without it only direct local requests are served. |
 
 Blank lines and `#` comments are ignored in all three, and a malformed host name, login, or port stops `serve` naming the file to fix.
 `FM_BOARD_INTERVAL` (default 10, 2 to 300) sets how many seconds pass between rebuilds of the board's data.
