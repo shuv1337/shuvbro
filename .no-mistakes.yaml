@@ -40,11 +40,14 @@ commands:
 # The evidence is not committed to the feature or default branch.
 test:
   instructions: |
-    Run only portable behavior suites through bin/fm-test-run.sh.
-    Do not set FM_LIVE=1 or any FM_*_LIVE=1 opt-in, and do not run live OpenCode V2 TUI suites, live Herdr suites, or credentialed harness probes.
+    Every bin/fm-test-run.sh invocation must pass both --exclude-family live-harness-optin and --exclude-family real-herdr-gated, including --changed, --all, and --lane portable-*.
+    Those selection modes already include the families: portable lanes include live-harness-optin, and a change that maps to real-herdr-gated selects that family.
+    live-harness-optin is governed by fm_live_gate in tests/lib.sh.
+    real-herdr-gated does not use that gate; it runs when herdr is on PATH.
+    Do not set FM_LIVE or any other fm_live_gate control variable.
+    Do not run live OpenCode V2 TUI suites, live Herdr suites, or credentialed harness probes.
     Do not start, stop, restart, attach to, or otherwise drive the host's real Herdr session or shuvcode service.
-    The live-suite list is owned by bin/fm-test-run.sh (families live-harness-optin and real-herdr-gated); the opt-in decision is owned by fm_live_gate in tests/lib.sh.
-    Do not copy that list here. Drop those families with --exclude-family instead of enabling them.
-    If the requested intent only a live suite could exercise, leave that scenario untested and name the family you excluded.
+    The live-suite list stays owned by bin/fm-test-run.sh; do not copy it here.
+    If the intent describes behavior only a live suite could exercise, leave that scenario untested and name the family you excluded.
   evidence:
     store_in_repo: true
