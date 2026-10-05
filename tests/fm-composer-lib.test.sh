@@ -737,3 +737,40 @@ test_queued_enter_verdict_does_not_convert_other_states() {
 test_queued_enter_verdict_busy_pending_is_empty
 test_queued_enter_verdict_idle_pending_stays_pending
 test_queued_enter_verdict_does_not_convert_other_states
+
+# Codex Working status row. The busy verdict that consumes these readings is
+# owned by bin/fm-busy-lib.sh; this only pins the parse.
+test_codex_working_elapsed_reads_status_row() {
+  local out
+  out=$(printf '%s\n' '• Working (6s • esc to interrupt)' | fm_composer_codex_working_elapsed)
+  [ "$out" = "6 1" ] || fail "seconds row must be 6s at 1s resolution, got '$out'"
+  out=$(printf '%s\n' 'Working (1m 23s • Esc to interrupt)' | fm_composer_codex_working_elapsed)
+  [ "$out" = "83 1" ] || fail "minute+seconds row must be 83s at 1s resolution, got '$out'"
+  out=$(printf '%s\n' 'Working (1m 00s)' | fm_composer_codex_working_elapsed)
+  [ "$out" = "60 1" ] || fail "zero-padded seconds must keep 1s resolution, got '$out'"
+  out=$(printf '%s\n' 'Working (5m)' | fm_composer_codex_working_elapsed)
+  [ "$out" = "300 60" ] || fail "minute-only row must be 300s at 60s resolution, got '$out'"
+  out=$(printf '%s\n' 'Working (1h 02m 03s)' | fm_composer_codex_working_elapsed)
+  [ "$out" = "3723 1" ] || fail "hour row with seconds must be 3723s, got '$out'"
+  out=$(printf '%s\n' 'Working (2h)' | fm_composer_codex_working_elapsed)
+  [ "$out" = "7200 3600" ] || fail "hour-only row must be 7200s at 3600s resolution, got '$out'"
+  pass "fm_composer_codex_working_elapsed: Codex Working rows parse to seconds and display resolution"
+}
+
+test_codex_working_elapsed_ignores_non_status_text() {
+  local out rc
+  out=$(printf '%s\n' 'Worked for 1m 23s' | fm_composer_codex_working_elapsed) && rc=0 || rc=$?
+  [ "$rc" -ne 0 ] || fail "a completed Worked-for separator must not parse, got '$out'"
+  out=$(printf '%s\n' 'the pane shows Working (5m) while stuck' | fm_composer_codex_working_elapsed) && rc=0 || rc=$?
+  [ "$rc" -ne 0 ] || fail "transcript prose mentioning the row must not parse, got '$out'"
+  out=$(printf '%s\n' 'Working on the repo' | fm_composer_codex_working_elapsed) && rc=0 || rc=$?
+  [ "$rc" -ne 0 ] || fail "Working without a duration must not parse, got '$out'"
+  out=$(printf '%s\n' \
+    'quoted earlier: Working (9m)' \
+    '• Working (1m 02s • esc to interrupt)' | fm_composer_codex_working_elapsed)
+  [ "$out" = "62 1" ] || fail "the last status row must win over an earlier mention, got '$out'"
+  pass "fm_composer_codex_working_elapsed: only a status-shaped Working row matches, last row wins"
+}
+
+test_codex_working_elapsed_reads_status_row
+test_codex_working_elapsed_ignores_non_status_text

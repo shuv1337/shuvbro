@@ -6,7 +6,7 @@ Verified on 2026-06-11 with codex-cli 0.139.0 unless a fact gives a newer versio
 
 | Fact | Value |
 |---|---|
-| Busy state | Unknown until a semantic source is live-verified: the app-server turn lifecycle is unreachable for a pane worker, and project lifecycle hooks did not fire for a Firstmate-launched worker. |
+| Busy state | Unknown until a semantic source is live-verified, except an advancing pane Working timer. A single snapshot is not busy. |
 | Exit command | `/quit`; the control path sends Escape then Enter after a 1.2-second settle, live-verified with codex-cli 0.160.0 on 2026-10-04 PDT (see Exit popup). |
 | Interrupt | Single Escape. |
 | Skill invocation | `$<skill>`, for example `$no-mistakes`; `/<skill>` is Claude-only and Codex rejects it as "Unrecognized command". |
@@ -14,6 +14,10 @@ Verified on 2026-06-11 with codex-cli 0.139.0 unless a fact gives a newer versio
 | Model flag | `--model <model>`. |
 | Effort flag | `-c 'model_reasoning_effort="<low\|medium\|high\|xhigh>"'`, verified on codex-cli 0.142.1 whose installed schema contains `model_reasoning_effort`, active config uses it, and bundled catalog advertises only these four values while omitting `max`. |
 | Model discovery | Open the current interactive session's `/model` picker. |
+
+The Working-timer observation reads the live status row above the composer (`Working (6s • esc to interrupt)`, `Working (1m 23s • esc to interrupt)`, or a minute-only `Working (5m)`).
+`fm_composer_codex_working_elapsed` in `bin/fm-composer-lib.sh` owns that parse.
+`bin/fm-busy-lib.sh` owns the verdict: an elapsed value that has increased since the last observation is `busy codex-working-timer`, the same value still inside its display resolution is also busy, and a value that does not advance once that resolution has passed stays `unknown codex-unverified` so a frozen timer still escalates.
 
 A directory trust dialog appears on the first run for a repository root: "Do you trust the contents of this directory?"
 Accept it with Enter and verify the instructions begin processing.

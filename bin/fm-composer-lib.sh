@@ -1475,3 +1475,70 @@ _fm_composer_pi_verdict() {  # <screen> <styled> <has_identity> <identity>
     *) printf 'unknown' ;;
   esac
 }
+
+# fm_composer_codex_working_elapsed: the ONE reader of Codex's visible Working
+# status row. Plain pane text on stdin (the same capture the watcher hashes).
+# Prints "<seconds> <grain>" for the LAST matching row, or returns 1.
+# Grain is the row's display resolution in seconds: 1 when seconds are shown,
+# 60 for a minute-only row, 3600 for an hour-only row.
+# The row is the live status indicator above the composer, rendered as
+# "Working (<elapsed> • esc to interrupt)" with elapsed "Ns", "Nm Ns", or
+# "Nh Nm Ns" (codex-cli 0.160.0; a minute-only "Working (Nm)" is accepted too).
+# A completed "Worked for" separator and a transcript sentence that merely
+# mentions the row do not match. This function does not decide busy; the
+# observation contract is owned by bin/fm-busy-lib.sh.
+fm_composer_codex_working_elapsed() {
+  local line plain trimmed prefix inner rest seconds grain unit_seconds
+  local best_seconds='' best_grain='' matched=1
+  while IFS= read -r line || [ -n "$line" ]; do
+    plain=$(printf '%s\n' "$line" | fm_composer_strip_ansi)
+    trimmed=${plain#"${plain%%[![:space:]]*}"}
+    trimmed=${trimmed%"${trimmed##*[![:space:]]}"}
+    [ -n "$trimmed" ] || continue
+    case "$trimmed" in
+      *'Working ('*) ;;
+      *) continue ;;
+    esac
+    prefix=${trimmed%%Working (*}
+    if [ -n "$prefix" ] && ! [[ "$prefix" =~ ^[^[:space:][:alnum:]]{1,8}[[:space:]]+$ ]]; then
+      continue
+    fi
+    inner=${trimmed#*Working (}
+    inner=${inner%%)*}
+    [ "$inner" != "$trimmed" ] || continue
+    rest=$inner
+    seconds=0
+    grain=0
+    if [[ "$rest" =~ ^([0-9]{1,6})h(.*)$ ]]; then
+      unit_seconds=${BASH_REMATCH[1]}
+      seconds=$((seconds + unit_seconds * 3600))
+      grain=3600
+      rest=${BASH_REMATCH[2]}
+      rest=${rest#"${rest%%[![:space:]]*}"}
+    fi
+    if [[ "$rest" =~ ^([0-9]{1,6})m(.*)$ ]]; then
+      unit_seconds=${BASH_REMATCH[1]}
+      seconds=$((seconds + unit_seconds * 60))
+      grain=60
+      rest=${BASH_REMATCH[2]}
+      rest=${rest#"${rest%%[![:space:]]*}"}
+    fi
+    if [[ "$rest" =~ ^([0-9]{1,6})s(.*)$ ]]; then
+      unit_seconds=${BASH_REMATCH[1]}
+      seconds=$((seconds + unit_seconds))
+      grain=1
+      rest=${BASH_REMATCH[2]}
+      rest=${rest#"${rest%%[![:space:]]*}"}
+    fi
+    [ "$grain" -gt 0 ] || continue
+    # Status furniture may follow the duration. Prose may not.
+    if [[ "$rest" =~ ^[A-Za-z0-9] ]]; then
+      continue
+    fi
+    best_seconds=$seconds
+    best_grain=$grain
+    matched=0
+  done
+  [ "$matched" -eq 0 ] || return 1
+  printf '%s %s\n' "$best_seconds" "$best_grain"
+}

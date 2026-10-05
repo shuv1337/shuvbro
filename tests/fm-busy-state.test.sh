@@ -306,6 +306,64 @@ Ctrl+c:cancel')
 
 # --- kimi verification gate -----------------------------------------------------
 
+test_codex_working_timer_advance_is_busy_and_frozen_is_not() {
+  local state out
+  state=$(new_state_dir codex-timer)
+  # A single snapshot is not busy, including the delivery-footer shape.
+  out=$(FM_BUSY_NOW=1000 fm_busy_classify tmux w1 codex t1 "$state" '• Working (6s • esc to interrupt)')
+  [ "$out" = "unknown codex-unverified" ] || fail "first Working snapshot must stay unknown, got '$out'"
+  # The same painted second, still inside a 1s resolution, is not yet frozen.
+  out=$(FM_BUSY_NOW=1000 fm_busy_classify tmux w1 codex t1 "$state" '• Working (6s • esc to interrupt)')
+  [ "$out" = "busy codex-working-timer" ] || fail "same second inside resolution must be busy, got '$out'"
+  # Fifteen seconds later the same 6s reading has missed its tick.
+  out=$(FM_BUSY_NOW=1015 fm_busy_classify tmux w1 codex t1 "$state" '• Working (6s • esc to interrupt)')
+  [ "$out" = "unknown codex-unverified" ] || fail "frozen seconds row must stay unknown, got '$out'"
+  # An increased elapsed value is the verified advance.
+  out=$(FM_BUSY_NOW=1015 fm_busy_classify tmux w1 codex t1 "$state" 'Working (21s • esc to interrupt)')
+  [ "$out" = "busy codex-working-timer" ] || fail "advancing timer must be busy, got '$out'"
+  out=$(FM_BUSY_NOW=1030 fm_busy_classify tmux w1 codex t1 "$state" 'Working (1m 00s • esc to interrupt)')
+  [ "$out" = "busy codex-working-timer" ] || fail "timer crossing a minute must stay busy, got '$out'"
+  # A rebuilt widget that jumps backwards is a new observation, not an advance.
+  out=$(FM_BUSY_NOW=1031 fm_busy_classify tmux w1 codex t1 "$state" 'Working (2s • esc to interrupt)')
+  [ "$out" = "unknown codex-unverified" ] || fail "a reset timer must not classify busy, got '$out'"
+  out=$(FM_BUSY_NOW=1032 fm_busy_classify tmux w1 codex t1 "$state" 'Working (3s • esc to interrupt)')
+  [ "$out" = "busy codex-working-timer" ] || fail "the reset timer must count once it advances, got '$out'"
+  pass "codex Working timer: an advance is busy, a frozen reading stays unknown"
+}
+
+test_codex_working_timer_minute_row_holds_through_its_resolution() {
+  local state out
+  state=$(new_state_dir codex-minute)
+  out=$(FM_BUSY_NOW=2000 fm_busy_classify herdr s:p codex t1 "$state" 'Working (5m)')
+  [ "$out" = "unknown codex-unverified" ] || fail "first minute-only snapshot must stay unknown, got '$out'"
+  # Two watcher polls later the minute has not had time to tick.
+  out=$(FM_BUSY_NOW=2030 fm_busy_classify herdr s:p codex t1 "$state" 'Working (5m)')
+  [ "$out" = "busy codex-working-timer" ] || fail "minute-only row inside 60s must be busy, got '$out'"
+  out=$(FM_BUSY_NOW=2061 fm_busy_classify herdr s:p codex t1 "$state" 'Working (5m)')
+  [ "$out" = "unknown codex-unverified" ] || fail "minute-only row past 60s without a tick must escalate, got '$out'"
+  out=$(FM_BUSY_NOW=2061 fm_busy_classify herdr s:p codex t1 "$state" 'Working (6m)')
+  [ "$out" = "busy codex-working-timer" ] || fail "the next minute must count as an advance, got '$out'"
+  # The row leaving the pane clears the observation so a later turn starts clean.
+  out=$(FM_BUSY_NOW=2100 fm_busy_classify herdr s:p codex t1 "$state" '› ')
+  [ "$out" = "unknown codex-unverified" ] || fail "a pane with no Working row must stay unknown, got '$out'"
+  [ ! -e "$state/t1.codex-working" ] || fail "a gone Working row must drop the observation"
+  out=$(FM_BUSY_NOW=2101 fm_busy_classify herdr s:p codex t1 "$state" 'Working (1s • esc to interrupt)')
+  [ "$out" = "unknown codex-unverified" ] || fail "a new turn's first snapshot must stay unknown, got '$out'"
+  pass "codex minute-only Working row holds only through its display resolution"
+}
+
+test_codex_working_timer_does_not_classify_other_harnesses() {
+  local state out
+  state=$(new_state_dir codex-timer-isolation)
+  out=$(FM_BUSY_NOW=3000 fm_busy_classify tmux w1 claude t1 "$state" 'Working (1m 23s • esc to interrupt)')
+  [ "$out" = "unknown missing" ] || fail "claude must not borrow the codex timer, got '$out'"
+  out=$(FM_BUSY_NOW=3015 fm_busy_classify tmux w1 claude t1 "$state" 'Working (1m 40s • esc to interrupt)')
+  [ "$out" = "unknown missing" ] || fail "a second claude reading must still ignore the timer, got '$out'"
+  out=$(FM_BUSY_NOW=3000 fm_busy_classify tmux w1 grok t1 "$state" 'Working (1m 23s • esc to interrupt)')
+  [ "$out" = "idle grok-regex" ] || fail "grok must not become busy from a codex Working row, got '$out'"
+  pass "the codex Working timer never classifies another harness"
+}
+
 test_codex_unverified_gate() {
   local state gen out
   state=$(new_state_dir codex-gate)
@@ -475,6 +533,9 @@ test_record_without_sidecar_unknown
 test_source_mismatch_cross_adapter
 test_converted_adapters_ignore_footer_text
 test_grok_regex_isolated
+test_codex_working_timer_advance_is_busy_and_frozen_is_not
+test_codex_working_timer_minute_row_holds_through_its_resolution
+test_codex_working_timer_does_not_classify_other_harnesses
 test_codex_unverified_gate
 test_kimi_unverified_gate
 test_cursor_ignores_rendered_and_native_signals
