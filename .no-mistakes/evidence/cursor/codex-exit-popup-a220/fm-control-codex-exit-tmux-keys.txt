@@ -1,0 +1,3 @@
+send-keys -t fmses:fm-probe -l /quit
+send-keys -t fmses:fm-probe Escape
+send-keys -t fmses:fm-probe Enter

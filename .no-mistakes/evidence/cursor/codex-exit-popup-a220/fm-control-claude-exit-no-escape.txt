@@ -1,0 +1,18 @@
+$ bin/fm-control.sh cl exit   # harness=claude; live tmux pane running a raw-mode process named "claude" that logs received bytes
+stopped cl harness=claude backend=tmux endpoint=fmses:fm-cl worktree=/home/shuv/.cache/agent-ws/codex-exit-probe/wt
+exit-code=0
+--- tmux send-keys issued:
+send-keys -t fmses:fm-cl -l /exit
+send-keys -t fmses:fm-cl Enter
+--- bytes the claude-named process received:
+/
+e
+x
+i
+t
+ENTER(buf=/exit)
+--- pane:
+> /exit
+CLAUDE_STUB_EXIT
+STUB_STATUS=0
+bash-5.3$

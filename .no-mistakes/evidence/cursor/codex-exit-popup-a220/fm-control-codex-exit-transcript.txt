@@ -1,0 +1,5 @@
+$ FM_HOME=$probe_home PATH=$socket_wrapper:$PATH FM_GATE_REFUSE_BYPASS=1 bin/fm-control.sh probe exit
+stopped probe harness=codex backend=tmux endpoint=fmses:fm-probe worktree=/home/shuv/.cache/agent-ws/codex-exit-probe/wt
+exit-code=0
+elapsed=3.065004256s
+agent_state after: dead

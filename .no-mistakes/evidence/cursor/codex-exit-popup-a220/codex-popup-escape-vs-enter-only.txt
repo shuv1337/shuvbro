@@ -1,0 +1,38 @@
+===== window esc: ready composer
+  Welcome. There’s no dress code, just code.
+  Tip: Maximize usage with GPT-6.1 Sol. Try it on complex work for near-Astra performance at a lower cost.
+› Ask Codex to do anything
+  GPT-6.1-Sol default · ~/.cache/agent-ws/codex-exit-probe/wt
+===== esc: after typing /quit (popup)
+  Welcome. There’s no dress code, just code.
+  Tip: Maximize usage with GPT-6.1 Sol. Try it on complex work for near-Astra performance at a lower cost.
+› /quit  exit Codex
+› /quit
+  GPT-6.1-Sol default · ~/.cache/agent-ws/codex-exit-probe/wt
+===== esc: after Escape
+     ~/.cache/agent-ws/codex-exit-probe/wt
+  Welcome. There’s no dress code, just code.
+  Tip: Maximize usage with GPT-6.1 Sol. Try it on complex work for near-Astra performance at a lower cost.
+› /quit
+  GPT-6.1-Sol default · ~/.cache/agent-ws/codex-exit-probe/wt
+===== esc: after Enter
+  Tip: Maximize usage with GPT-6.1 Sol. Try it on complex work for near-Astra performance at a lower cost.
+Session ID: 01a109ca-90f8-7701-81af-25dc705ee67c
+CODEX_EXIT_STATUS=0
+bash-5.3$
+===== window enteronly: ready composer
+  Nice to see you in these parts.
+  Tip: Maximize usage with GPT-6.1 Sol. Try it on complex work for near-Astra performance at a lower cost.
+› Ask Codex to do anything
+  GPT-6.1-Sol default · ~/.cache/agent-ws/codex-exit-probe/wt
+===== enteronly: after typing /quit (popup)
+  Nice to see you in these parts.
+  Tip: Maximize usage with GPT-6.1 Sol. Try it on complex work for near-Astra performance at a lower cost.
+› /quit  exit Codex
+› /quit
+  GPT-6.1-Sol default · ~/.cache/agent-ws/codex-exit-probe/wt
+===== enteronly: after Enter
+  Tip: Maximize usage with GPT-6.1 Sol. Try it on complex work for near-Astra performance at a lower cost.
+Session ID: 01a109ca-8dc9-72f2-b912-6076eaaf191e
+CODEX_EXIT_STATUS=0
+bash-5.3$
