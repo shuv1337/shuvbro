@@ -12,10 +12,12 @@ export async function countWatchers(state, {
   const stat = (pid) => {
     const text = readText(pid, "stat");
     const fields = text.slice(text.lastIndexOf(") ") + 2).trim().split(/\s+/);
-    if (fields.length < 20 || !/^\d+$/.test(fields[1]) || !/^\d+$/.test(fields[19])) {
+    if (fields.length < 20 || !/^\d+$/.test(fields[1]) || !/^\d+$/.test(fields[19]) || !/^\d+$/.test(fields[6])) {
       throw new Error(`invalid stat for ${pid}`);
     }
-    return { parent: fields[1], start: fields[19], status: fields[0], identity: `${fields[1]}:${fields[19]}` };
+    const forkWithoutExec = (BigInt(fields[6]) & 64n) !== 0n; // Linux PF_FORKNOEXEC
+    return { parent: fields[1], start: fields[19], status: fields[0], forkWithoutExec,
+      identity: `${fields[1]}:${fields[19]}:${forkWithoutExec}` };
   };
   const record = (pid, withEnv) => {
     const before = stat(pid);
@@ -29,7 +31,7 @@ export async function countWatchers(state, {
     if (after.identity !== before.identity || readText(pid, "cmdline") !== cmd) return null;
     return { pid, ...after, cmd, env };
   };
-  const transient = (error) => ["ENOENT", "ESRCH"].includes(error.code);
+  const transient = (error) => ["ENOENT", "ESRCH", "EACCES"].includes(error.code);
   const servesHome = (env) => env !== null && env.split("\0").includes(`FM_STATE_OVERRIDE=${state}`);
   const isWatcher = (cmd) => /(?:^|\0)[^\0]*\/bin\/fm-watch\.sh(?:\0|$)/.test(cmd);
   let previous = null;
@@ -46,7 +48,10 @@ export async function countWatchers(state, {
         env = readText(pid, "environ");
       }
       catch (error) {
-        if (transient(error) || error.code === "EACCES") continue;
+        if (transient(error)) {
+          if (cmd && isWatcher(cmd)) stable = false;
+          continue;
+        }
         throw error;
       }
       if (!servesHome(env)) continue;
@@ -63,7 +68,13 @@ export async function countWatchers(state, {
           stable = false;
           continue;
         }
-        if (parent.cmd === child.cmd && servesHome(parent.env)) continue;
+        // A Bash subshell retains its parent's command even after adoption by
+        // init or a subreaper. PF_FORKNOEXEC survives adoption until exec.
+        if (child.forkWithoutExec) continue;
+        if (parent.cmd === child.cmd) {
+          if (parent.env === null) { stable = false; continue; }
+          if (servesHome(parent.env)) continue;
+        }
         roots.push(`${pid}:${child.identity}:${parent.pid}:${parent.identity}:${child.cmd}`);
       } catch (error) {
         if (transient(error)) { stable = false; continue; }
