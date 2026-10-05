@@ -1,0 +1,20 @@
+FM_TEST_BEGIN 2026-10-05T02:58:34Z tests/fm-opencode-v2-shared-service-live.test.sh family=live-harness-optin expected_gate_skip=live-capability
+ok - live phase 1: isolated shared service shuvcode v2.0.22-shuv.2 pid 3571483 on port 39327 with all paths in the lab
+not ok - the dispatch capability probe refused the installed target: opencode-v2 capability probe: unqualified target shuvcode v2.0.22-shuv.2; use qualified shuvcode v2.0.22-shuv.1 or qualify the new build first
+not ok - the capability probe refused a runtime-less root without the actionable diagnostic: opencode-v2 capability probe: unqualified target shuvcode v2.0.22-shuv.2; use qualified shuvcode v2.0.22-shuv.1 or qualify the new build first
+ok - live phase 2: the primary's plugin inventory has no failed or duplicate plugins
+ok - live phase 2: exactly one active V2 lead implementation (firstmate.native.v2)
+ok - live phase 3: an unrelated root session at the primary ran the protected command
+ok - live phase 3: a child carrying the inherited marker ran the protected command
+ok - live phase 3: the exact-marked unregistered lead's command was refused with the stale-scope rebind diagnostic before execution
+ok - live phase 4: a model shell carries its exact session id under the shared service and cannot lock unregistered
+ok - live leg A: activated UI pid 3572409 owns lead ses_ef6004226ffeWNnUSVcP1EFOcB: active registration, .lock is the UI pid, watcher armed
+ok - live leg A: in one lead session the allowed command completed, cd was rejected as [persistent-cd] and the backgrounded arm as [watcher-background], before execution
+ok - live leg C: two workers (explicit and configured-default model, both mock/echo) ran on the one shared service with exact recorded sessions; a worker shell cannot claim the lead home
+ok - live leg G: a busy-lead wake steers at the next tool boundary before the old prompt's final response, an idle-lead wake starts execution; two wakes, two canonical acks, no duplicate execution
+not ok - 2 live qualification check(s) failed
+note: live evidence retained at /tmp/fm-opencode-v2-shared-live.s3V6Lf
+FM_TEST_END 2026-10-05T02:59:23Z tests/fm-opencode-v2-shared-service-live.test.sh exit=1 duration_ms=49142 gate_skip=false
+FM_TEST_SUMMARY total=1 failed=1 skipped_gate=0 duration_ms=49166
+FM_TEST_SUMMARY_FAMILY family=live-harness-optin count=1 duration_ms=49142 failed=1
+FM_TEST_SLOWEST rank=1 script=tests/fm-opencode-v2-shared-service-live.test.sh duration_ms=49142
