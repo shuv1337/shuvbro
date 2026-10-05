@@ -120,6 +120,38 @@ test_two_guard_aliases_delegate_once() {
   pass "two guard aliases skip each other and delegate allowed and unmarked invocations once"
 }
 
+test_two_guard_copies_delegate_once() {
+  local first="$TMP_ROOT/copy-first" second="$TMP_ROOT/copy-second" out rc
+  mkdir -p "$first" "$second"
+  cp "$ROOT/bin/fm-sharkctl-guard.sh" "$first/sharkctl"
+  cp "$ROOT/bin/fm-sharkctl-guard.sh" "$second/sharkctl"
+  chmod +x "$first/sharkctl" "$second/sharkctl"
+
+  reset_decoy
+  out=$(fm_run_timed 5 env -u FM_SHARKCTL_GUARD_REST FM_TASK_ID=worker-copy \
+    PATH="$first:$second:$DECOY_DIR:$SYSTEM_PATH" DECOY_LOG="$DECOY_LOG" \
+    "$first/sharkctl" devices list 2>&1) && rc=0 || rc=$?
+  expect_code 0 "$rc" "two guard copies must delegate a worker's allowed verb (got: $out)"
+  [ "$(cat "$DECOY_LOG")" = "devices list" ] \
+    || fail "two copies must forward the worker invocation exactly once: $(cat "$DECOY_LOG")"
+
+  reset_decoy
+  out=$(fm_run_timed 5 env -u FM_SHARKCTL_GUARD_REST -u FM_TASK_ID \
+    PATH="$first:$second:$DECOY_DIR:$SYSTEM_PATH" DECOY_LOG="$DECOY_LOG" \
+    "$first/sharkctl" notify ask --wait 2>&1) && rc=0 || rc=$?
+  expect_code 0 "$rc" "two guard copies must delegate an unmarked invocation (got: $out)"
+  [ "$(cat "$DECOY_LOG")" = "notify ask --wait" ] \
+    || fail "two copies must forward the unmarked invocation exactly once: $(cat "$DECOY_LOG")"
+
+  reset_decoy
+  out=$(fm_run_timed 5 env -u FM_SHARKCTL_GUARD_REST FM_TASK_ID=worker-copy \
+    PATH="$first:$second:$DECOY_DIR:$SYSTEM_PATH" DECOY_LOG="$DECOY_LOG" \
+    "$first/sharkctl" notify ask 2>&1) && rc=0 || rc=$?
+  expect_code 1 "$rc" "two guard copies must still refuse a worker's notify (got: $out)"
+  decoy_was_called && fail "two copies let a worker's notify reach sharkctl"
+  pass "two separate guard copies delegate allowed and unmarked invocations once and still refuse notify"
+}
+
 # Fake tmux: answers the pane-path query and logs every send-keys payload in
 # order, so the test can replay the worker environment spawn actually sent.
 make_spawn_fakebin() {
@@ -297,5 +329,6 @@ test_notify_ask_refuses_without_calling_sharkctl
 test_ask_refuses_and_other_verbs_delegate
 test_unmarked_shell_delegates_notify_ask
 test_two_guard_aliases_delegate_once
+test_two_guard_copies_delegate_once
 test_spawned_ship_and_scout_refuse_notify_ask
 test_filtered_launch_keeps_the_guard

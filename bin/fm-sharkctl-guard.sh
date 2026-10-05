@@ -36,8 +36,14 @@ same_file() {
   [ "$1" -ef "$2" ]
 }
 
+# A separate copy of this guard later on PATH is not the same file. Delegation
+# hands it FM_SHARKCTL_GUARD_REST, the PATH entries after the one it was found
+# in, so each hop searches strictly further along PATH and the chain ends.
 next_sharkctl() {
   local path=${PATH-} dir candidate
+  if [ -n "${FM_SHARKCTL_GUARD_REST+set}" ]; then
+    path=$FM_SHARKCTL_GUARD_REST
+  fi
   while [ -n "$path" ]; do
     dir=${path%%:*}
     case "$path" in
@@ -48,14 +54,15 @@ next_sharkctl() {
     candidate=$dir/sharkctl
     [ -x "$candidate" ] && [ ! -d "$candidate" ] || continue
     same_file "$0" "$candidate" && continue
-    printf '%s\n' "$candidate"
+    printf '%s\n%s\n' "$path" "$candidate"
     return 0
   done
   return 1
 }
 
-if ! target=$(next_sharkctl); then
+if ! found=$(next_sharkctl); then
   printf '%s\n' "error: sharkctl: command not found" >&2
   exit 127
 fi
-exec "$target" "$@"
+export FM_SHARKCTL_GUARD_REST="${found%%$'\n'*}"
+exec "${found#*$'\n'}" "$@"
