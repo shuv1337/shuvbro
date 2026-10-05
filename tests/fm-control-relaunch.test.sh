@@ -1578,7 +1578,7 @@ v2_relaunch_case() {  # <name> <id>
   cat > "$V2R_DIR/fakebin/shuvcode" <<SH
 #!/usr/bin/env bash
 case "\${1:-}" in
-  --version) echo 'shuvcode v2.0.22-shuv.1'; exit 0 ;;
+  --version) echo 'shuvcode v2.0.22-shuv.2'; exit 0 ;;
   --help) echo '--server --session --auto'; exit 0 ;;
 esac
 exec "$V2_NATIVE_BIN/shuvcode" "\$@"

@@ -13,7 +13,7 @@ export async function probeCapabilities(root, executable = "shuvcode") {
     return result.stdout;
   }
   const version = cli(["--version"]).trim();
-  if (version !== "shuvcode v2.0.22-shuv.1") throw new Error("opencode-v2 capability probe: unqualified target " + version + "; use qualified shuvcode v2.0.22-shuv.1 or qualify the new build first");
+  if (version !== "shuvcode v2.0.22-shuv.2") throw new Error("opencode-v2 capability probe: unqualified target " + version + "; use qualified shuvcode v2.0.22-shuv.2 or qualify the new build first");
   const help = cli(["--help"]);
   for (const flag of ["--server", "--session", "--auto"]) if (!help.includes(flag)) throw new Error("opencode-v2 capability probe: missing native " + flag + " launch capability");
   const runtimeRoot = join(resolve(root), ".opencode/plugins");

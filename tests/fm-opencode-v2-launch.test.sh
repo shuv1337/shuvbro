@@ -86,18 +86,95 @@ import * as fs from 'node:fs'; import assert from 'node:assert/strict'; import {
 const {probeCapabilities}=await import(pathToFileURL(process.env.ROOT+'/bin/fm-opencode-v2-capability.mjs'));
 const lab=process.env.LAB,runtime=lab+'/.opencode/plugins';fs.mkdirSync(runtime,{recursive:true});
 const binary=lab+'/shuvcode',log=lab+'/calls';
-fs.writeFileSync(binary,`#!/bin/bash\necho "$*" >> '${log}'\ncase "$1" in --version) echo "\${PROBE_VERSION:-shuvcode v2.0.22-shuv.1}" ;; --help) echo "\${PROBE_FLAGS:---server --session --auto}" ;; *) exit 99 ;; esac\n`,{mode:0o700});
-process.env.PROBE_VERSION='shuvcode v1.0.0';await assert.rejects(probeCapabilities(lab,binary),/unqualified target/);delete process.env.PROBE_VERSION;
+fs.writeFileSync(binary,`#!/bin/bash\necho "$*" >> '${log}'\ncase "$1" in --version) echo "\${PROBE_VERSION:-shuvcode v2.0.22-shuv.2}" ;; --help) echo "\${PROBE_FLAGS:---server --session --auto}" ;; *) exit 99 ;; esac\n`,{mode:0o700});
+for (const version of ['shuvcode v1.0.0','shuvcode v2.0.22-shuv.1','shuvcode v2.0.22-shuv.3']) {
+  process.env.PROBE_VERSION=version;
+  await assert.rejects(probeCapabilities(lab,binary),/unqualified target.*use qualified shuvcode v2\.0\.22-shuv\.2/);
+}
+delete process.env.PROBE_VERSION;
 process.env.PROBE_FLAGS='--session --auto';await assert.rejects(probeCapabilities(lab,binary),/missing native --server/);delete process.env.PROBE_FLAGS;
 await assert.rejects(probeCapabilities(lab,binary),/npm ci/);
 fs.mkdirSync(runtime+'/node_modules/effect',{recursive:true});
 fs.writeFileSync(runtime+'/package.json',JSON.stringify({dependencies:{effect:'4.0.0-rc.112'}}));
 fs.writeFileSync(runtime+'/node_modules/effect/package.json',JSON.stringify({name:'effect',version:'4.0.0-rc.112',type:'module',exports:'./index.js'}));
 fs.writeFileSync(runtime+'/node_modules/effect/index.js','export const Data={TaggedError(){}}; export const Effect={gen(){},promise(){},tryPromise(){},runPromise(){},flatMap(){},fail(){}};');
-assert.equal((await probeCapabilities(lab,binary)).qualified,true);
+assert.deepEqual(await probeCapabilities(lab,binary),{version:'shuvcode v2.0.22-shuv.2',runtime:'effect',qualified:true});
 assert.ok(fs.readFileSync(log,'utf8').trim().split('\n').every(line=>['--version','--help'].includes(line)),'probe accessed service or dispatch');
 JS
 pass 'capability probe refuses unqualified version, missing CLI and runtime; qualified stand-in is read-only'
+# The live guard must use dispatch's own native choice in its CPU/libc order
+# independently of locale, and fail when that choice cannot run instead of
+# moving to another variant or the node launcher.
+# shellcheck source=tests/fm-opencode-v2-live-binary-lib.sh
+. "$ROOT/tests/fm-opencode-v2-live-binary-lib.sh"
+(
+  unset FM_OPENCODE_V2_BIN
+  resolver="$TMP_ROOT/resolver"
+  mkdir -p "$resolver/bin"
+  export RESOLVER_LOG="$resolver/calls"
+  cat > "$resolver/bin/shuvcode" <<'SH'
+#!/usr/bin/env bash
+printf 'launcher:%s\n' "$*" >> "$RESOLVER_LOG"
+echo 'shuvcode launcher fixture'
+SH
+  chmod +x "$resolver/bin/shuvcode"
+  native=$(type -P true)
+  for name in shuvcode-linux-x64 shuvcode-linux-x64-baseline shuvcode-linux-x64-baseline-musl shuvcode-linux-x64-musl; do
+    mkdir -p "$resolver/node_modules/$name/bin"
+    cp "$native" "$resolver/node_modules/$name/bin/shuvcode"
+  done
+  modules=$(readlink -f "$resolver/node_modules")
+  break_native() { printf '\177ELF\0\0\0\0\0\0\0\0' > "$1"; chmod +x "$1"; }
+  # These host probes are consumed by the production package-order helper.
+  # shellcheck disable=SC2329
+  uname() { case "$*" in -s) printf '%s\n' Linux ;; -m) printf '%s\n' x86_64 ;; *) command uname "$@" ;; esac; }
+  # shellcheck disable=SC2329
+  ldd() {
+    if [ "${RESOLVER_MUSL:-0}" = 1 ]; then printf '%s\n' 'ldd (musl libc) fixture';
+    else printf '%s\n' 'ldd (GNU libc) fixture'; fi
+  }
+  # shellcheck disable=SC2329
+  grep() {
+    case "$*" in
+      */proc/cpuinfo) [ "${RESOLVER_AVX2:-0}" = 1 ] ;;
+      *) command grep "$@" ;;
+    esac
+  }
+  resolver_call() { PATH="$resolver/bin:$PATH" v2_resolve_live_binary; }
+  : > "$RESOLVER_LOG"
+  for lang in C en_US.UTF-8; do
+    for avx2 in 0 1; do
+      for musl in 0 1; do
+        expected=shuvcode-linux-x64-baseline
+        [ "$avx2" = 0 ] || expected=shuvcode-linux-x64
+        [ "$musl" = 0 ] || expected="$expected-musl"
+        got=$(LC_ALL="$lang" RESOLVER_AVX2="$avx2" RESOLVER_MUSL="$musl" resolver_call) || fail "$lang AVX2=$avx2 musl=$musl resolver failed"
+        [ "$got" = "$modules/$expected/bin/shuvcode" ] || fail "$lang AVX2=$avx2 musl=$musl selected $got instead of $expected"
+      done
+    done
+  done
+  good="$modules/shuvcode-linux-x64-baseline/bin/shuvcode"
+  bad="$modules/shuvcode-linux-x64/bin/shuvcode"
+  break_native "$bad"
+  if RESOLVER_AVX2=1 resolver_call > "$resolver/out" 2> "$resolver/err"; then
+    fail "live resolver replaced dispatch's broken AVX2 choice with $(cat "$resolver/out")"
+  fi
+  grep -q "cannot run dispatch-selected shuvcode binary: $bad" "$resolver/err" || fail 'broken dispatch choice lost its diagnostic'
+  [ "$(RESOLVER_AVX2=0 resolver_call)" = "$good" ] || fail 'working non-AVX2 dispatch choice was refused'
+  [ "$(FM_OPENCODE_V2_BIN="$good" resolver_call)" = "$good" ] || fail 'working binary override was ignored'
+  for override in "$bad" "$resolver/bin/shuvcode"; do
+    if FM_OPENCODE_V2_BIN="$override" resolver_call > "$resolver/out" 2> "$resolver/err"; then
+      fail "unusable explicit binary override $override was accepted as $(cat "$resolver/out")"
+    fi
+  done
+  rm -rf "$resolver/node_modules"
+  if resolver_call > "$resolver/out" 2> "$resolver/err"; then
+    fail "resolver fell back to the node launcher as $(cat "$resolver/out")"
+  fi
+  grep -q 'dispatch resolved no native shuvcode binary' "$resolver/err" || fail 'missing native binary lost its diagnostic'
+  [ ! -s "$RESOLVER_LOG" ] || fail "resolver ran the node launcher: $(cat "$RESOLVER_LOG")"
+)
+pass 'live binary resolver returns dispatch native choice in both locales and fails when that choice or override cannot run'
 export PATH="$TMP_ROOT/bin:$PATH"
 export TEST_NATIVE_STATE="$TMP_ROOT/native-state" TEST_SERVICE_PID=$$
 mkdir -p "$TEST_NATIVE_STATE"

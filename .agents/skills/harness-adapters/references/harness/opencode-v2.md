@@ -1,6 +1,6 @@
 # Shuvcode (OpenCode V2 fork)
 
-Native shared-service qualification is pending; [runtime verification](../../../../../docs/verification/runtime-backends.md#native-shared-service-qualification-status) owns the actual isolated v2.0.22-shuv.1 evidence and remaining live matrix.
+Native shared-service qualification is pending; [runtime verification](../../../../../docs/verification/runtime-backends.md#native-shared-service-qualification-status) owns the actual isolated v2.0.22-shuv.2 evidence and remaining live matrix.
 This is a fork of OpenCode V2 distributed as `shuvcode`, never sloppy-matched as V1 `opencode` and never claimed as the upstream `opencode2` beta.
 
 ## Identity
@@ -13,7 +13,7 @@ Adapter id is `opencode-v2`.
 
 | Fact | Value |
 |---|---|
-| Launcher | `~/.local/bin/shuvcode` is a node script (`#!/usr/bin/env node`) installed from the `shuvcode` npm package. |
+| Launcher | The npm-installed `shuvcode` launcher is a node script (`#!/usr/bin/env node`). |
 | Binary | The npm tree's `.../shuvcode-linux-x64/bin/shuvcode`, whose process name is `shuvcode`. |
 | Process tree | The launcher reports as node (comm `node-MainThread` on modern Node on Linux) with `node <launcher> ...` arguments; it runs the `shuvcode` binary. Tool subprocesses are children of the session service, not of a TUI named `opencode`. |
 | Session service | Native primary and worker launches use the normal shared service. Its `serve --service` process is an ancestry barrier, never a home-lock owner; a primary model shell requires the supplemental exact TUI/session proof. |

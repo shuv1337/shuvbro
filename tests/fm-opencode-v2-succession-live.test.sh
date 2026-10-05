@@ -124,21 +124,14 @@ wait_until() {  # <tries of 0.25s> <command...>
   return 1
 }
 
-resolve_binary() {
-  local launcher dir candidate
-  if [ -n "${FM_OPENCODE_V2_BIN:-}" ]; then printf '%s' "$FM_OPENCODE_V2_BIN"; return; fi
-  launcher=$(readlink -f "$(command -v shuvcode)")
-  dir=$(dirname "$launcher")
-  for candidate in "$dir"/../node_modules/shuvcode-*/bin/shuvcode "$dir"/../../shuvcode-*/bin/shuvcode; do
-    [ -x "$candidate" ] && { readlink -f "$candidate"; return; }
-  done
-  printf '%s' "$launcher"
-}
+# shellcheck source=tests/fm-opencode-v2-live-binary-lib.sh
+. "$ROOT/tests/fm-opencode-v2-live-binary-lib.sh"
 free_port() {
   node -e 'const s=require("net").createServer();s.listen(0,"127.0.0.1",()=>{console.log(s.address().port);s.close()})'
 }
 
-SC=$(resolve_binary)
+SC=$(v2_resolve_live_binary) || fail 'dispatch-selected shuvcode cannot run for the live guard; no service command was run'
+printf 'note: native shuvcode binary %s\n' "$SC"
 mkdir -p "$LAB/xdg/config/shuvcode" "$LAB/xdg/state" "$LAB/xdg/data" "$LAB/xdg/cache"
 paths=$(cd "$LAB" && isolated "$SC" debug paths 2>/dev/null)
 for kind in config state data; do
