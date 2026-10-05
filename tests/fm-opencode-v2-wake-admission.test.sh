@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Wake handoff and admission sequencing for the OpenCode V2 adapter, against the
-# real recovery helpers.
+# real recovery helpers and exact-ID steer journal.
 #
 # Part 1 pins the helper contract the adapter must respect: the handling
 # handoff (`fm-watch-arm.sh --handling-delivered`) is accepted while the
@@ -33,6 +33,66 @@ DRAIN="$CODE_ROOT/bin/fm-wake-drain.sh"
 TMP_ROOT=$(fm_test_tmproot fm-opencode-v2-wake-admission)
 export NODE_NO_WARNINGS=1
 ARM_PID=
+
+test_journal_steers_with_exact_receipts_and_canonical_ack() {
+  local out
+  out=$(CODE_ROOT="$CODE_ROOT" LAB="$TMP_ROOT/journal" node --input-type=module 2>&1 <<'JS'
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import {pathToFileURL} from 'node:url';
+const {createAdmissionJournal}=await import(pathToFileURL(process.env.CODE_ROOT+'/.opencode/plugins/fm-native-v2/admission.js'));
+const paths={state:process.env.LAB};
+fs.mkdirSync(paths.state,{recursive:true,mode:0o700});
+const queue=paths.state+'/.wake-queue', row='100\t1\tsignal\ttask\tready\n';
+fs.writeFileSync(queue,row);
+const calls=[];
+const admit=async input=>{calls.push(input);return {id:calls.length===1?'msg_wrong_receipt':input.id};};
+const journal=createAdmissionJournal(paths,'ses_steer',admit,()=>{});
+const wake=journal.prepare('original wake');
+await assert.rejects(journal.deliver(wake),/successor confirmation/);
+assert.equal(calls.length,0);
+const confirmed=journal.confirm(wake);
+await Promise.all([journal.deliver(confirmed),journal.deliver(confirmed)]);
+assert.equal(calls.length,2,'wrong exact-ID receipt must retry; concurrent delivery must coalesce');
+assert.equal(calls[0].delivery,'steer');
+assert.deepEqual(calls[0],calls[1]);
+assert.equal(fs.readFileSync(queue,'utf8'),row,'native receipt must not acknowledge canonical rows');
+const reloaded=createAdmissionJournal(paths,'ses_steer',admit,()=>{});
+await reloaded.deliver(confirmed);
+assert.equal(calls.length,2,'admitted identity must survive journal reload');
+
+// The lead can handle a steer before its native receipt arrives. Canonical
+// acknowledgement retires a lost-receipt retry without claiming admission.
+fs.writeFileSync(queue,'101\t2\tsignal\ttask\tnext\n');
+let lostCalls=0;
+const lost=createAdmissionJournal(paths,'ses_steer',async input=>{
+  assert.equal(input.delivery,'steer');lostCalls++;
+  fs.writeFileSync(queue,'');throw new Error('receipt lost after canonical handling');
+},()=>{});
+const handled=lost.confirm(lost.prepare('handled during admission'));
+assert.equal(await lost.deliver(handled),true);
+assert.equal(lostCalls,1);
+const records=fs.readdirSync(paths.state+'/.opencode-v2-admissions',{recursive:true});
+const record=records.find(name=>name.endsWith(handled.id+'.json'));
+assert.equal(JSON.parse(fs.readFileSync(paths.state+'/.opencode-v2-admissions/'+record)).phase,'acknowledged');
+assert.equal(lost.pending().length,0);
+
+// Startup and repair prompts share the lead journal and need prompt delivery
+// even if activation or a supervision failure happens during an existing turn.
+for(const kind of ['startup:claim','failure:claim:episode:reason']) {
+  const notice=reloaded.prepare(kind,kind);
+  await reloaded.deliver(notice);
+  assert.equal(calls.at(-1).delivery,'steer');
+  assert.equal(calls.at(-1).id,notice.id);
+  const count=calls.length;
+  await reloaded.deliver(reloaded.prepare('replacement text',kind));
+  assert.equal(calls.length,count);
+}
+console.log('lead wakes, startup and repairs steer with stable IDs; exact receipts and canonical acknowledgements remain distinct');
+JS
+  ) || fail "$out"
+  pass "$out"
+}
 
 # The lead's handling turn: drain, then the generation-bound acknowledgement.
 lead_drain_and_ack() {  # <state>
@@ -112,6 +172,7 @@ test_handoff_after_lead_ack_is_rejected() {
 
 FAILED=0
 for t in \
+  test_journal_steers_with_exact_receipts_and_canonical_ack \
   test_handoff_before_lead_ack_is_accepted \
   test_handoff_after_lead_ack_is_rejected; do
   ( "$t" ) || FAILED=$((FAILED + 1))

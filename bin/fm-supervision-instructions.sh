@@ -211,7 +211,7 @@ ordinary_wake_line() {
       if [ -n "$V2_INACTIVE" ]; then
         printf '%s\n' '- Ordinary wake: automatic OpenCode V2 supervision is inactive in this checkout; no plugin owns watcher continuity here, so follow the fallback below.'
       else
-        printf '%s\n' '- Ordinary wake: the OpenCode TUI plugin already owns watcher continuity; do not arm manually.'
+        printf '%s\n' '- Ordinary wake: the OpenCode V2 TUI plugin already owns watcher continuity and delivers lead prompts as steers; follow docs/supervision-protocols/opencode-v2.md and do not arm manually.'
       fi
       ;;
     opencode)

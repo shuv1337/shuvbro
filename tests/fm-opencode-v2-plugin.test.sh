@@ -202,7 +202,7 @@ const admission=journal.prepare('original encoded wake');
 await journal.deliver(journal.confirm(admission));
 assert.equal(calls.length,2);
 assert.deepEqual(calls[0],calls[1]);
-assert.equal(calls[0].delivery,'queue');
+assert.equal(calls[0].delivery,'steer');
 assert.equal(journal.prepare('replacement must not change text').text,'original encoded wake');
 assert.equal(fs.readFileSync(r.state+'/.wake-queue','utf8'),'100\t1\tsignal\ttask\tready\n');
 fs.appendFileSync(r.state+'/.wake-queue','101\t2\tsignal\ttask\tsecond\n');
@@ -301,6 +301,7 @@ const {createAdmissionJournal}=await import(new URL('.opencode/plugins/fm-native
 const p={root:process.env.LAB,home:process.env.LAB,state:process.env.LAB+'/state',config:process.env.LAB+'/config'};
 let admitted=false,failures=[];
 const journal=createAdmissionJournal(p,'ses_coordinator',async input=>{
+  assert.equal(input.delivery,'steer');
   assert.equal(fs.readFileSync(p.state+'/order','utf8').trim(),'confirmed');
   fs.appendFileSync(p.state+'/order','admitted\n');admitted=true;return{id:input.id};
 });
