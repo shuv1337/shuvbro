@@ -87,7 +87,7 @@ free_port() {
 }
 
 # --- phase 1: isolation and service identity --------------------------------
-SC=$(v2_resolve_live_binary) || fail 'no runnable shuvcode for the live guard; no service command was run'
+SC=$(v2_resolve_live_binary) || fail 'dispatch-selected shuvcode cannot run for the live guard; no service command was run'
 printf 'note: native shuvcode binary %s\n' "$SC"
 VERSION=$("$SC" --version 2>/dev/null)
 mkdir -p "$LAB/xdg/config" "$LAB/xdg/state" "$LAB/xdg/data" "$LAB/xdg/cache"

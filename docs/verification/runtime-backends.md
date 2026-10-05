@@ -1720,8 +1720,8 @@ ok - a lead against a private server is refused at activation
 ```
 
 Both guards use a local deterministic provider, isolated XDG services, private termctrl PTYs and disposable non-default ownership namespaces retired through `cleanup-test-namespace`.
-Their shared resolver uses the CPU/libc package preference order owned by `fm_shuvcode_platform_package_names` in `bin/fm-shuvcode-lib.sh`, probes candidates with read-only `--version` calls and skips incompatible loaders.
-The portable launcher regression exercises the four real x64 package names under both `C` and `en_US.UTF-8`, asserting AVX2, non-AVX2 and libc preferences, loader-failure fallback and explicit-override refusal.
+Their shared resolver reuses dispatch's `fm_shuvcode_native_binary` in `bin/fm-shuvcode-lib.sh`, with its CPU/libc package order, and fails when that one binary cannot run a read-only `--version`; it never skips to another variant or the node launcher.
+The portable launcher regression exercises the four real x64 package names as native executables under both `C` and `en_US.UTF-8`, asserting AVX2, non-AVX2 and libc preferences, failure when dispatch's preferred variant cannot load even though another variant works, refusal of the node launcher, and explicit-override refusal.
 The direct Herdr detach/attach leg F was excluded because its interactive client bypasses the named-session helper required by this qualification's isolation contract.
 The separate real Herdr/Treehouse worker lifecycle guard above passed, but does not qualify that primary detach/attach leg.
 The real-model evidence remains the single-worker free-model guard above; a real-model two-home/two-worker combined Herdr matrix remains pending, so these results qualify worker dispatch on shuv.2 without claiming the complete native shared-service matrix.

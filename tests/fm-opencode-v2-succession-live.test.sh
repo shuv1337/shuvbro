@@ -130,7 +130,7 @@ free_port() {
   node -e 'const s=require("net").createServer();s.listen(0,"127.0.0.1",()=>{console.log(s.address().port);s.close()})'
 }
 
-SC=$(v2_resolve_live_binary) || fail 'no runnable shuvcode for the live guard; no service command was run'
+SC=$(v2_resolve_live_binary) || fail 'dispatch-selected shuvcode cannot run for the live guard; no service command was run'
 printf 'note: native shuvcode binary %s\n' "$SC"
 mkdir -p "$LAB/xdg/config/shuvcode" "$LAB/xdg/state" "$LAB/xdg/data" "$LAB/xdg/cache"
 paths=$(cd "$LAB" && isolated "$SC" debug paths 2>/dev/null)
