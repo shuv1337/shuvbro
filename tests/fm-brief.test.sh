@@ -971,27 +971,6 @@ test_allow_write_names_exact_paths_and_refuses_broader_roots() {
   [ "$(grep -F -c -- '   - `'"$videos"'`' "$brief")" -eq 1 ] \
     || fail "scout brief named the same path more than once"
 
-  HOME="$user_home" FM_HOME="$home" FM_ROOT_OVERRIDE="$primary" \
-    "$ROOT/bin/fm-brief.sh" allow-ship some-proj --mode direct-PR --herdr-lab \
-      --allow-write="$videos" >/dev/null \
-    || fail "ship --allow-write scaffold failed"
-  brief="$home/data/allow-ship/brief.md"
-  assert_grep '2. Stay inside this worktree; modify nothing outside it except these exact paths and the files inside them, and nothing broader:' "$brief" \
-    "ship allowance did not rewrite the stay-inside rule"
-  assert_grep '   - `'"$videos"'`' "$brief" "ship brief omitted the allowed path"
-  assert_no_grep '2. Stay inside this worktree; modify nothing outside it.' "$brief" \
-    "ship brief kept the unmodified stay-inside rule"
-  assert_grep 'not the primary checkout firstmate operates from' "$brief" \
-    "ship allowance dropped the worktree-isolation assertion"
-  assert_no_grep 'Herdr lifecycle declaration - NOT ENABLED' "$brief" \
-    "ship --herdr-lab kept the disabled Herdr declaration"
-  # shellcheck disable=SC2016  # The brief text is a fixed string, including its backticks.
-  assert_grep 'This brief was explicitly scaffolded with `--herdr-lab`' "$brief" \
-    "ship --allow-write combined with --herdr-lab dropped the Herdr contract"
-  # shellcheck disable=SC2016  # The brief text is a fixed string, including its backticks.
-  assert_grep '1. Never push to the default branch (push only your `fm/allow-ship` branch). Never merge a PR.' "$brief" \
-    "ship allowance rewrote the delivery rule"
-
   while IFS='|' read -r label args expect; do
     [ -n "$label" ] || continue
     # shellcheck disable=SC2086  # args is an intentional word-split arg list
@@ -1018,7 +997,9 @@ projects directory|allow-projects some-proj --scout --allow-write $home/projects
 home contains projects|allow-fm-home some-proj --scout --allow-write $home|--allow-write refuses a projects/ clone or a path that contains one
 symlink clone target|allow-symlink-clone some-proj --scout --allow-write $outside|--allow-write refuses a projects/ clone or a path that contains one
 linked worktree primary|allow-ext-primary some-proj --scout --allow-write $ext|--allow-write refuses the primary checkout or a path that contains it
-secondmate flag|allow-second --secondmate --no-projects --allow-write $videos|--allow-write applies only to ship and scout briefs
+ship flag|allow-ship some-proj --mode no-mistakes --allow-write $videos|--allow-write applies only to scout briefs
+ship equals flag|allow-ship-eq some-proj --mode direct-PR --herdr-lab --allow-write=$videos|--allow-write applies only to scout briefs
+secondmate flag|allow-second --secondmate --no-projects --allow-write $videos|--allow-write applies only to scout briefs
 missing value|allow-missing some-proj --scout --allow-write|--allow-write requires a value
 empty value|allow-empty some-proj --scout --allow-write=|--allow-write requires an absolute path
 ROWS
@@ -1033,7 +1014,7 @@ ROWS
   [ ! -e "$empty_home/data/allow-future" ] || fail "absent-projects refusal created a task directory"
 
   out=$("$ROOT/bin/fm-brief.sh" --help)
-  assert_contains "$out" "--allow-write <path> is repeatable on ship and scout scaffolds only." \
+  assert_contains "$out" "--allow-write <path> is repeatable on scout scaffolds only." \
     "help did not document --allow-write"
   assert_contains "$out" "Refuses \`/\`, \$HOME itself, the primary checkout, and any projects/ clone," \
     "help did not document the allow-write refusals"

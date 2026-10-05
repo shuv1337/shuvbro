@@ -12,13 +12,13 @@
 # charters still use a single `{TASK}` charter fill. Firstmate may adjust other
 # sections when the task genuinely deviates (e.g. working an existing external
 # PR instead of shipping a new one).
-# Usage: fm-brief.sh <task-id> <repo-name> --mode <no-mistakes|direct-PR|local-only> [--herdr-lab] [--allow-write <path>]
+# Usage: fm-brief.sh <task-id> <repo-name> --mode <no-mistakes|direct-PR|local-only> [--herdr-lab]
 #        fm-brief.sh <task-id> <repo-name> --scout [--herdr-lab] [--allow-write <path>]
 #        fm-brief.sh <task-id> --secondmate {<project>...|--no-projects}
 #   --scout writes the scout contract instead: the deliverable is a report at
 #   data/<task-id>/report.md (no branch, no push, no PR) and the worktree is scratch.
-#   --allow-write <path> is repeatable on ship and scout scaffolds only.
-#   It rewrites that scaffold's stay-inside rule so the worker may also write the
+#   --allow-write <path> is repeatable on scout scaffolds only.
+#   It rewrites the scout stay-inside rule so the worker may also write the
 #   named path and the files inside it, and nothing broader.
 #   A leading ~/ expands to $HOME; every other relative form is refused.
 #   Refuses `/`, $HOME itself, the primary checkout, and any projects/ clone,
@@ -26,7 +26,7 @@
 #   projects/ directory even when no clone is there yet.
 #   The primary checkout is this repo's main worktree, plus the main worktree of
 #   a projects/ clone when that clone is a linked worktree of another checkout.
-#   A secondmate charter refuses the flag.
+#   Ship scaffolds and secondmate charters refuse the flag.
 #   --secondmate writes a persistent secondmate charter. The project list
 #   is cloned into the secondmate home, while the natural-language scope
 #   tells the main firstmate when to route work there; routine churn stays in its own home;
@@ -359,8 +359,8 @@ validate_allow_write() {
   if [ "${#ALLOW_WRITE[@]}" -eq 0 ]; then
     return 0
   fi
-  if [ "$KIND" = secondmate ]; then
-    echo "error: --allow-write applies only to ship and scout briefs" >&2
+  if [ "$KIND" != scout ]; then
+    echo "error: --allow-write applies only to scout briefs; ship and secondmate scaffolds refuse it" >&2
     return 1
   fi
   collect_forbidden_write_roots
@@ -383,20 +383,12 @@ validate_allow_write() {
 }
 
 format_stay_inside_rule() {
-  local kind=$1 path i
+  local path i
   if [ "${#ALLOW_WRITE_CANON[@]}" -eq 0 ]; then
-    if [ "$kind" = scout ]; then
-      printf '%s\n' "2. Stay inside this worktree; the only files you may write outside it are the report and the status file below."
-    else
-      printf '%s\n' "2. Stay inside this worktree; modify nothing outside it."
-    fi
+    printf '%s\n' "2. Stay inside this worktree; the only files you may write outside it are the report and the status file below."
     return 0
   fi
-  if [ "$kind" = scout ]; then
-    printf '%s\n' "2. Stay inside this worktree; the only files you may write outside it are the report and the status file below, plus these exact paths and the files inside them, and nothing broader:"
-  else
-    printf '%s\n' "2. Stay inside this worktree; modify nothing outside it except these exact paths and the files inside them, and nothing broader:"
-  fi
+  printf '%s\n' "2. Stay inside this worktree; the only files you may write outside it are the report and the status file below, plus these exact paths and the files inside them, and nothing broader:"
   i=0
   while [ "$i" -lt "${#ALLOW_WRITE_CANON[@]}" ]; do
     path=${ALLOW_WRITE_CANON[$i]}
@@ -678,9 +670,9 @@ IFS= read -r -d '' TASK_SECTION <<'EOF' || true
 EOF
 TASK_SECTION=${TASK_SECTION%$'\n'}
 ROLE_INTRO=$(fm_brief_agent_intro "$KIND") || exit 1
-STAY_INSIDE_RULE=$(format_stay_inside_rule "$KIND") || exit 1
 
 if [ "$KIND" = scout ]; then
+STAY_INSIDE_RULE=$(format_stay_inside_rule) || exit 1
 cat > "$BRIEF" <<EOF
 $ROLE_INTRO
 
@@ -787,7 +779,7 @@ If the top-level path is the primary checkout or not the worktree you were launc
 
 # Rules
 $RULE1
-$STAY_INSIDE_RULE
+2. Stay inside this worktree; modify nothing outside it.
 3. Use gh-axi for GitHub operations and chrome-devtools-axi for browser operations.
 4. Report status by appending one line:
    \`echo "{state}: {one short line}" >> $STATUS_FILE\`
