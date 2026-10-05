@@ -4405,11 +4405,6 @@ test_send_does_not_start_server_when_status_reports_down() {
 set -u
 printf '%s\n' "$*" >> "$FM_HERDR_LOG"
 case "${1:-}" in
-  server)
-    echo 'error: herdr server is already running' >&2
-    echo 'api socket: ~/.config/herdr/herdr.sock' >&2
-    exit 1
-    ;;
   status)
     printf '%s\n' '{"server":{"running":false}}'
     exit 0
@@ -4447,10 +4442,7 @@ SH
   if grep -q '^server\( \|$\)' "$log"; then
     fail "fm-send started a herdr server:"$'\n'"$(cat "$log")"$'\n'"$(cat "$err")"
   fi
-  if grep -q 'herdr server is already running' "$err"; then
-    fail "fm-send printed a herdr server-start failure after delivery:"$'\n'"$(cat "$err")"
-  fi
-  pass "fm-send herdr: a delivered steer exits 0 and never runs herdr server, even when status reports the server down"
+  pass "fm-send herdr: a send and doorbell never run herdr server, even when status reports the server down"
 }
 
 test_send_text_submit_send_failed() {
