@@ -20,9 +20,10 @@
 #          2..300). A rebuild from `model` runs only for a page or data request
 #          that needs one: not while nobody is asking, and not again while the
 #          backlog, heads-up notes, secondmate registry, task metadata, and
-#          status logs are unchanged unless the last rebuild is at least
-#          60 seconds old (or FM_BOARD_INTERVAL, when that is longer). An
-#          answer always rebuilds after its write, so the page never keeps the
+#          status logs are unchanged unless that rebuild started at least
+#          60 seconds ago (or FM_BOARD_INTERVAL, when that is longer), with a
+#          small margin so the next check is not early. An answer always
+#          rebuilds after its write, so the page never keeps the
 #          question it just answered. While it runs it keeps a private serve record,
 #          state/board/serve.json (pid, port, instance), removed on exit.
 #          bin/fm-board.mjs owns the persistent answer-confirmation records.
@@ -92,7 +93,8 @@
 #   FM_BOARD_INTERVAL    seconds between page checks, default 10 (2..300).
 #   FM_BOARD_TODAY       UTC date used to validate Later dates (tests only).
 #   FM_BOARD_TEST_FULL_INTERVAL
-#                        replaces the 60-second full rebuild bound (tests only).
+#                        shortens the 60-second full rebuild bound (tests only);
+#                        a positive whole number of seconds, at most 60.
 set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -664,6 +666,13 @@ command_serve() {
     ''|*[!0-9]*) fail "FM_BOARD_INTERVAL must be a whole number of seconds: $interval" ;;
   esac
   [ "$interval" -ge 2 ] && [ "$interval" -le 300 ] || fail "FM_BOARD_INTERVAL must be 2..300 seconds: $interval"
+  if [ -n "${FM_BOARD_TEST_FULL_INTERVAL:-}" ]; then
+    case "$FM_BOARD_TEST_FULL_INTERVAL" in
+      ''|*[!0-9]*) fail "FM_BOARD_TEST_FULL_INTERVAL must be a positive whole number of seconds no greater than 60: $FM_BOARD_TEST_FULL_INTERVAL" ;;
+    esac
+    [ "$FM_BOARD_TEST_FULL_INTERVAL" -ge 1 ] && [ "$FM_BOARD_TEST_FULL_INTERVAL" -le 60 ] \
+      || fail "FM_BOARD_TEST_FULL_INTERVAL must be a positive whole number of seconds no greater than 60: $FM_BOARD_TEST_FULL_INTERVAL"
+  fi
   hosts='[]'
   while IFS= read -r host; do
     [ -n "$host" ] || continue

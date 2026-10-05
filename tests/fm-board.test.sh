@@ -1055,6 +1055,37 @@ test_a_request_after_the_full_interval_rebuilds() {
   pass "a request after the full interval rebuilds even when the records are unchanged"
 }
 
+# Scaled stand-in for FM_BOARD_INTERVAL >= 60, where the full bound equals the
+# check interval. The second check arrives one interval after the rebuild
+# started, and still inside the bound if age were measured from when it finished.
+test_one_interval_later_rebuilds_when_the_bound_matches_the_check() {
+  local home first snap1 second snap2
+  home=$(make_home interval-bound)
+  FM_BOARD_TEST_FULL_INTERVAL=2 start_board "$home"
+  first=$(board_data)
+  snap1=$(printf '%s' "$first" | jq -r '.snapshot_generated')
+  sleep 1.2
+  second=$(board_data)
+  snap2=$(printf '%s' "$second" | jq -r '.snapshot_generated')
+  [ -n "$snap2" ] && [ "$snap2" != "$snap1" ] \
+    || fail "a check one interval after the rebuild reused the snapshot: $snap1 then $snap2"
+  pass "a check one interval later rebuilds when the full bound matches the check interval"
+}
+
+test_test_full_interval_outside_1_to_60_refuses_to_start() {
+  local home value
+  home=$(make_home test-full-bound)
+  for value in 0 61 1e6 2.5 -1; do
+    if in_home "$home" env FM_BOARD_PORT=0 FM_BOARD_TEST_FULL_INTERVAL="$value" "$BOARD" serve > "$home/full.log" 2>&1; then
+      fail "FM_BOARD_TEST_FULL_INTERVAL=$value started the board"
+    fi
+    grep -F "FM_BOARD_TEST_FULL_INTERVAL" "$home/full.log" >/dev/null \
+      || fail "an invalid test full interval was not named ($value): $(cat "$home/full.log")"
+    rm -f "$home/state/board/serve.json"
+  done
+  pass "a test full interval outside 1..60 refuses to start"
+}
+
 test_a_home_that_never_opts_in_is_untouched() {
   local home stamp changed
   home=$(make_home opt-out)
@@ -1100,4 +1131,6 @@ test_answer_replay_survives_restart_without_reapplying
 test_confirmation_storage_failure_reports_unknown
 test_unchanged_records_are_not_rebuilt_on_each_check
 test_a_request_after_the_full_interval_rebuilds
+test_one_interval_later_rebuilds_when_the_bound_matches_the_check
+test_test_full_interval_outside_1_to_60_refuses_to_start
 test_a_home_that_never_opts_in_is_untouched

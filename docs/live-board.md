@@ -4,6 +4,7 @@ The live board is an optional web page for one home that shows what is waiting o
 It does not rebuild while nobody is asking for the page or its data, so a board left running with no one looking stays quiet.
 Opening it shows the current records without waiting for a background timer.
 While the page is open it keeps checking, reuses the last rebuild when the backlog, heads-up notes, secondmate registry, task metadata, and status logs are unchanged, and still fully rebuilds at least once a minute (or once per check, when checks are slower), so worker liveness, secondmate-home questions, and other inputs outside those files can lag up to that long while the page is open.
+That age starts when the rebuild starts, so the next check is not early.
 The page's update time is that check.
 An in-flight card's checked time is the last full rebuild, which can be older when those records have not changed.
 Answering always rebuilds after the write, so the page does not keep the question you just answered.
@@ -77,4 +78,4 @@ A raw TCP forward can omit the proxy headers and look like a direct local reques
 
 ## Verification
 
-`tests/fm-board.test.sh` covers the rendered view, every request guard above, each answer kind landing through the intake with its wake, a declared choice keeping held work held, a re-ask racing an answer, failed Later recovery including notification failure, the stale and offline indicators against a skewed phone clock, the page handling a lost committed response while a new question is asked, restart-safe retries, an unchanged fleet not rebuilding on the page's check, a request after the full-rebuild bound still rebuilding, and a home that never starts the board staying untouched.
+`tests/fm-board.test.sh` covers the rendered view, every request guard above, each answer kind landing through the intake with its wake, a declared choice keeping held work held, a re-ask racing an answer, failed Later recovery including notification failure, the stale and offline indicators against a skewed phone clock, the page handling a lost committed response while a new question is asked, restart-safe retries, an unchanged fleet not rebuilding on the page's check, a request after the full-rebuild bound still rebuilding, a check one interval later rebuilding when that bound matches the check interval, a test-only shorter bound refusing values outside 1 to 60, and a home that never starts the board staying untouched.

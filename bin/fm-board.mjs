@@ -30,7 +30,8 @@ import * as fs from "node:fs";
 import { dirname, join } from "node:path";
 
 const config = parseConfig(process.env.FM_BOARD_SERVE_CONFIG);
-const fullIntervalMs = Math.max(Number(process.env.FM_BOARD_TEST_FULL_INTERVAL) || 60, config.interval) * 1000;
+const FULL_REBUILD_MARGIN_MS = 1000;
+const fullIntervalMs = Math.max(testFullIntervalMs(), config.interval * 1000);
 const token = randomBytes(32).toString("hex");
 const instance = randomBytes(8).toString("hex");
 const pageTemplate = fs.readFileSync(config.page, "utf8");
@@ -74,6 +75,21 @@ function parseConfig(raw) {
 function fatal(message) {
   process.stderr.write(`fm-board: ${message}\n`);
   process.exit(1);
+}
+
+// Tests may shorten the 60s bound, never lengthen it. A non-integer such as
+// 1e6 must not stretch the safety rebuild for the life of the process.
+function testFullIntervalMs() {
+  const raw = process.env.FM_BOARD_TEST_FULL_INTERVAL;
+  if (raw === undefined || raw === "") return 60 * 1000;
+  if (!/^[1-9][0-9]*$/.test(raw)) {
+    fatal("FM_BOARD_TEST_FULL_INTERVAL must be a positive whole number of seconds no greater than 60");
+  }
+  const seconds = Number(raw);
+  if (!Number.isInteger(seconds) || seconds > 60) {
+    fatal("FM_BOARD_TEST_FULL_INTERVAL must be a positive whole number of seconds no greater than 60");
+  }
+  return seconds * 1000;
 }
 
 function runBoard(args, input) {
@@ -133,6 +149,9 @@ function refresh() {
   if (refreshing) return refreshing;
   const myEpoch = refreshEpoch;
   const before = inputSignature();
+  // Age the rebuild from its start, minus a small margin, so a check one
+  // interval later is not early and does not reuse this snapshot.
+  const startedAt = Date.now() - FULL_REBUILD_MARGIN_MS;
   refreshing = (async () => {
     const result = await runBoard(["model"]);
     try {
@@ -145,7 +164,7 @@ function refresh() {
       if (myEpoch === refreshEpoch && before === after) {
         modelEpoch = myEpoch;
         cachedSignature = after;
-        lastFullAt = Date.now();
+        lastFullAt = startedAt;
       } else {
         cachedSignature = null;
       }
