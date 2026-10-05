@@ -295,6 +295,7 @@ export default { id: "firstmate.native.v2", async setup(ctx) {
       for await (const event of ctx.client.event.subscribe({ signal: abort.signal })) {
         if (stopped || eventSessionID(event) !== record.sessionID) continue;
         if (!isIdleEvent(event)) continue;
+        journal.idle();
         // Idle/interrupted alone never admits a continuation. The watcher is
         // restored here; only its genuine durable wake journal admits input.
         await reconcile();

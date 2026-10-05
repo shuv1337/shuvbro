@@ -119,10 +119,15 @@ export function createAdmissionJournal(paths, sessionID, admit, report = console
     for (const name of readdirSync(dir).filter(name => /^msg_[a-f0-9]{64}\.json$/.test(name))) {
       const value = validate(readPrivate(join(dir, name)));
       // A doorbell admitted by an older claim cannot hold this owner's slot.
-      if (value.id === exceptId || value.kind !== "wake" || value.phase !== "admitted" || value.claim !== options.claim) continue;
+      if (value.id === exceptId || value.kind !== "wake" || value.phase !== "admitted" || value.claim !== options.claim || value.idle) continue;
       if (!acknowledged(value)) result.push(value);
     }
     return result;
+  }
+  // The lead's turn ended without draining: its doorbell no longer holds the
+  // slot, so parked wakes ring once more. A later drain still retires it.
+  function idle() {
+    for (const value of outstandingDoorbells()) save({ ...value, idle: true });
   }
   function parkedBehindDoorbell(value) {
     return value.kind === "wake" && !["admitted", "acknowledged"].includes(value.phase) && ((wakeSlot && wakeSlot !== value.id) || outstandingDoorbells(value.id).length > 0);
@@ -196,6 +201,7 @@ export function createAdmissionJournal(paths, sessionID, admit, report = console
   return {
     prepare,
     parked: parkedBehindDoorbell,
+    idle,
     stalled,
     confirm: (value, recovery) => {
       const phase = ["admitted", "acknowledged"].includes(value.phase) ? value.phase : "confirmed";

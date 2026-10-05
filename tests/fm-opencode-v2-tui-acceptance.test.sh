@@ -175,6 +175,34 @@ test_notice_parked_wake_only_when_stuck() {
   pass "tui: a parked wake stays silent, a drain covers its presented rows, a post-drain row gets one doorbell, and only a provably stuck parked wake raises WATCHER FAILURE"
 }
 
+# A lead turn that ends without draining releases its doorbell, so the wake
+# parked behind it rings exactly once more; one later drain retires both
+# doorbells and a further wake from those rows admits nothing new.
+test_turn_end_without_drain_rerings_parked_wake() {
+  tui_case turn-end-rering 1
+  local out="$CASE/out.json" steps state="$HOME_DIR/state"
+  steps=$(jq -nc --argjson a "$(owned_and_armed "$(lock_step)")" --arg s "$state" --argjson e "$(lead_env_with_path)" '
+    $a + [
+      {do:"write",path:($s+"/alpha.status"),text:"done: alpha finished\n"},
+      {do:"wait",until:"admitted",match:"WATCHER FIRED",count:1,timeoutMs:20000},
+      {do:"write",path:($s+"/beta.status"),text:"done: beta finished\n"},
+      {do:"wait",until:"shell-ok",command:("grep -q beta " + $s + "/.wake-queue"),timeoutMs:20000},
+      {do:"sleep",ms:5000},
+      {do:"event",event:{type:"session.execution.succeeded",data:{sessionID:"ses_lead"}}},
+      {do:"wait",until:"admitted",match:"WATCHER FIRED",count:2,timeoutMs:20000},
+      {do:"shell",command:"bin/fm-wake-drain.sh >/dev/null 2>&1; echo drained",extraEnv:$e},
+      {do:"event",event:{type:"session.execution.succeeded",data:{sessionID:"ses_lead"}}},
+      {do:"sleep",ms:5000}]')
+  v2_tui "$CASE" "$(spec "$(jq -nc --argjson s "$steps" '{steps:$s}')")" "$out"
+  step_ok "$out" 5 "positive control: the first doorbell was not admitted"
+  step_ok "$out" 7 "fixture: the second wake never became durable"
+  jq -e --argjson at "$(jq '.steps[9].at' "$out")" '[.admitted[] | select(.text | contains("WATCHER FIRED")) | select(.at < $at)] | length == 1' "$out" >/dev/null \
+    || fail "a busy lead with no drain did not keep the second wake parked: $(jq -c '[.admitted[].text[0:60]]' "$out")"
+  step_ok "$out" 10 "a turn that ended without draining stranded the parked wake"
+  [ "$(wake_admissions "$out")" = 2 ] || fail "expected exactly one re-ring and no prompt after the drain: $(jq -c '[.admitted[].text[0:60]]' "$out")"
+  pass "tui: a turn ending without a drain re-rings one parked wake; a later drain retires both without another prompt"
+}
+
 test_notice_permanent_after_stall() {
   tui_case notice-permanent 1
   local out="$CASE/out.json" steps
@@ -896,6 +924,7 @@ v2_run_cases \
   test_notice_episodes \
   test_notice_permanent_after_stall \
   test_notice_parked_wake_only_when_stuck \
+  test_turn_end_without_drain_rerings_parked_wake \
   test_notice_transient \
   test_notice_silent_until_first_ownership \
   test_notice_startup_transient_self_heals \

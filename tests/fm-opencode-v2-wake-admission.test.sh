@@ -266,6 +266,33 @@ for (const forced of [false,true]) {
   assert.equal(f.reload().pending().length,0);
   assert.equal(fs.readFileSync(f.queue,'utf8'),row,'coverage never consumes rows');
 }
+// A lead turn that ends without draining releases its doorbell: the parked
+// wake rings exactly once more, a busy lead keeps it parked, and one later
+// drain retires both doorbells without another prompt.
+for (const ended of [false,true]) {
+  const f=fixture('idle-lead-'+ended);
+  const drained=f.queue.replace('/.wake-queue','/.wake-drain-presented');
+  fs.writeFileSync(drained,'1\tG\t0\n');
+  fs.writeFileSync(f.queue,row);
+  const first=f.journal.confirm(f.journal.prepare('first row'));await f.journal.deliver(first);
+  fs.writeFileSync(f.queue,row+'101\t2\tsignal\ttask\tnext\n');
+  const later=f.journal.confirm(f.journal.prepare('later row'));
+  assert.equal(await f.journal.deliver(later),false);
+  if(ended)f.reload().idle();
+  const journal=f.reload();
+  assert.equal(journal.parked(later),!ended);
+  assert.equal(await journal.deliver(later),ended);
+  const third=journal.confirm(journal.prepare('third row'));
+  assert.equal(third.id,later.id);
+  assert.equal(await journal.deliver(third),ended);
+  assert.deepEqual(f.calls.map(call=>call.id),ended?[first.id,later.id]:[first.id],'an ended turn re-rings exactly one doorbell; a busy lead stays parked');
+  if(!ended)continue;
+  fs.writeFileSync(drained,'2\tG\t2\n');
+  const after=f.reload();
+  assert.equal(after.acknowledged(first),true);assert.equal(after.acknowledged(later),true);
+  assert.equal(after.pending().length,0);
+  assert.equal(f.calls.length,2,'the drain after the re-ring retires both doorbells without another prompt');
+}
 // An in-flight no-row admission owns the slot before its native receipt.
 {
   let release;
