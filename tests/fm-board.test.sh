@@ -551,7 +551,7 @@ test_answers_land_through_the_intake() {
   out=$(post_answer "$(jq -cn --arg t "$BOARD_TOKEN" '{token: $t, task: "call-yes", card: ("b" * 64), choice: "yes"}')")
   expect_refusal "$out" 409 not_waiting "an already answered question was answered again"
   [ "$(inbox_notes "$home")" = 8 ] || fail "a refused repeat answer woke the lead"
-  pass "yes, no, later, typed replies, and declared options land through the intake with board provenance and one wake each, and only yes releases held work"
+  pass "yes, no, later, typed replies, and declared options land through the intake with board provenance and one wake each, and yes releases held work"
 }
 
 test_same_second_answer_still_moves_to_answered() {
@@ -641,6 +641,384 @@ EOF
   pass "a Later whose deferral fails is still recorded, reported as not deferred, and wakes the lead"
 }
 
+test_failed_later_repair_is_not_success_or_answerable() {
+  local home real out until
+  home=$(make_home "${1:-later-repair-fails}")
+  hold "$home" sample-ship --reason "Merge PR 5 now? Recommend yes"
+  real=$(command -v tasks-axi)
+  cat > "$home/fakebin/tasks-axi" <<EOF
+#!/usr/bin/env bash
+if [ "\${1:-}" = update ] && [ "\${2:-}" = sample-ship ]; then
+  count=0
+  [ ! -f "$home/update-count" ] || count=\$(cat "$home/update-count")
+  count=\$((count + 1))
+  echo "\$count" > "$home/update-count"
+  [ "\$count" != 2 ] || { echo "tasks-axi: repair write unavailable" >&2; exit 1; }
+fi
+if [ "\${1:-}" = hold ]; then
+  for arg in "\$@"; do
+    [ "\$arg" != --until ] || { echo "tasks-axi: date gate unavailable" >&2; exit 1; }
+  done
+fi
+exec "$real" "\$@"
+EOF
+  chmod +x "$home/fakebin/tasks-axi"
+  [ "${1:-}" != note-fails ] || printf 'unavailable\n' > "$home/state/inbox"
+  start_board "$home"
+  until=$(utc_day 7)
+  out=$(post_answer "$(answer_body sample-ship later "$(jq -cn --arg d "$until" '{until: $d}')")")
+  expect_refusal "$out" 500 repair_failed "a failed Later repair reported success"
+  [ "$(cat "$home/update-count")" = 2 ] || fail "the second update was not exercised"
+  board_data | jq -e 'any(.with_lead[]; .id == "sample-ship")
+    and all(.waiting_on_you[]; .id != "sample-ship")' >/dev/null \
+    || fail "a failed Later repair offered Yes/No again: $(board_data)"
+  if [ "${1:-}" = note-fails ]; then
+    body_of "$out" | jq -e '.message | contains("Bro was not notified")' >/dev/null \
+      || fail "a failed Later repair silently ignored its inbox-note failure: $out"
+    [ "$(inbox_notes "$home")" = 0 ] || fail "the notification failure was not exercised"
+  else
+    [ "$(inbox_notes "$home")" = 1 ] || fail "a failed Later repair did not wake the lead about the recorded answer"
+    grep -h -F "the follow-up record did not land, so the outcome is uncertain" "$home"/state/inbox/*.note >/dev/null \
+      || fail "the lead's note does not say the failed repair left the outcome uncertain: $(cat "$home"/state/inbox/*.note)"
+  fi
+  local_merge_refused "$home" sample-ship
+  if [ "${1:-}" = note-fails ]; then
+    pass "a failed Later repair explicitly reports an inbox-note failure and keeps the work held"
+  else
+    pass "a failed Later repair reports failure and wakes the lead without restoring answer buttons or releasing work"
+  fi
+}
+
+test_declared_option_keeps_held_work_held() {
+  local home out show
+  home=$(make_home held-option)
+  hold "$home" sample-ship --reason "Which rollout? Recommend staged" --option "Staged" --option "Not yet"
+  start_board "$home"
+  board_data | jq -e 'any(.waiting_on_you[]; .id == "sample-ship" and .answer_mode == "release"
+    and .choices == [{id: "opt-1", label: "Staged"}, {id: "opt-2", label: "Not yet"}])' >/dev/null \
+    || fail "held work did not offer its declared options: $(board_data)"
+  out=$(post_answer "$(answer_body sample-ship opt-2)")
+  [ "$(status_of "$out")" = 200 ] && [ "$(body_of "$out" | jq -r '.outcome')" = recorded ] \
+    || fail "a declared option on held work was not recorded without releasing it: $out"
+  show=$(task_show "$home" sample-ship)
+  printf '%s\n' "$show" | grep -F "held: yes" >/dev/null || fail "a declared option released held work: $show"
+  printf '%s\n' "$show" | grep -F "Answer: Not yet" >/dev/null || fail "the chosen option was not recorded: $show"
+  printf '%s\n' "$show" | grep -F "Captain answer recorded:" >/dev/null || fail "the option was not recorded on the task: $show"
+  local_merge_refused "$home" sample-ship
+  board_data | jq -e 'any(.with_lead[]; .id == "sample-ship" and .answer == "Not yet")
+    and all(.waiting_on_you[]; .id != "sample-ship")' >/dev/null \
+    || fail "a declared option on held work is not listed as answered with the lead: $(board_data)"
+  [ "$(inbox_notes "$home")" = 1 ] || fail "a declared option on held work did not wake the lead"
+  grep -h -F "the held work stays held until you act on this answer" "$home"/state/inbox/*.note >/dev/null \
+    || fail "the lead's note does not say the work stays held: $(cat "$home"/state/inbox/*.note)"
+  pass "a declared option on held work is recorded for the lead and never releases it"
+}
+
+# A re-ask that lands after the board read the card but before the answer is
+# written must never receive the old click. The tasks-axi wrapper starts the
+# re-ask at the first call after that read and gives it time to finish.
+test_reask_during_an_answer_never_takes_the_old_click() {
+  local home real out i=0
+  home=$(make_home answer-race)
+  hold "$home" sample-ship --reason "Merge PR 5 now? Recommend yes"
+  real=$(command -v tasks-axi)
+  cat > "$home/fakebin/tasks-axi" <<EOF
+#!/usr/bin/env bash
+if [ "\${1:-}" = --version ] && rm "$home/race-armed" 2>/dev/null; then
+  ( cd "$home" && env -u FM_CAPTAIN_HOLD_LOCKED_BY "$ROOT/bin/fm-captain-hold.sh" hold sample-ship \
+      --reason "Merge PR 5 after the docs land? Recommend yes"; touch "$home/race-done" ) >/dev/null 2>&1 &
+  for _ in \$(seq 1 30); do [ ! -e "$home/race-done" ] || break; sleep 0.1; done
+fi
+exec "$real" "\$@"
+EOF
+  chmod +x "$home/fakebin/tasks-axi"
+  start_board "$home"
+  out=$(answer_body sample-ship yes)
+  touch "$home/race-armed"
+  out=$(post_answer "$out")
+  [ ! -e "$home/race-armed" ] || fail "the re-ask was never started during the answer"
+  while [ ! -e "$home/race-done" ]; do
+    i=$((i + 1))
+    [ "$i" -le 200 ] || fail "the re-ask never finished"
+    sleep 0.1
+  done
+  case "$(status_of "$out"):$(body_of "$out" | jq -r '.outcome // .code')" in
+    200:released|409:stale_card) : ;;
+    *) fail "an answer racing a re-ask ended unexpectedly: $out" ;;
+  esac
+  task_show "$home" sample-ship | grep -F "held: yes" >/dev/null \
+    || fail "the old click released the re-asked question: $(task_show "$home" sample-ship)"
+  i=0
+  until board_data | jq -e 'any(.waiting_on_you[]; .id == "sample-ship" and .answerable
+      and .reason == "Merge PR 5 after the docs land? Recommend yes")' >/dev/null; do
+    i=$((i + 1))
+    [ "$i" -le 100 ] || fail "the re-asked question is not waiting on the captain: $(board_data)"
+    sleep 0.1
+  done
+  pass "a re-ask racing an answer is never answered by the old click"
+}
+
+test_board_without_logins_is_local_only() {
+  local home out
+  home=$(make_home local-only)
+  printf 'board.example.ts.net\n' > "$home/config/board-hosts"
+  if in_home "$home" env FM_BOARD_PORT=0 "$BOARD" serve > "$home/hosts.log" 2>&1; then
+    fail "the board started for extra host names without a login allowlist"
+  fi
+  grep -F "board-logins is empty" "$home/hosts.log" >/dev/null \
+    || fail "the refused start did not name the missing login allowlist: $(cat "$home/hosts.log")"
+  [ ! -e "$home/state/board/serve.json" ] || fail "a refused start left a serve record"
+  rm "$home/config/board-hosts"
+  start_board "$home"
+  out=$(http GET /board.json '{}')
+  [ "$(status_of "$out")" = 200 ] || fail "a direct loopback request was refused without logins: $out"
+  expect_refusal "$(http GET /board.json '{"X-Forwarded-For": "100.64.0.9"}')" 403 local_only \
+    "a proxied request was served without a login allowlist"
+  expect_refusal "$(http GET / '{"X-Forwarded-Host": "127.0.0.1"}')" 403 local_only \
+    "a forwarded loopback request was served without a login allowlist"
+  expect_refusal "$(http GET /board.json '{"Tailscale-User-Login": "anyone@example.com"}')" 403 local_only \
+    "a Tailscale login was trusted without a login allowlist"
+  pass "without a login allowlist the board refuses extra host names and every proxied request"
+}
+
+test_page_staleness_ignores_the_phone_clock() {
+  local home
+  home=$(make_home page-clock)
+  hold "$home" sample-ship --reason "Which rollout?" --option "Staged" --option "Not yet"
+  hold "$home" call-yes --title "Close it?" --reason "Close it?"
+  start_board "$home"
+  board_data | jq -e '.age_seconds | type == "number" and . >= 0' >/dev/null \
+    || fail "board data does not carry its server-measured age: $(board_data)"
+  node - "$BOARD_PORT" <<'JS' || fail "the page misreported staleness or styled options like Yes"
+const assert = require('node:assert/strict');
+const vm = require('node:vm');
+const origin = `http://127.0.0.1:${process.argv[2]}`;
+(async () => {
+  const page = await (await fetch(origin)).text();
+  const nodes = new Map();
+  const node = (id) => {
+    if (!nodes.has(id)) nodes.set(id, { innerHTML: '', textContent: '', className: '', dataset: {} });
+    return nodes.get(id);
+  };
+  let skew = 10 * 60000, elapsed = 0, offline = false;
+  class PhoneDate extends Date { static now() { return Date.now() + skew + elapsed; } }
+  const context = vm.createContext({
+    console, Date: PhoneDate, Map, Set, CSS: { escape: (s) => s }, setInterval: () => {},
+    location: { reload() { throw new Error('unexpected reload'); } },
+    document: {
+      getElementById: node, addEventListener() {}, activeElement: null,
+      querySelector(selector) {
+        const name = /meta\[name="([^"]+)"\]/.exec(selector)?.[1];
+        return name ? { content: new RegExp(`name="${name}" content="([^"]+)"`).exec(page)[1] } : null;
+      },
+    },
+    fetch: async (path, options = {}) => {
+      if (offline) throw new TypeError('network down');
+      return fetch(new URL(path, origin), options);
+    },
+  });
+  vm.runInContext(/<script[^>]*>([\s\S]*?)<\/script>/.exec(page)[1], context);
+  const updated = node('updated');
+  await vm.runInContext('refresh()', context);
+  assert.equal(updated.className, 'updated', 'a phone clock ten minutes fast marked a fresh board stale');
+  assert.match(updated.textContent, /^updated \d+s ago$/);
+  const you = node('you').innerHTML;
+  assert.match(you, /class="primary"[^>]*data-choice="yes"/, 'Yes lost its emphasis');
+  assert.match(you, /class=""[^>]*data-choice="opt-2"/, 'a declared option was styled like Yes');
+  elapsed = 60000;
+  vm.runInContext('tick()', context);
+  assert.equal(updated.className, 'updated stale', 'a board with no update for a minute was not marked stale');
+  assert.match(updated.textContent, /^Not updating - last update 1m ago$/);
+  offline = true;
+  await vm.runInContext('refresh()', context);
+  assert.equal(updated.className, 'updated stale');
+  assert.match(updated.textContent, /^Board offline - last update 1m ago$/);
+  offline = false;
+  skew = -10 * 60000;
+  elapsed = 0;
+  const fresh = await (await fetch(new URL('board.json', origin))).json();
+  context.fetch = async () => ({ ok: true, json: async () => ({ ...fresh, age_seconds: 120 }) });
+  await vm.runInContext('refresh()', context);
+  assert.equal(updated.className, 'updated stale', 'a phone clock ten minutes slow hid a stuck board');
+  assert.match(updated.textContent, /^Not updating - last update 2m ago$/);
+})().catch((error) => { console.error(error); process.exitCode = 1; });
+JS
+  pass "the page judges staleness by the board's clock, reports offline, and styles declared options neutrally"
+}
+
+test_page_recovers_a_lost_committed_response() {
+  local home
+  home=$(make_home "${1:-lost-response}")
+  hold "$home" sample-ship --reason "Merge PR 5 now? Recommend yes"
+  hold "$home" lost-call --title "Close the question?" --reason "Close it?"
+  start_board "$home"
+  in_home "$home" env FM_BOARD_TEST_REASK="${1:-}" FM_BOARD_TEST_HOLD="$ROOT/bin/fm-captain-hold.sh" \
+    node - "$BOARD_PORT" <<'JS' || fail "the page did not recover the committed answer"
+const assert = require('node:assert/strict');
+const vm = require('node:vm');
+const port = process.argv[2];
+const origin = `http://127.0.0.1:${port}`;
+const reask = process.env.FM_BOARD_TEST_REASK === 'reask-after-loss';
+(async () => {
+  const page = await (await fetch(origin)).text();
+  const nodes = new Map();
+  const node = (id) => {
+    if (!nodes.has(id)) nodes.set(id, { innerHTML: '', textContent: '', dataset: {} });
+    return nodes.get(id);
+  };
+  let posts = 0, committedBody;
+  const requests = [];
+  let loseEveryResponse = false;
+  const context = vm.createContext({
+    console, Date, Map, Set, CSS: { escape: (s) => s }, setInterval: () => {},
+    location: { reload() { throw new Error('unexpected reload'); } },
+    document: {
+      getElementById: node, addEventListener() {}, activeElement: null,
+      querySelector(selector) {
+        const name = /meta\[name="([^"]+)"\]/.exec(selector)?.[1];
+        if (!name) return null;
+        return { content: new RegExp(`name="${name}" content="([^"]+)"`).exec(page)[1] };
+      },
+    },
+    fetch: async (path, options = {}) => {
+      const headers = { ...options.headers, Origin: origin };
+      const response = await fetch(new URL(path, origin), { ...options, headers });
+      if (options.method === 'POST') {
+        posts++;
+        requests.push(JSON.parse(options.body));
+        if (posts === 1 || loseEveryResponse) {
+          committedBody = options.body;
+          assert.equal(response.status, 200);
+          assert.equal((await response.json()).outcome, loseEveryResponse ? 'closed' : 'released');
+          if (posts === 1 && reask) {
+            require('node:child_process').execFileSync(process.env.FM_BOARD_TEST_HOLD,
+              ['hold', 'sample-ship', '--reason', 'Merge only after docs?'], { env: process.env });
+            let observed = false;
+            for (let i = 0; i < 300; i++) {
+              const data = await (await fetch(new URL('board.json', origin))).json();
+              if (data.waiting_on_you.some((w) => w.id === 'sample-ship' && w.card !== requests[0].card)) {
+                observed = true; break;
+              }
+              await new Promise((resolve) => setTimeout(resolve, 100));
+            }
+            assert.ok(observed, 'the re-asked card never reached the page recovery read');
+          }
+          // The real answer committed; discard its response on the phone side.
+          throw new TypeError('connection lost after commit');
+        }
+        if (posts === 2) assert.equal(options.body, committedBody, 'recovery changed the original click');
+        if (posts === 2 && reask) vm.runInContext('drafts.set("sample-ship", "Reply to the new question")', context);
+      }
+      return response;
+    },
+  });
+  vm.runInContext(/<script[^>]*>([\s\S]*?)<\/script>/.exec(page)[1], context);
+  await vm.runInContext('refresh()', context);
+  await vm.runInContext('answer("sample-ship", "yes")', context);
+  await vm.runInContext('refresh()', context);
+  assert.equal(posts, 2, 'a lost response was not checked with the same request');
+  if (reask) {
+    assert.match(node('you').innerHTML, /Merge only after docs/);
+    assert.doesNotMatch(node('you').innerHTML, / disabled|feedback recorded/,
+      'the old receipt disabled or marked the new question as answered');
+    assert.equal(vm.runInContext('drafts.get("sample-ship")', context), 'Reply to the new question',
+      'the old receipt discarded a draft for the new question');
+  }
+  assert.match(node('answered').innerHTML, /Recorded/);
+  assert.doesNotMatch(node('answered').innerHTML + node('you').innerHTML, /Nothing was recorded|Not recorded:/);
+  if (reask) {
+    await vm.runInContext('answer("sample-ship", "no")', context);
+    await vm.runInContext('refresh()', context);
+    assert.notEqual(requests[2].card, requests[0].card, 'the next answer reused the old question');
+    assert.match(node('lead').innerHTML, /You answered: no/);
+  }
+  loseEveryResponse = true;
+  await vm.runInContext('answer("lost-call", "yes")', context);
+  await vm.runInContext('refresh()', context);
+  assert.equal(posts, reask ? 5 : 4);
+  assert.match(node('banner').innerHTML, /may have been recorded/);
+  assert.match(node('banner').innerHTML, /data-act="refresh"/);
+  assert.doesNotMatch(node('banner').innerHTML, /Nothing was recorded|Not recorded:/);
+  // A known not_waiting response is not evidence that this click was unwritten.
+  await vm.runInContext('render({instance: INSTANCE, waiting_on_you: [{id: "old", title: "Old question", answerable: true, card: "a".repeat(64), choices: []}]})', context);
+  context.fetch = async () => ({ ok: true, json: async () => ({ ok: false, code: 'not_waiting', message: 'This is no longer waiting on you.' }) });
+  await vm.runInContext('answer("old", "yes")', context);
+  assert.match(node('banner').innerHTML, /no longer waiting/);
+  assert.doesNotMatch(node('banner').innerHTML, /Not recorded:/);
+})().catch((error) => { console.error(error); process.exitCode = 1; });
+JS
+  if [ "${1:-}" = reask-after-loss ]; then
+    task_show "$home" sample-ship | grep -F 'held: yes' >/dev/null || fail "the new No released re-asked work"
+    [ "$(inbox_notes "$home")" = 3 ] || fail "recovery duplicated a note or the new question could not be answered"
+  else
+    task_show "$home" sample-ship | grep -F 'held: no' >/dev/null || fail "the committed answer did not release work"
+    [ "$(inbox_notes "$home")" = 2 ] || fail "a lost response recovery duplicated the inbox note"
+  fi
+  if [ "${1:-}" = reask-after-loss ]; then
+    pass "an old receipt leaves a re-asked card and its draft untouched, and the new question can be answered"
+  else
+    pass "the actual page recovers a response lost after a committed release without duplicating the answer"
+  fi
+}
+
+test_answer_replay_survives_restart_without_reapplying() {
+  local home body out card before i=0
+  home=$(make_home replay)
+  hold "$home" sample-ship --reason "Ship now?"
+  start_board "$home"
+  body=$(answer_body sample-ship yes)
+  card=$(printf '%s' "$body" | jq -r .card)
+  out=$(post_answer "$body")
+  [ "$(body_of "$out" | jq -r .outcome)" = released ] || fail "initial answer did not land: $out"
+  stop_boards
+  # Wait for the old server to release its home record before restarting it.
+  while [ -e "$home/state/board/serve.json" ]; do
+    i=$((i + 1))
+    [ "$i" -le 100 ] || fail "the server did not stop before replay"
+    sleep 0.1
+  done
+  hold "$home" sample-ship --reason "Ship after docs?"
+  start_board "$home"
+  before=$(cat "$home/data/backlog.md")
+  body=$(printf '%s' "$body" | jq -c --arg t "$BOARD_TOKEN" '.token = $t')
+  out=$(post_answer "$body")
+  [ "$(status_of "$out")" = 200 ] && [ "$(body_of "$out" | jq -r .outcome)" = released ] \
+    || fail "an exact retry lost its committed result after restart: $out"
+  expect_refusal "$(post_answer "$(printf '%s' "$body" | jq -c '.choice = "no"')")" 409 answer_conflict \
+    "the same card accepted a different answer"
+  [ "$(cat "$home/data/backlog.md")" = "$before" ] || fail "a replay applied the old answer to a new hold"
+  [ "$(inbox_notes "$home")" = 1 ] || fail "a replay duplicated the notification"
+  [ "$(card_of sample-ship)" != "$card" ] || fail "a new hold reused the old card"
+  pass "a committed result survives server restart and retries never release a re-asked question"
+}
+
+test_confirmation_storage_failure_reports_unknown() {
+  local home body out real
+  home=$(make_home receipt-fails)
+  hold "$home" sample-ship --reason "Ship now?"
+  real=$(command -v tasks-axi)
+  cat > "$home/fakebin/tasks-axi" <<EOF
+#!/usr/bin/env bash
+"$real" "\$@" || exit \$?
+if [ "\${1:-}" = unhold ] && [ "\${2:-}" = sample-ship ]; then
+  printf 'unavailable\n' > "$home/state/board/answers"
+fi
+EOF
+  chmod +x "$home/fakebin/tasks-axi"
+  start_board "$home"
+  # After unhold commits, the wrapper prevents creating the confirmation dir.
+  body=$(answer_body sample-ship yes)
+  out=$(post_answer "$body")
+  expect_refusal "$out" 500 outcome_unknown "a failed confirmation claimed the answer was not recorded"
+  body_of "$out" | jq -e '.message | startswith("Your answer was recorded")' >/dev/null \
+    || fail "a confirmation storage failure misreported the committed answer: $out"
+  task_show "$home" sample-ship | grep -F 'held: no' >/dev/null || fail "the storage failure test did not commit"
+  out=$(post_answer "$body")
+  expect_refusal "$out" 500 outcome_unknown "an unreadable confirmation retried the mutation"
+  [ "$(inbox_notes "$home")" = 1 ] || fail "a failed confirmation duplicated the answer notification"
+  pass "a committed answer with unavailable confirmation storage reports uncertainty and does not reapply"
+}
+
 test_a_home_that_never_opts_in_is_untouched() {
   local home stamp changed
   home=$(make_home opt-out)
@@ -674,4 +1052,14 @@ test_answers_land_through_the_intake
 test_same_second_answer_still_moves_to_answered
 test_reasking_an_answered_call_never_offers_the_old_question
 test_later_that_cannot_defer_is_still_recorded
+test_failed_later_repair_is_not_success_or_answerable
+test_failed_later_repair_is_not_success_or_answerable note-fails
+test_declared_option_keeps_held_work_held
+test_reask_during_an_answer_never_takes_the_old_click
+test_board_without_logins_is_local_only
+test_page_staleness_ignores_the_phone_clock
+test_page_recovers_a_lost_committed_response
+test_page_recovers_a_lost_committed_response reask-after-loss
+test_answer_replay_survives_restart_without_reapplying
+test_confirmation_storage_failure_reports_unknown
 test_a_home_that_never_opts_in_is_untouched

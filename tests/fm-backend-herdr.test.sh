@@ -389,7 +389,18 @@ run_v2_state() {  # <dir> <harness>
   fb=$(make_herdr_fakebin "$dir")
   PATH="$fb:$PATH" FM_HERDR_LOG="$dir/log" FM_HERDR_RESPONSES="$dir/responses" \
     FM_HERDR_PS_BIN="$dir/ps" FM_BACKEND_HERDR_IDLE_SHELL_PROOF_POLLS=3 \
-    bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_agent_state default:w1:p2 "$1"' "$ROOT" "$2"
+    bash -c '
+      . "$0/bin/backends/herdr.sh"
+      case "${2:-state}" in
+        husk) fm_backend_herdr_tab_is_husk default w1:p2 "$1" && printf husk ;;
+        ring)
+          . "$0/bin/fm-task-inbox-lib.sh"
+          fm_task_inbox_ring herdr default:w1:p2 /missing/001.msg fm-test "$1"
+          printf "%s" "$?"
+          ;;
+        *) fm_backend_herdr_agent_state default:w1:p2 "$1" ;;
+      esac
+    ' "$ROOT" "$2" "${3:-state}"
 }
 
 v2_state_case() {  # <name> -> echoes a fresh case dir
@@ -458,6 +469,199 @@ test_opencode_v2_agent_state_settles_a_prompt_helper() {
   out=$(run_v2_state "$dir" opencode-v2)
   [ "$out" = ambiguous ] || fail "a pane busy with another foreground process must read ambiguous, got '$out'"
   pass "fm_backend_herdr_agent_state: an opencode-v2 pane settles past a prompt helper but never past a busy foreground"
+}
+
+# sticky_switch_state <case> <harness> <foreground-json>: sets out to one
+# agent-state read for <harness> while Herdr still reports shuvcode.
+sticky_switch_state() {  # <case> <harness> <foreground>
+  local dir n
+  dir=$(v2_state_case "sticky-$1")
+  printf '{"result":{"pane":{"pane_id":"w1:p2"}}}\n' > "$dir/responses/1.out"
+  printf '{"result":{"agent":{"agent":"shuvcode","agent_status":"idle"}}}\n' > "$dir/responses/2.out"
+  for n in 3 4 5 6; do
+    v2_process_info_fixture w1:p2 22712 31000 "$3" > "$dir/responses/$n.out"
+  done
+  out=$(run_v2_state "$dir" "$2")
+}
+
+test_stale_shuvcode_registration_cannot_confirm_replacement() {
+  local dir out
+  dir=$(v2_state_case stale-switch)
+  printf '{"result":{"pane":{"pane_id":"w1:p2"}}}\n' > "$dir/responses/1.out"
+  printf '{"result":{"agent":{"agent":"shuvcode","agent_status":"idle"}}}\n' > "$dir/responses/2.out"
+  v2_process_info_fixture w1:p2 22712 22712 '[{"pid":22712,"name":"zsh","argv":["-zsh"]}]' > "$dir/responses/3.out"
+  cp "$dir/responses/3.out" "$dir/responses/4.out"
+  out=$(run_v2_state "$dir" claude)
+  [ "$out" = dead ] || fail "a stale shuvcode registration over a shell cannot confirm a replacement claude, got '$out'"
+  dir=$(v2_state_case stale-switch-live)
+  printf '{"result":{"pane":{"pane_id":"w1:p2"}}}\n' > "$dir/responses/1.out"
+  printf '{"result":{"agent":{"agent":"shuvcode","agent_status":"working"}}}\n' > "$dir/responses/2.out"
+  v2_process_info_fixture w1:p2 22712 40069 "$V2_LIVE_FOREGROUND" > "$dir/responses/3.out"
+  out=$(run_v2_state "$dir" codex)
+  [ "$out" = ambiguous ] || fail "a surviving shuvcode must not count as the requested codex replacement, got '$out'"
+  dir=$(v2_state_case sticky-claude-up)
+  printf '{"result":{"pane":{"pane_id":"w1:p2"}}}\n' > "$dir/responses/1.out"
+  printf '{"result":{"agent":{"agent":"shuvcode","agent_status":"idle"}}}\n' > "$dir/responses/2.out"
+  v2_process_info_fixture w1:p2 22712 31000 \
+    '[{"pid":31000,"name":"2.1.220","argv":["/home/u/.local/share/claude/versions/2.1.220","--dangerously-skip-permissions"]}]' \
+    > "$dir/responses/3.out"
+  out=$(run_v2_state "$dir" claude)
+  [ "$out" = alive ] || fail "claude's own foreground process must confirm it under a sticky shuvcode registration, got '$out'"
+  dir=$(v2_state_case sticky-codex-up)
+  printf '{"result":{"pane":{"pane_id":"w1:p2"}}}\n' > "$dir/responses/1.out"
+  printf '{"result":{"agent":{"agent":"shuvcode","agent_status":"idle"}}}\n' > "$dir/responses/2.out"
+  v2_process_info_fixture w1:p2 22712 31000 '[{"pid":31000,"name":"codex","argv":["codex","--yolo"]}]' > "$dir/responses/3.out"
+  cp "$dir/responses/3.out" "$dir/responses/4.out"
+  out=$(run_v2_state "$dir" codex)
+  [ "$out" = alive ] || fail "codex's own foreground process must confirm it under a sticky shuvcode registration, got '$out'"
+  printf '0\n' > "$dir/responses/.count"
+  out=$(run_v2_state "$dir" claude)
+  [ "$out" = ambiguous ] || fail "another adapter's foreground process must not confirm the requested claude, got '$out'"
+  sticky_switch_state node-pi pi \
+    '[{"pid":31000,"name":"node-MainThread","argv":["/usr/bin/node","/home/u/.npm-global/bin/pi","--mode","rpc"]}]'
+  [ "$out" = alive ] || fail "a node-launched pi must confirm under a sticky shuvcode registration, got '$out'"
+  sticky_switch_state pi-launcher pi '[{"pid":31000,"name":"pi-launcher","argv":["pi-launcher"]}]'
+  [ "$out" = alive ] || fail "pi's launcher must confirm under a sticky shuvcode registration, got '$out'"
+  sticky_switch_state node-cursor cursor \
+    '[{"pid":31000,"name":"MainThread","argv":["/home/u/.local/share/cursor-agent/versions/2026.08.11-e8db854/node","index.js"]}]'
+  [ "$out" = alive ] || fail "a node-launched cursor must confirm under a sticky shuvcode registration, got '$out'"
+  sticky_switch_state pi-lookalike pi \
+    '[{"pid":31000,"name":"node","argv":["node","/opt/pi-tools/run.js"]}]'
+  [ "$out" = ambiguous ] || fail "a script path without an exact pi component must not confirm pi, got '$out'"
+  sticky_switch_state cursor-lookalike cursor \
+    '[{"pid":31000,"name":"node","argv":["node","/tmp/agent/index.js"]}]'
+  [ "$out" = ambiguous ] || fail "an unrelated node process must not confirm cursor, got '$out'"
+  sticky_switch_state shuvcode-for-pi pi "$V2_LIVE_FOREGROUND"
+  [ "$out" = ambiguous ] || fail "a still-running shuvcode must not confirm the requested pi, got '$out'"
+  dir=$(v2_state_case fresh-switch)
+  printf '{"result":{"pane":{"pane_id":"w1:p2"}}}\n' > "$dir/responses/1.out"
+  printf '{"result":{"agent":{"agent":"claude","agent_status":"working"}}}\n' > "$dir/responses/2.out"
+  out=$(run_v2_state "$dir" claude)
+  [ "$out" = alive ] || fail "a newly registered replacement must read alive, got '$out'"
+  pass "Herdr harness switch: the exited shuvcode registration cannot confirm a replacement"
+}
+
+test_recorded_adapter_unknown_registration_uses_foreground() {
+  local dir out n
+  dir=$(v2_state_case codex-startup-unknown)
+  printf '{"result":{"pane":{"pane_id":"w1:p2"}}}\n' > "$dir/responses/1.out"
+  printf '{"result":{"agent":{"pane_id":"w1:p2","agent":"codex","agent_status":"unknown"}}}\n' > "$dir/responses/2.out"
+  for n in 3 4 5 6; do
+    v2_process_info_fixture w1:p2 22712 31000 '[{"pid":31000,"name":"codex","argv":["/home/u/.local/share/mise/installs/codex/latest/bin/codex","--model","gpt-6-astra"]}]' > "$dir/responses/$n.out"
+  done
+  out=$(run_v2_state "$dir" codex)
+  [ "$out" = alive ] || fail "valid codex unknown startup registration must use its own foreground identity, got '$out'"
+  printf '0\n' > "$dir/responses/.count"
+  out=$(run_v2_state "$dir" '')
+  [ "$out" = unreadable ] || fail "an omitted harness must keep the legacy unknown-registration reading, got '$out'"
+  printf '0\n' > "$dir/responses/.count"
+  for n in 3 4 5 6; do
+    v2_process_info_fixture w1:p2 22712 31000 "$V2_LIVE_FOREGROUND" > "$dir/responses/$n.out"
+  done
+  out=$(run_v2_state "$dir" codex)
+  [ "$out" = ambiguous ] || fail "unknown codex registration cannot confirm a foreground shuvcode, got '$out'"
+  printf '0\n' > "$dir/responses/.count"
+  for n in 3 4 5 6; do
+    v2_process_info_fixture w1:p2 22712 22712 '[{"pid":22712,"name":"zsh","argv":["-zsh"]}]' > "$dir/responses/$n.out"
+  done
+  out=$(run_v2_state "$dir" codex)
+  [ "$out" = dead ] || fail "unknown codex registration over a proven idle shell must read dead, got '$out'"
+  pass "Herdr startup: the recorded adapter's unknown registration uses its foreground evidence"
+}
+
+test_exited_v2_husk_and_doorbell_use_recorded_harness() {
+  local dir out mode
+  for mode in husk ring; do
+    dir=$(v2_state_case "consumer-$mode")
+    printf '{"result":{"pane":{"pane_id":"w1:p2"}}}\n' > "$dir/responses/1.out"
+    v2_process_info_fixture w1:p2 22712 22712 '[{"pid":22712,"name":"zsh","argv":["-zsh"]}]' > "$dir/responses/2.out"
+    cp "$dir/responses/2.out" "$dir/responses/3.out"
+    out=$(run_v2_state "$dir" opencode-v2 "$mode")
+    case "$mode:$out" in husk:husk|ring:3) ;; *) fail "exited v2 $mode consumer returned '$out'" ;; esac
+    assert_not_contains "$(cat "$dir/log")" $'agent\x1fget' "the consumer must select the recorded adapter's process proof"
+  done
+  pass "Herdr exited worker: husk and doorbell consumers use recorded-harness evidence"
+}
+
+test_opencode_v2_nested_worktree_shell() {
+  local dir out n
+  dir=$(v2_state_case nested-worktree)
+  cat > "$dir/ps" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  "-axo pid=,ppid=") printf '1 0\n22712 1\n28000 22712\n30000 28000\n' ;;
+  "-p 28000 -o comm=") printf 'treehouse\n' ;;
+  "-p 28000 -o args=") printf '/home/u/.local/bin/treehouse get\n' ;;
+  "-p 30000 -o stat=") printf 'Ss+\n' ;;
+  *) exit 1 ;;
+esac
+SH
+  printf '{"result":{"pane":{"pane_id":"w1:p2"}}}\n' > "$dir/responses/1.out"
+  for n in 2 3 4 5; do
+    v2_process_info_fixture w1:p2 22712 30000 '[{"pid":30000,"name":"zsh","argv":["zsh","-l"]}]' > "$dir/responses/$n.out"
+  done
+  out=$(run_v2_state "$dir" opencode-v2)
+  [ "$out" = dead ] || fail "a lone idle worktree shell descending from the pane shell must read dead, got '$out'"
+  # An agent sharing that nested foreground group is still positively alive.
+  printf '0\n' > "$dir/responses/.count"
+  v2_process_info_fixture w1:p2 22712 30000 "$V2_LIVE_FOREGROUND" > "$dir/responses/2.out"
+  out=$(run_v2_state "$dir" opencode-v2)
+  [ "$out" = alive ] || fail "a live shuvcode below the worktree wrapper must read alive, got '$out'"
+  # A script shell is not an interactive prompt, even with matching ancestry.
+  printf '0\n' > "$dir/responses/.count"
+  for n in 2 3 4 5; do
+    v2_process_info_fixture w1:p2 22712 30000 '[{"pid":30000,"name":"zsh","argv":["zsh","-c","read input"]}]' > "$dir/responses/$n.out"
+  done
+  out=$(run_v2_state "$dir" opencode-v2)
+  [ "$out" = ambiguous ] || fail "a descendant script shell must not prove an idle interactive prompt, got '$out'"
+  # A sibling process under the wrapper keeps the ancestry proof ambiguous.
+  printf '0\n' > "$dir/responses/.count"
+  for n in 2 3 4 5; do
+    v2_process_info_fixture w1:p2 22712 30000 '[{"pid":30000,"name":"zsh","argv":["zsh","-l"]}]' > "$dir/responses/$n.out"
+  done
+  sed "s/28000 22712/28000 22712\\\\n28001 28000/" "$dir/ps" > "$dir/ps.next"
+  mv "$dir/ps.next" "$dir/ps"
+  chmod +x "$dir/ps"
+  out=$(run_v2_state "$dir" opencode-v2)
+  [ "$out" = ambiguous ] || fail "a wrapper with another child cannot prove the agent gone, got '$out'"
+  pass "Herdr worktree wrapper: the lone descendant foreground shell proves the agent exited"
+}
+
+# nested_shell_state <case> <ps-rows> <wrapper-comm> <wrapper-args>: classify
+# a lone idle `zsh -l` (pid 30000) under the given process table.
+nested_shell_state() {  # <case> <rows> <comm> <args>
+  local dir n
+  dir=$(v2_state_case "$1")
+  cat > "$dir/ps" <<SH
+#!/usr/bin/env bash
+case "\$*" in
+  "-axo pid=,ppid=") printf '$2' ;;
+  "-p 28000 -o comm=") printf '%s\\n' '$3' ;;
+  "-p 28000 -o args=") printf '%s\\n' '$4' ;;
+  "-p 29000 -o comm=") printf 'treehouse\\n' ;;
+  "-p 29000 -o args=") printf 'treehouse get\\n' ;;
+  "-p 30000 -o stat=") printf 'Ss+\\n' ;;
+  *) exit 1 ;;
+esac
+SH
+  printf '{"result":{"pane":{"pane_id":"w1:p2"}}}\n' > "$dir/responses/1.out"
+  for n in 2 3 4 5; do
+    v2_process_info_fixture w1:p2 22712 30000 '[{"pid":30000,"name":"zsh","argv":["zsh","-l"]}]' > "$dir/responses/$n.out"
+  done
+  run_v2_state "$dir" opencode-v2
+}
+
+test_nested_shell_requires_one_treehouse_hop() {
+  local out
+  out=$(nested_shell_state th-argv0 '1 0\n22712 1\n28000 22712\n30000 28000\n' th-renamed '/opt/bin/treehouse get')
+  [ "$out" = dead ] || fail "a treehouse argv0 must prove the wrapper, got '$out'"
+  out=$(nested_shell_state non-treehouse '1 0\n22712 1\n28000 22712\n30000 28000\n' script 'script -q /dev/null')
+  [ "$out" = ambiguous ] || fail "a non-Treehouse intermediate must keep the nested shell ambiguous, got '$out'"
+  out=$(nested_shell_state two-hops '1 0\n22712 1\n28000 22712\n29000 28000\n30000 29000\n' treehouse 'treehouse get')
+  [ "$out" = ambiguous ] || fail "a chain longer than one Treehouse hop must stay ambiguous, got '$out'"
+  out=$(nested_shell_state direct-child '1 0\n22712 1\n30000 22712\n' treehouse 'treehouse get')
+  [ "$out" = ambiguous ] || fail "a shell with no Treehouse hop must stay ambiguous, got '$out'"
+  pass "Herdr nested shell: only pane shell -> one Treehouse wrapper -> lone shell proves exit"
 }
 
 test_opencode_v2_agent_state_never_guesses_agent_free() {
@@ -4837,6 +5041,11 @@ test_workspace_label_different_secondmates_get_different_labels
 test_cli_helper_sets_env_and_appends_trailing_session_flag
 test_agent_state_bypasses_a_stale_client_shadowing_a_compatible_one
 test_opencode_v2_agent_state_reads_foreground_processes
+test_opencode_v2_nested_worktree_shell
+test_nested_shell_requires_one_treehouse_hop
+test_stale_shuvcode_registration_cannot_confirm_replacement
+test_recorded_adapter_unknown_registration_uses_foreground
+test_exited_v2_husk_and_doorbell_use_recorded_harness
 test_opencode_v2_agent_state_never_guesses_agent_free
 test_opencode_v2_agent_state_settles_a_prompt_helper
 test_cli_caches_the_selected_client_within_a_process
