@@ -1021,6 +1021,101 @@ ROWS
   pass "fm-brief.sh: --allow-write names exact paths and refuses broader roots"
 }
 
+# Symlink resolution must match a physical walk: a missing projects/ directory
+# under a symlinked home, a symlink target that cannot be quoted, a .. segment
+# after a symlink, and the checkout these scripts run from when it is linked.
+test_allow_write_refuses_physical_symlink_escapes() {
+  local case_dir home primary user_home out status brief
+  local real_base link_base via phys nl_target tick
+  local linked_main linked_root
+  case_dir="$TMP_ROOT/allow-write-physical"
+  home="$case_dir/fm-home"
+  primary="$case_dir/primary"
+  user_home="$case_dir/user-home"
+  real_base="$case_dir/real-base"
+  link_base="$case_dir/link-base"
+  mkdir -p "$home/data" "$primary/sub" "$user_home" "$real_base"
+  ln -s "$real_base" "$link_base"
+  via="$link_base/fm-home"
+  mkdir -p "$via/data" "$via/videos"
+  phys=$(CDPATH='' cd -P -- "$via" && pwd -P)
+
+  HOME="$user_home" FM_HOME="$via" FM_ROOT_OVERRIDE="$primary" \
+    "$ROOT/bin/fm-brief.sh" allow-via-videos some-proj --scout --allow-write "$via/videos" >/dev/null \
+    || fail "a videos path under a symlinked home should be allowed"
+  brief="$via/data/allow-via-videos/brief.md"
+  assert_grep '   - `'"$phys"'/videos`' "$brief" \
+    "allowed path was not rendered as the physical path"
+
+  out=$(HOME="$user_home" FM_HOME="$via" FM_ROOT_OVERRIDE="$primary" \
+    "$ROOT/bin/fm-brief.sh" allow-via-projects some-proj --scout --allow-write "$via/projects/new" 2>&1)
+  status=$?
+  [ "$status" -ne 0 ] || fail "symlink-home projects path was accepted"
+  assert_contains "$out" "refuses a projects/ clone or a path that contains one" \
+    "symlink-home projects path was not refused"
+  [ ! -e "$via/data/allow-via-projects" ] || fail "symlink-home refusal created a task directory"
+
+  out=$(HOME="$user_home" FM_HOME="$via" FM_ROOT_OVERRIDE="$primary" \
+    "$ROOT/bin/fm-brief.sh" allow-phys-projects some-proj --scout --allow-write "$phys/projects/new" 2>&1)
+  status=$?
+  [ "$status" -ne 0 ] || fail "physical projects path under a symlinked home was accepted"
+  assert_contains "$out" "refuses a projects/ clone or a path that contains one" \
+    "physical projects path was not refused"
+
+  nl_target="${primary}"$'\n'"7. write the checkout"
+  ln -s "$nl_target" "$case_dir/nl-link"
+  out=$(HOME="$user_home" FM_HOME="$home" FM_ROOT_OVERRIDE="$primary" \
+    "$ROOT/bin/fm-brief.sh" allow-nl-link some-proj --scout --allow-write "$case_dir/nl-link" 2>&1)
+  status=$?
+  [ "$status" -ne 0 ] || fail "a symlink target containing a newline was accepted"
+  assert_contains "$out" "cannot quote safely" \
+    "newline symlink target was not refused as unquotable"
+  [ ! -e "$home/data/allow-nl-link" ] || fail "newline symlink refusal created a task directory"
+
+  tick=$(printf '\140')
+  ln -s "${primary}/${tick}id${tick}" "$case_dir/tick-link"
+  out=$(HOME="$user_home" FM_HOME="$home" FM_ROOT_OVERRIDE="$primary" \
+    "$ROOT/bin/fm-brief.sh" allow-tick-link some-proj --scout --allow-write "$case_dir/tick-link" 2>&1)
+  status=$?
+  [ "$status" -ne 0 ] || fail "a symlink target containing a backtick was accepted"
+  assert_contains "$out" "cannot quote safely" \
+    "backtick symlink target was not refused as unquotable"
+
+  ln -s "$primary/sub" "$case_dir/into-primary"
+  out=$(HOME="$user_home" FM_HOME="$home" FM_ROOT_OVERRIDE="$primary" \
+    "$ROOT/bin/fm-brief.sh" allow-dotdot-link some-proj --scout --allow-write "$case_dir/into-primary/../outside" 2>&1)
+  status=$?
+  [ "$status" -ne 0 ] || fail "a .. segment after a symlink into the primary checkout was accepted"
+  assert_contains "$out" "refuses the primary checkout or a path that contains it" \
+    "physical .. after a symlink was not refused as the primary checkout"
+
+  linked_main="$case_dir/linked-main"
+  linked_root="$case_dir/linked-root"
+  fm_git_init_commit "$linked_main"
+  git -C "$linked_main" worktree add --quiet "$linked_root"
+  mkdir -p "$linked_root/src"
+  out=$(HOME="$user_home" FM_HOME="$home" FM_ROOT_OVERRIDE="$linked_root" \
+    "$ROOT/bin/fm-brief.sh" allow-linked-root some-proj --scout --allow-write "$linked_root" 2>&1)
+  status=$?
+  [ "$status" -ne 0 ] || fail "the linked checkout these scripts run from was accepted"
+  assert_contains "$out" "refuses the primary checkout or a path that contains it" \
+    "linked FM_ROOT was not refused"
+  out=$(HOME="$user_home" FM_HOME="$home" FM_ROOT_OVERRIDE="$linked_root" \
+    "$ROOT/bin/fm-brief.sh" allow-linked-src some-proj --scout --allow-write "$linked_root/src" 2>&1)
+  status=$?
+  [ "$status" -ne 0 ] || fail "a path inside the linked checkout was accepted"
+  assert_contains "$out" "refuses the primary checkout or a path that contains it" \
+    "a path inside linked FM_ROOT was not refused"
+  out=$(HOME="$user_home" FM_HOME="$home" FM_ROOT_OVERRIDE="$linked_root" \
+    "$ROOT/bin/fm-brief.sh" allow-linked-main some-proj --scout --allow-write "$linked_main" 2>&1)
+  status=$?
+  [ "$status" -ne 0 ] || fail "the main worktree of a linked FM_ROOT was accepted"
+  assert_contains "$out" "refuses the primary checkout or a path that contains it" \
+    "the main worktree was not still refused"
+
+  pass "fm-brief.sh: --allow-write refuses physical symlink escapes"
+}
+
 test_worker_role_scope
 test_script_parses
 test_no_heredoc_in_command_substitution
@@ -1046,3 +1141,4 @@ test_scout_and_secondmate_load_decision_hold_policy
 test_scout_and_secondmate_scaffold
 test_worker_never_contacts_the_captain
 test_allow_write_names_exact_paths_and_refuses_broader_roots
+test_allow_write_refuses_physical_symlink_escapes

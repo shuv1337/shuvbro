@@ -24,8 +24,13 @@
 #   Refuses `/`, $HOME itself, the primary checkout, and any projects/ clone,
 #   including a path inside one, a path that contains one, and this home's
 #   projects/ directory even when no clone is there yet.
-#   The primary checkout is this repo's main worktree, plus the main worktree of
-#   a projects/ clone when that clone is a linked worktree of another checkout.
+#   Those roots and the allowed path are resolved physically, the same way pwd -P
+#   does, so a symlink or a later .. segment cannot name a broader tree.
+#   A newline, carriage return, or backtick is refused on the flag, on each
+#   symlink target, and on the resolved path.
+#   The primary checkout is this repo's main worktree and the physical path of
+#   the checkout these scripts run from, plus the main worktree of a projects/
+#   clone when that clone is a linked worktree of another checkout.
 #   Ship scaffolds and secondmate charters refuse the flag.
 #   --secondmate writes a persistent secondmate charter. The project list
 #   is cloned into the secondmate home, while the natural-language scope
@@ -122,8 +127,8 @@ resolve_directory_input() {
 }
 
 # --allow-write contract: header comment above is the owner. These helpers only
-# enforce it. Paths are canonicalized before the refusal checks so a symlink or
-# a .. segment cannot name a broader tree than the one the flag accepted.
+# enforce it. The allowed path is walked in order and resolved physically, so a
+# symlink is followed before a later .. segment, matching pwd -P.
 lexical_abs_path() {
   local input=$1 part out
   case "$input" in
@@ -180,10 +185,37 @@ expand_allow_write_input() {
   esac
 }
 
+allow_write_text_is_unsafe() {
+  # $'\n' cannot be captured with command substitution; that strips the newline
+  # and the pattern then matches every path.
+  case "$1" in
+    *$'\n'*|*$'\r'*|*$'\140'*) return 0 ;;
+  esac
+  return 1
+}
+
+refuse_unsafe_allow_write_text() {
+  if allow_write_text_is_unsafe "$1"; then
+    echo "error: --allow-write path contains a character the brief cannot quote safely" >&2
+    return 1
+  fi
+}
+
+readlink_exact() {
+  local target
+  # Preserve a trailing newline that command substitution would otherwise strip.
+  target=$(readlink "$1"; printf x) || return 1
+  printf '%s' "${target%x}"
+}
+
 canonicalize_allow_path() {
-  local input=$1 depth=${2:-0} out part combined target
+  local input=$1 depth=${2:-0} out part combined target parent
   [ "$depth" -lt 40 ] || { echo "error: --allow-write path has a symlink loop" >&2; return 1; }
-  input=$(lexical_abs_path "$input") || return 1
+  case "$input" in
+    /*) ;;
+    *) echo "error: --allow-write requires an absolute path (got '$input')" >&2; return 1 ;;
+  esac
+  refuse_unsafe_allow_write_text "$input" || return 1
   input=${input#/}
   out=
   while [ -n "$input" ]; do
@@ -198,8 +230,15 @@ canonicalize_allow_path() {
     case "$part" in
       ''|.) continue ;;
       ..)
+        if [ -n "$out" ] && [ -d "$out" ]; then
+          out=$(CDPATH='' cd -P -- "$out" && pwd -P) || {
+            echo "error: --allow-write path cannot be resolved: $out" >&2
+            return 1
+          }
+        fi
         if [ -n "$out" ]; then
           out=${out%/*}
+          [ -n "$out" ] || out=/
         fi
         continue
         ;;
@@ -210,7 +249,11 @@ canonicalize_allow_path() {
       combined="$out/$part"
     fi
     if [ -L "$combined" ]; then
-      target=$(readlink "$combined") || { echo "error: --allow-write path cannot be resolved: $combined" >&2; return 1; }
+      target=$(readlink_exact "$combined") || {
+        echo "error: --allow-write path cannot be resolved: $combined" >&2
+        return 1
+      }
+      refuse_unsafe_allow_write_text "$target" || return 1
       case "$target" in
         /*) ;;
         *)
@@ -221,6 +264,7 @@ canonicalize_allow_path() {
           fi
           ;;
       esac
+      refuse_unsafe_allow_write_text "$target" || return 1
       if [ -n "$input" ]; then
         target="$target/$input"
       fi
@@ -229,7 +273,24 @@ canonicalize_allow_path() {
     fi
     out=$combined
   done
+  if [ -n "$out" ] && [ -d "$out" ]; then
+    out=$(CDPATH='' cd -P -- "$out" && pwd -P) || {
+      echo "error: --allow-write path cannot be resolved: $out" >&2
+      return 1
+    }
+  elif [ -n "$out" ] && [ -e "$out" ]; then
+    parent=$(CDPATH='' cd -P -- "$(dirname "$out")" && pwd -P) || {
+      echo "error: --allow-write path cannot be resolved: $out" >&2
+      return 1
+    }
+    if [ "$parent" = / ]; then
+      out="/$(basename "$out")"
+    else
+      out="$parent/$(basename "$out")"
+    fi
+  fi
   [ -n "$out" ] || out=/
+  refuse_unsafe_allow_write_text "$out" || return 1
   printf '%s\n' "$out"
 }
 
@@ -276,19 +337,24 @@ git_primary_worktree() {
 }
 
 collect_forbidden_write_roots() {
-  local primary projects clone resolved main
+  local primary projects clone resolved main home_phys root_phys
   FORBIDDEN_WRITE_KIND=()
   FORBIDDEN_WRITE_PATH=()
+  root_phys=$(canonical_dir "$FM_ROOT" || true)
+  add_forbidden_write_root primary "$root_phys"
   primary=
   if [ -d "$FM_ROOT" ]; then
     primary=$(git_primary_worktree "$FM_ROOT" || true)
   fi
   if [ -z "$primary" ]; then
-    primary=$(canonical_dir "$FM_ROOT" || true)
+    primary=$root_phys
   fi
   add_forbidden_write_root primary "$primary"
-  if [ -d "$FM_HOME/projects" ]; then
-    projects=$(canonical_dir "$FM_HOME/projects" || true)
+  home_phys=$(canonical_dir "$FM_HOME" || true)
+  if [ -n "$home_phys" ] && [ -d "$home_phys/projects" ]; then
+    projects=$(canonical_dir "$home_phys/projects" || true)
+  elif [ -n "$home_phys" ]; then
+    projects="$home_phys/projects"
   else
     projects=$(lexical_abs_path "$FM_HOME/projects" || true)
   fi
@@ -369,14 +435,11 @@ validate_allow_write() {
     raw=${ALLOW_WRITE[$i]}
     i=$((i + 1))
     [ -n "$raw" ] || { echo "error: --allow-write requires an absolute path (got '')" >&2; return 1; }
-    case "$raw" in
-      *$'\n'*|*$'\r'*|*'`'*)
-        echo "error: --allow-write path contains a character the brief cannot quote safely" >&2
-        return 1
-        ;;
-    esac
+    refuse_unsafe_allow_write_text "$raw" || return 1
     expanded=$(expand_allow_write_input "$raw") || return 1
+    refuse_unsafe_allow_write_text "$expanded" || return 1
     canon=$(canonicalize_allow_path "$expanded") || return 1
+    refuse_unsafe_allow_write_text "$canon" || return 1
     refuse_allow_write_path "$canon" || return 1
     append_allow_write_canon "$canon"
   done
