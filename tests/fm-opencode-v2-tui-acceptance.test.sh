@@ -16,10 +16,6 @@
 # did NOT happen. Cases that must tell an event-triggered reconcile from the
 # periodic fallback run the TUI's 2 s reconcile timer on a manual clock.
 #
-# Set FM_V2_WATCHERS_ONLY=1 for the deterministic process-race regressions,
-# or FM_V2_WATCHER_ACCEPTANCE_ONLY=1 to also drive the real coordinator cases
-# that assert singleton watcher counts.
-#
 # Lead model shells that are not themselves testing environment replacement
 # (B2) pass PATH explicitly, so a B2 failure cannot mask the case under test.
 set -u
@@ -79,9 +75,8 @@ watchers_step() {
 }
 
 # Deterministic /proc race regressions exercise the same counting interface the
-# model shell invokes. This focus flag avoids driving unrelated TUI cases.
+# model shell invokes.
 "$V2_NODE_BIN" "$ROOT/tests/assets/fm-watch-count-regression.mjs" || fail "watcher-count regressions"
-if [ "${FM_V2_WATCHERS_ONLY:-0}" = 1 ]; then exit 0; fi
 
 startup_admissions() { jq '[.admitted[] | select(.text | test("fm-session-start"))] | length' "$1"; }
 wake_admissions() { jq --arg w "$WAKE" '[.admitted[] | select(.text | test($w))] | length' "$1"; }
@@ -825,11 +820,6 @@ EOF2
   [ -e "$state/$id.turn-ended" ] || fail "positive control: the worker's terminal event did not notify"
   pass "worker: after the worker latches busy, its child session's events neither clear it nor notify; its own terminal event does"
 }
-
-if [ "${FM_V2_WATCHER_ACCEPTANCE_ONLY:-0}" = 1 ]; then
-  v2_run_cases test_turn_end_event_arms_one_watcher_without_prompt test_rejected_admissions_retry_one_id
-  exit $?
-fi
 
 v2_run_cases \
   test_notice_episodes \

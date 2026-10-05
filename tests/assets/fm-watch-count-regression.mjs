@@ -77,6 +77,25 @@ try {
     assert.equal(await countWatchers(home, options), 1);
     assert.ok(fired);
   });
+  await test("run-state changes keep a stable identity", async ({ procRoot, options }) => {
+    let statReads = 0;
+    options.read = (path, encoding) => {
+      const value = readFileSync(path, encoding);
+      if (path === join(procRoot, "20/stat") || path === join(procRoot, "10/stat")) {
+        return value.replace(") S ", statReads++ % 2 ? ") R " : ") S ");
+      }
+      return value;
+    };
+    assert.equal(await countWatchers(home, { ...options, attempts: 3 }), 1);
+  });
+  await test("an inaccessible reparenting parent still counts its watcher", async ({ procRoot, put, options }) => {
+    put(30, 1, 30);
+    options.read = (path, encoding) => {
+      if (path === join(procRoot, "1/environ")) throw Object.assign(new Error("denied"), { code: "EACCES" });
+      return readFileSync(path, encoding);
+    };
+    assert.equal(await countWatchers(home, options), 2);
+  });
   await test("PID reuse during a read invalidates the identity", async ({ procRoot, put, options }) => {
     let scans = 0;
     let fired = false;

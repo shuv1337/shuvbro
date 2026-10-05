@@ -15,18 +15,22 @@ export async function countWatchers(state, {
     if (fields.length < 20 || !/^\d+$/.test(fields[1]) || !/^\d+$/.test(fields[19])) {
       throw new Error(`invalid stat for ${pid}`);
     }
-    return `${fields[1]}:${fields[19]}:${fields[0]}`;
+    return { parent: fields[1], start: fields[19], status: fields[0], identity: `${fields[1]}:${fields[19]}` };
   };
-  const record = (pid) => {
+  const record = (pid, withEnv) => {
     const before = stat(pid);
     const cmd = readText(pid, "cmdline");
-    const env = readText(pid, "environ");
-    if (stat(pid) !== before || readText(pid, "cmdline") !== cmd) return null;
-    const [parent, start, status] = before.split(":");
-    return { pid, parent, start, status, cmd, env, identity: before };
+    let env = null;
+    if (withEnv(cmd)) {
+      try { env = readText(pid, "environ"); }
+      catch (error) { if (error.code !== "EACCES") throw error; }
+    }
+    const after = stat(pid);
+    if (after.identity !== before.identity || readText(pid, "cmdline") !== cmd) return null;
+    return { pid, ...after, cmd, env };
   };
   const transient = (error) => ["ENOENT", "ESRCH"].includes(error.code);
-  const servesHome = (process) => process.env.split("\0").includes(`FM_STATE_OVERRIDE=${state}`);
+  const servesHome = (env) => env !== null && env.split("\0").includes(`FM_STATE_OVERRIDE=${state}`);
   const isWatcher = (cmd) => /(?:^|\0)[^\0]*\/bin\/fm-watch\.sh(?:\0|$)/.test(cmd);
   let previous = null;
   for (let attempt = 0; attempt < attempts; attempt++) {
@@ -45,22 +49,21 @@ export async function countWatchers(state, {
         if (transient(error) || error.code === "EACCES") continue;
         throw error;
       }
-      if (!env.split("\0").includes(`FM_STATE_OVERRIDE=${state}`)) continue;
+      if (!servesHome(env)) continue;
       try {
-        const child = record(pid);
+        const child = record(pid, () => true);
         if (!child || child.cmd !== cmd || child.env !== env) { stable = false; continue; }
-        if (!servesHome(child)) continue;
         if (["Z", "X"].includes(child.status)) { stable = false; continue; }
-        const parent = record(child.parent);
+        const parent = record(child.parent, (parentCmd) => parentCmd === child.cmd);
         // Verify the child still has the same identity and parent after reading
         // that parent. A missing/reused parent invalidates this entire sample.
-        const after = record(pid);
+        const after = record(pid, () => false);
         if (!parent || !after || BigInt(parent.start) > BigInt(child.start) ||
             after.identity !== child.identity || after.cmd !== child.cmd) {
           stable = false;
           continue;
         }
-        if (parent.cmd === child.cmd && servesHome(parent)) continue;
+        if (parent.cmd === child.cmd && servesHome(parent.env)) continue;
         roots.push(`${pid}:${child.identity}:${parent.pid}:${parent.identity}:${child.cmd}`);
       } catch (error) {
         if (transient(error)) { stable = false; continue; }
