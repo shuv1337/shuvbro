@@ -752,8 +752,12 @@ test_codex_working_elapsed_reads_status_row() {
   [ "$out" = "300 60" ] || fail "minute-only row must be 300s at 60s resolution, got '$out'"
   out=$(printf '%s\n' 'Working (1h 02m 03s)' | fm_composer_codex_working_elapsed)
   [ "$out" = "3723 1" ] || fail "hour row with seconds must be 3723s, got '$out'"
-  out=$(printf '%s\n' 'Working (2h)' | fm_composer_codex_working_elapsed)
-  [ "$out" = "7200 3600" ] || fail "hour-only row must be 7200s at 3600s resolution, got '$out'"
+  out=$(printf '%s\n' '• Working (1m 08s • esc to interrupt)' | fm_composer_codex_working_elapsed)
+  [ "$out" = "68 1" ] || fail "zero-padded 08 seconds must parse as decimal, got '$out'"
+  out=$(printf '%s\n' '• Working (1m 09s • esc to interrupt)' | fm_composer_codex_working_elapsed)
+  [ "$out" = "69 1" ] || fail "zero-padded 09 seconds must parse as decimal, got '$out'"
+  out=$(printf '%s\n' 'Working (1h 08m 09s)' | fm_composer_codex_working_elapsed)
+  [ "$out" = "4089 1" ] || fail "zero-padded hour row must parse as decimal, got '$out'"
   pass "fm_composer_codex_working_elapsed: Codex Working rows parse to seconds and display resolution"
 }
 
@@ -765,6 +769,12 @@ test_codex_working_elapsed_ignores_non_status_text() {
   [ "$rc" -ne 0 ] || fail "transcript prose mentioning the row must not parse, got '$out'"
   out=$(printf '%s\n' 'Working on the repo' | fm_composer_codex_working_elapsed) && rc=0 || rc=$?
   [ "$rc" -ne 0 ] || fail "Working without a duration must not parse, got '$out'"
+  out=$(printf '%s\n' 'Working (2h)' | fm_composer_codex_working_elapsed) && rc=0 || rc=$?
+  [ "$rc" -ne 0 ] || fail "an hour-only row must not parse, got '$out'"
+  out=$(printf '%s\n' 'Working (1h 05m)' | fm_composer_codex_working_elapsed) && rc=0 || rc=$?
+  [ "$rc" -ne 0 ] || fail "an hour row without seconds must not parse, got '$out'"
+  out=$(printf '%s\n' '• Working (5m 03s • esc to inte' | fm_composer_codex_working_elapsed) && rc=0 || rc=$?
+  [ "$rc" -ne 0 ] || fail "a row cut off before its closing paren must not parse, got '$out'"
   out=$(printf '%s\n' \
     'quoted earlier: Working (9m)' \
     '• Working (1m 02s • esc to interrupt)' | fm_composer_codex_working_elapsed)

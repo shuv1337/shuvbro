@@ -1480,7 +1480,8 @@ _fm_composer_pi_verdict() {  # <screen> <styled> <has_identity> <identity>
 # status row. Plain pane text on stdin (the same capture the watcher hashes).
 # Prints "<seconds> <grain>" for the LAST matching row, or returns 1.
 # Grain is the row's display resolution in seconds: 1 when seconds are shown,
-# 60 for a minute-only row, 3600 for an hour-only row.
+# 60 for a minute-only row. Any other shape, and a row cut off before its
+# closing paren, does not match.
 # The row is the live status indicator above the composer, rendered as
 # "Working (<elapsed> • esc to interrupt)" with elapsed "Ns", "Nm Ns", or
 # "Nh Nm Ns" (codex-cli 0.160.0; a minute-only "Working (Nm)" is accepted too).
@@ -1488,7 +1489,7 @@ _fm_composer_pi_verdict() {  # <screen> <styled> <has_identity> <identity>
 # mentions the row do not match. This function does not decide busy; the
 # observation contract is owned by bin/fm-busy-lib.sh.
 fm_composer_codex_working_elapsed() {
-  local line plain trimmed prefix inner rest seconds grain unit_seconds
+  local line plain trimmed prefix inner rest seconds grain hours unit_seconds
   local best_seconds='' best_grain='' matched=1
   while IFS= read -r line || [ -n "$line" ]; do
     plain=$(printf '%s\n' "$line" | fm_composer_strip_ansi)
@@ -1504,33 +1505,37 @@ fm_composer_codex_working_elapsed() {
       continue
     fi
     inner=${trimmed#*Working (}
-    inner=${inner%%)*}
-    [ "$inner" != "$trimmed" ] || continue
+    case "$inner" in
+      *')'*) inner=${inner%%)*} ;;
+      *) continue ;;
+    esac
     rest=$inner
     seconds=0
     grain=0
+    hours=0
     if [[ "$rest" =~ ^([0-9]{1,6})h(.*)$ ]]; then
       unit_seconds=${BASH_REMATCH[1]}
-      seconds=$((seconds + unit_seconds * 3600))
-      grain=3600
+      seconds=$((seconds + 10#$unit_seconds * 3600))
+      hours=1
       rest=${BASH_REMATCH[2]}
       rest=${rest#"${rest%%[![:space:]]*}"}
     fi
     if [[ "$rest" =~ ^([0-9]{1,6})m(.*)$ ]]; then
       unit_seconds=${BASH_REMATCH[1]}
-      seconds=$((seconds + unit_seconds * 60))
+      seconds=$((seconds + 10#$unit_seconds * 60))
       grain=60
       rest=${BASH_REMATCH[2]}
       rest=${rest#"${rest%%[![:space:]]*}"}
     fi
     if [[ "$rest" =~ ^([0-9]{1,6})s(.*)$ ]]; then
       unit_seconds=${BASH_REMATCH[1]}
-      seconds=$((seconds + unit_seconds))
+      seconds=$((seconds + 10#$unit_seconds))
       grain=1
       rest=${BASH_REMATCH[2]}
       rest=${rest#"${rest%%[![:space:]]*}"}
     fi
     [ "$grain" -gt 0 ] || continue
+    [ "$hours" -eq 0 ] || [ "$grain" -eq 1 ] || continue
     # Status furniture may follow the duration. Prose may not.
     if [[ "$rest" =~ ^[A-Za-z0-9] ]]; then
       continue
