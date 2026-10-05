@@ -241,7 +241,13 @@ fm_pane_is_busy() {  # <target> [harness]
 # transition evidence could mark an undelivered message delivered.
 fm_tmux_submit_enter_core() {  # <target> <retries> <enter-sleep> [baseline-idle]
   local target=$1 retries=$2 sleep_s=$3 baseline_idle=${4:-} i=0 j state busy_state
+  local dismiss=${FM_CONTROL_EXIT_DISMISS_KEY:-}
   while :; do
+    # Codex exit: dismiss the slash popup before Enter. See
+    # fm_control_exit_dismiss_key. Unset for every other submission.
+    if [ -n "$dismiss" ]; then
+      tmux send-keys -t "$target" "$dismiss" 2>/dev/null || true
+    fi
     tmux send-keys -t "$target" Enter 2>/dev/null || true
     sleep "$sleep_s"
     state=$(fm_tmux_composer_state "$target")

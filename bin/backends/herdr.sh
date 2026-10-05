@@ -78,9 +78,10 @@ FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 # shellcheck source=bin/fm-composer-lib.sh
 . "$FM_BACKEND_HERDR_ROOT/bin/fm-composer-lib.sh"
 
-# Shuvcode process identity, for the opencode-v2 process-based agent state.
-# shellcheck source=bin/fm-shuvcode-lib.sh
-. "$FM_BACKEND_HERDR_ROOT/bin/fm-shuvcode-lib.sh"
+# Verified harness process identity (including the Cursor and shuvcode
+# owners), for the process-based agent state.
+# shellcheck source=bin/fm-session-lock-lib.sh
+. "$FM_BACKEND_HERDR_ROOT/bin/fm-session-lock-lib.sh"
 
 # Shared, backend-neutral normalized-transition shape and the single-owner
 # status->action policy table (bin/fm-transition-lib.sh). This adapter's event
@@ -1296,6 +1297,19 @@ fm_backend_herdr_pid_is_bare_shell() {  # <ps-bin> <pid>
   return 1
 }
 
+# fm_backend_herdr_pid_is_treehouse: true only when <pid>'s command name or
+# argv[0] is exactly the treehouse executable.
+fm_backend_herdr_pid_is_treehouse() {  # <ps-bin> <pid>
+  local comm args
+  comm=$("$1" -p "$2" -o comm= 2>/dev/null | tr -d '[:space:]')
+  comm=${comm##*/}
+  [ "$comm" = treehouse ] && return 0
+  args=$("$1" -p "$2" -o args= 2>/dev/null) || return 1
+  args=${args#"${args%%[![:space:]]*}"}
+  args=${args%%[[:space:]]*}
+  [ "${args##*/}" = treehouse ]
+}
+
 # fm_backend_herdr_pane_idle_shell_pid: print the shell pid of <pane-id> only
 # when the exact pane provably holds one lone idle recognized shell: pane
 # process-info agrees on the pane id, the shell pid is both the foreground
@@ -1303,6 +1317,9 @@ fm_backend_herdr_pid_is_bare_shell() {  # <ps-bin> <pid>
 # and argv0 resolve to the same recognized shell, the operating-system
 # process table shows exactly that one shell row with no child process, and
 # the shell sits in a sleeping or idle state.
+# Agent-state callers may pass allow-descendant: a lone interactive shell in
+# its own foreground group may descend from the pane shell through exactly one
+# lone Treehouse wrapper process. This never authorizes pane-death cleanup.
 # An idle interactive shell transiently hosts short-lived prompt helpers
 # (verified on the real 0.7.5 lab: a workspace.move relayout makes zsh redraw
 # its prompt, spawning starship as a second foreground process for a few
@@ -1311,10 +1328,10 @@ fm_backend_herdr_pid_is_bare_shell() {  # <ps-bin> <pid>
 # fails every sample and still refuses.
 # This is the single owner of the idle-shell proof; the session-start
 # projection cleanup and every pane-death close path both rely on it.
-fm_backend_herdr_pane_idle_shell_pid() {  # <session> <pane-id>
+fm_backend_herdr_pane_idle_shell_pid() {  # <session> <pane-id> [allow-descendant]
   local attempt=0 max_attempts=${FM_BACKEND_HERDR_IDLE_SHELL_PROOF_POLLS:-10}
   while :; do
-    if fm_backend_herdr_pane_idle_shell_sample "$1" "$2"; then
+    if fm_backend_herdr_pane_idle_shell_sample "$1" "$2" "${3:-}"; then
       return 0
     fi
     attempt=$((attempt + 1))
@@ -1326,9 +1343,9 @@ fm_backend_herdr_pane_idle_shell_pid() {  # <session> <pane-id>
 # fm_backend_herdr_pane_idle_shell_sample: one strict instantaneous
 # observation for fm_backend_herdr_pane_idle_shell_pid, which owns the proof
 # contract and the settle retry.
-fm_backend_herdr_pane_idle_shell_sample() {  # <session> <pane-id>
+fm_backend_herdr_pane_idle_shell_sample() {  # <session> <pane-id> [allow-descendant]
   local session=$1 pane=$2 info shell_pid foreground_pgid count
-  local process_pid name argv0 shell_name rows stat ps_bin
+  local process_pid name argv0 shell_name rows stat ps_bin wrapper
   info=$(fm_backend_herdr_cli "$session" pane process-info --pane "$pane" 2>/dev/null) || return 1
   printf '%s' "$info" | jq -e --arg pane "$pane" '
     .result.type == "pane_process_info"
@@ -1338,13 +1355,15 @@ fm_backend_herdr_pane_idle_shell_sample() {  # <session> <pane-id>
     '.result.process_info.shell_pid | select(type == "number" and . > 1) | floor' 2>/dev/null) || return 1
   foreground_pgid=$(printf '%s' "$info" | jq -er \
     '.result.process_info.foreground_process_group_id | select(type == "number" and . > 1) | floor' 2>/dev/null) || return 1
-  [ "$foreground_pgid" = "$shell_pid" ] || return 1
   count=$(printf '%s' "$info" | jq -er \
     '.result.process_info.foreground_processes | select(type == "array") | length' 2>/dev/null) || return 1
   [ "$count" -eq 1 ] || return 1
   process_pid=$(printf '%s' "$info" | jq -er \
     '.result.process_info.foreground_processes[0].pid | select(type == "number") | floor' 2>/dev/null) || return 1
-  [ "$process_pid" = "$shell_pid" ] || return 1
+  [ "$process_pid" = "$foreground_pgid" ] || return 1
+  if [ "${3:-}" != allow-descendant ]; then
+    [ "$process_pid" = "$shell_pid" ] || return 1
+  fi
   name=$(printf '%s' "$info" | jq -er \
     '.result.process_info.foreground_processes[0].name | select(type == "string" and length > 0)' 2>/dev/null) || return 1
   argv0=$(printf '%s' "$info" | jq -er '
@@ -1357,18 +1376,41 @@ fm_backend_herdr_pane_idle_shell_sample() {  # <session> <pane-id>
   argv0=${argv0##*/}
   [ "$argv0" = "$shell_name" ] || return 1
   case "$shell_name" in sh|bash|zsh|dash|ksh|fish) ;; *) return 1 ;; esac
+  if [ "$process_pid" != "$shell_pid" ]; then
+    # The wrapper's login shell is interactive, not a shell running a script
+    # or command. Require argument boundaries rather than guessing from name.
+    printf '%s' "$info" | jq -e '
+      .result.process_info.foreground_processes[0].argv
+      | select(type == "array" and length > 0)
+      | .[1:] | all(. == "-l" or . == "-i" or . == "-il" or . == "-li"
+        or . == "--login" or . == "--interactive")
+    ' >/dev/null 2>&1 || return 1
+  fi
 
   ps_bin=${FM_HERDR_PS_BIN:-ps}
   command -v "$ps_bin" >/dev/null 2>&1 || return 1
   rows=$("$ps_bin" -axo pid=,ppid= 2>/dev/null) || return 1
-  printf '%s\n' "$rows" | awk -v shell="$shell_pid" '
-    $1 == shell { found++ }
-    $2 == shell { child++ }
-    END { exit(found == 1 && child == 0 ? 0 : 1) }
-  ' || return 1
-  stat=$("$ps_bin" -p "$shell_pid" -o stat= 2>/dev/null | tr -d '[:space:]') || return 1
+  # A Treehouse wrapper may leave its interactive login shell in a child
+  # process group. Only the agent-state probe opts in to this ancestry proof,
+  # bounded to exactly pane shell -> treehouse -> lone shell; pane-death
+  # cleanup still requires the original bare pane shell.
+  wrapper=$(printf '%s\n' "$rows" | awk -v shell="$shell_pid" -v foreground="$process_pid" '
+    { parent[$1] = $2; seen[$1]++; children[$2]++ }
+    END {
+      if (seen[shell] != 1 || seen[foreground] != 1 || children[foreground] != 0) exit 1
+      if (foreground == shell) { print ""; exit 0 }
+      wrapper = parent[foreground]
+      if (wrapper <= 1 || wrapper == shell || seen[wrapper] != 1) exit 1
+      if (parent[wrapper] != shell || children[wrapper] != 1 || children[shell] != 1) exit 1
+      print wrapper
+    }
+  ') || return 1
+  if [ -n "$wrapper" ]; then
+    fm_backend_herdr_pid_is_treehouse "$ps_bin" "$wrapper" || return 1
+  fi
+  stat=$("$ps_bin" -p "$process_pid" -o stat= 2>/dev/null | tr -d '[:space:]') || return 1
   case "$stat" in S*|I*) ;; *) return 1 ;; esac
-  printf '%s\n' "$shell_pid"
+  printf '%s\n' "$process_pid"
 }
 
 # fm_backend_herdr_projection_order_best_effort: place the exact workspace id
@@ -2014,8 +2056,8 @@ fm_backend_herdr_explicit_close_pane_confirmed() {  # <session> <pane_id>
 #              change as "the pane exists"). The caller must fail safe toward
 #              refusal here, never toward closing - this is the conservative
 #              backstop the husk check depends on.
-fm_backend_herdr_pane_agent_state() {  # <session> <pane_id>
-  local session=$1 pane_id=$2 out code presence status
+fm_backend_herdr_pane_agent_state() {  # <session> <pane_id> [harness]
+  local session=$1 pane_id=$2 harness=${3:-} out code presence status registration process_state
   presence=$(fm_backend_herdr_pane_presence_state "$session" "$pane_id")
   if [ "$presence" != present ]; then
     case "$presence" in
@@ -2030,7 +2072,27 @@ fm_backend_herdr_pane_agent_state() {  # <session> <pane_id>
     [ "$code" = "agent_not_found" ] && printf 'no-agent' || printf 'unknown'
     return 0
   fi
+  # A switch away from shuvcode cannot use its surviving registration as
+  # proof of the replacement. Until Herdr registers the new adapter, only the
+  # requested adapter's own foreground process proves it up and only the idle
+  # shell proves it gone; a still-running shuvcode is not the requested
+  # replacement. Omitted-harness callers retain the legacy registry view.
+  # A matching registration can also report unknown while the replacement
+  # starts; use the same positive foreground proof rather than calling that
+  # valid API response unreadable.
+  registration=$(printf '%s' "$out" | jq -r '.result.agent.agent // empty' 2>/dev/null)
   status=$(printf '%s' "$out" | jq -r '.result.agent.agent_status // empty' 2>/dev/null)
+  if [ -n "$harness" ] && { [ "$registration" = shuvcode ] || \
+      { [ "$registration" = "$harness" ] && [ "$status" = unknown ]; }; }; then
+    process_state=$(fm_backend_herdr_pane_process_agent_state "$session" "$pane_id" "$harness")
+    case "$process_state" in
+      dead) printf 'no-agent' ;;
+      alive) printf 'live' ;;
+      ambiguous) printf 'ambiguous' ;;
+      *) printf 'unknown' ;;
+    esac
+    return 0
+  fi
   case "$status" in
     working|idle|done|blocked) printf 'live' ;;
     *) printf 'unknown' ;;
@@ -2041,34 +2103,73 @@ fm_backend_herdr_pane_agent_state() {  # <session> <pane_id>
 # states (dead, no-agent) fm_backend_herdr_pane_agent_state can positively
 # confirm; live and unknown both refuse (1), so an inconclusive read never
 # licenses closing anything. Restored-layout recovery depends on this
-# fail-safe-toward-refusal behavior.
-fm_backend_herdr_tab_is_husk() {  # <session> <pane_id>
+# fail-safe-toward-refusal behavior. A bound recorded harness selects the
+# recovery-grade classifier, including shuvcode's foreground evidence.
+fm_backend_herdr_tab_is_husk() {  # <session> <pane_id> [recorded-harness]
+  if [ -n "${3:-}" ]; then
+    case "$(fm_backend_herdr_agent_state "$1:$2" "$3")" in
+      dead|missing) return 0 ;;
+      *) return 1 ;;
+    esac
+  fi
   case "$(fm_backend_herdr_pane_agent_state "$1" "$2")" in
     dead|no-agent) return 0 ;;
     *) return 1 ;;
   esac
 }
 
+# fm_backend_herdr_adapter_process_matches: true only when one foreground
+# process carries <harness>'s own identity, from the verified owners:
+# opencode-v2 and cursor delegate to bin/fm-shuvcode-lib.sh and
+# bin/fm-cursor-lib.sh; every other adapter needs its exact name as the
+# command name or argv[0] basename (pi also its launcher names), or
+# fm_harness_path_name naming exactly that adapter from the command path,
+# argv[0], or a node interpreter's script path.
+fm_backend_herdr_adapter_process_matches() {  # <harness> <name> <argv0> <args>
+  local harness=$1 comm=$2 argv0=${3:-} args=${4:-} base argv0_base script found=
+  case "$harness" in
+    opencode-v2) fm_shuvcode_process_matches "$comm" "$args" "$argv0"; return ;;
+    cursor) fm_cursor_process_matches "$comm" "$args" "$argv0"; return ;;
+  esac
+  base=${comm##*/}; base=${base#-}
+  argv0_base=${argv0##*/}; argv0_base=${argv0_base#-}
+  case "$base|$argv0_base" in
+    "$harness|"*|*"|$harness") found=$harness ;;
+    pi-launcher\|*|Pi\|*|*\|pi-launcher|*\|Pi) found=pi ;;
+    *)
+      if ! found=$(fm_harness_path_name "$comm") && ! found=$(fm_harness_path_name "$argv0"); then
+        found=
+        case "$base" in
+          node|node-*|node[0-9]*|nodejs|MainThread)
+            read -r _ script _ <<<"$args"
+            found=$(fm_harness_path_name "${script:-}") || found=
+            ;;
+        esac
+      fi
+      ;;
+  esac
+  [ -n "$found" ] || return 1
+  case "$harness" in
+    pi|pi-signed) case "$found" in pi|pi-signed) return 0 ;; esac ;;
+    *) [ "$found" = "$harness" ] && return 0 ;;
+  esac
+  return 1
+}
+
 # fm_backend_herdr_pane_process_agent_state: classify the exact pane's
 # FOREGROUND processes for one adapter whose Herdr registration cannot prove
 # liveness, printing alive|dead|ambiguous|unreadable.
 #   alive      - a foreground process carries the adapter's own structural
-#                identity (opencode-v2: bin/fm-shuvcode-lib.sh, matching the
-#                compiled binary or its node launcher, never the shared
-#                `--service` process, which never runs in a pane anyway).
+#                identity (fm_backend_herdr_adapter_process_matches).
 #   dead       - fm_backend_herdr_pane_idle_shell_pid proves the pane holds
 #                only its lone idle shell, with that proof's settle retry.
 #   ambiguous  - anything else, including a wrapper whose TUI child has not
 #                started or has already gone.
 #   unreadable - the read failed or its pane id or process list did not
 #                round-trip.
-# Unsupported adapters print unreadable rather than guessing an identity.
+# An adapter without a structural identity can never read alive.
 fm_backend_herdr_pane_process_agent_state() {  # <session> <pane-id> <harness>
   local session=$1 pane=$2 harness=$3 info rows name argv0 args
-  case "$harness" in
-    opencode-v2) ;;
-    *) printf 'unreadable'; return 0 ;;
-  esac
   info=$(fm_backend_herdr_cli "$session" pane process-info --pane "$pane" 2>/dev/null) \
     || { printf 'unreadable'; return 0; }
   printf '%s' "$info" | jq -e --arg pane "$pane" '
@@ -2084,14 +2185,14 @@ fm_backend_herdr_pane_process_agent_state() {  # <session> <pane-id> <harness>
     | @tsv' 2>/dev/null) || { printf 'unreadable'; return 0; }
   while IFS=$'\t' read -r name argv0 args; do
     [ -n "$name$argv0" ] || continue
-    if fm_shuvcode_process_matches "$name" "$args" "$argv0"; then
+    if fm_backend_herdr_adapter_process_matches "$harness" "$name" "$argv0" "$args"; then
       printf 'alive'
       return 0
     fi
   done <<EOF
 $rows
 EOF
-  if fm_backend_herdr_pane_idle_shell_pid "$session" "$pane" >/dev/null; then
+  if fm_backend_herdr_pane_idle_shell_pid "$session" "$pane" allow-descendant >/dev/null; then
     printf 'dead'
   else
     printf 'ambiguous'
@@ -2109,6 +2210,9 @@ EOF
 # relaunch gate), so that registration can neither prove the agent gone nor,
 # after a relaunch, prove a new one came up. Its pane is classified by
 # fm_backend_herdr_pane_process_agent_state instead.
+# A requested replacement adapter also rejects a surviving shuvcode
+# registration: only its own foreground process or a new registration proves
+# the replacement up.
 fm_backend_herdr_agent_state() {  # <target> [harness]
   local target=$1 harness=${2:-}
   fm_backend_herdr_parse_target "$target" || { printf 'unreadable'; return 0; }
@@ -2120,10 +2224,11 @@ fm_backend_herdr_agent_state() {  # <target> [harness]
     esac
     return 0
   fi
-  case "$(fm_backend_herdr_pane_agent_state "$FM_BACKEND_HERDR_SESSION" "$FM_BACKEND_HERDR_PANE")" in
+  case "$(fm_backend_herdr_pane_agent_state "$FM_BACKEND_HERDR_SESSION" "$FM_BACKEND_HERDR_PANE" "$harness")" in
     dead) printf 'missing' ;;
     no-agent) printf 'dead' ;;
     live) printf 'alive' ;;
+    ambiguous) printf 'ambiguous' ;;
     *) printf 'unreadable' ;;
   esac
 }
@@ -2182,7 +2287,7 @@ fm_backend_herdr_agent_alive() {  # <target>
 # 4th arg, so this function never even queries for a prune candidate in that
 # case. Echoes "<tab_id> <pane_id>" on success.
 fm_backend_herdr_create_task() {  # <container> <label> <cwd> <seeded_default_tab_id>
-  local container=$1 label=$2 cwd=$3 seeded_tab_id=${4:-} session wsid list dup_tabs dup dup_pane dup_tab_ids out tab_id pane_id remaining_dup_tabs
+  local container=$1 label=$2 cwd=$3 seeded_tab_id=${4:-} session wsid list dup_tabs dup dup_pane dup_tab_ids out tab_id pane_id remaining_dup_tabs recorded_meta recorded_harness recorded_target
   session=${container%%:*}
   wsid=${container#*:}
   list=$(fm_backend_herdr_cli "$session" tab list --workspace "$wsid" 2>/dev/null) || return 1
@@ -2195,7 +2300,15 @@ fm_backend_herdr_create_task() {  # <container> <label> <cwd> <seeded_default_ta
     while IFS= read -r dup; do
       [ -n "$dup" ] || continue
       dup_pane=$(fm_backend_herdr_pane_for_tab "$session" "$wsid" "$dup")
-      if [ -z "$dup_pane" ] || ! fm_backend_herdr_tab_is_husk "$session" "$dup_pane"; then
+      recorded_harness=
+      recorded_meta="${FM_STATE_OVERRIDE:-$FM_HOME/state}/${label#fm-}.meta"
+      if [ -f "$recorded_meta" ]; then
+        recorded_target=$(fm_backend_target_of_meta "$recorded_meta")
+        if [ "$recorded_target" = "$session:$dup_pane" ]; then
+          recorded_harness=$(sed -n 's/^harness=//p' "$recorded_meta")
+        fi
+      fi
+      if [ -z "$dup_pane" ] || ! fm_backend_herdr_tab_is_husk "$session" "$dup_pane" "$recorded_harness"; then
         echo "error: herdr tab '$label' already exists in workspace $wsid (session $session)" >&2
         return 1
       fi
@@ -2988,6 +3101,11 @@ fm_backend_herdr_send_text_submit() {  # <target> <text> <retries> <enter-sleep>
     footer_baseline=$(fm_backend_herdr_rendered_busy_state "$target")
   fi
   while :; do
+    # Codex exit: dismiss the slash popup before Enter. See
+    # fm_control_exit_dismiss_key. Unset for every other submission.
+    if [ -n "${FM_CONTROL_EXIT_DISMISS_KEY:-}" ]; then
+      fm_backend_herdr_send_key "$target" "$FM_CONTROL_EXIT_DISMISS_KEY" || true
+    fi
     if fm_backend_herdr_send_key "$target" Enter; then
       enter_sent=1
     elif [ "$enter_sent" -eq 0 ]; then
@@ -3463,7 +3581,7 @@ fm_backend_herdr_clear_transition() {  # <state_dir> <window>
 # and 2 when the event path is unusable (not capable, socket unresolved, reader
 # failed to run/subscribe - the caller sleeps the budget itself, the fail-closed
 # backstop). See the header block above for the full contract.
-fm_backend_herdr_wait_transition() {  # <session> <timeout_secs> <state_dir> <pane_window...>
+fm_backend_herdr_wait_transition() (  # <session> <timeout_secs> <state_dir> <pane_window...>
   local session=$1 timeout=$2 state=$3
   shift 3
   local windows=("$@")
@@ -3496,19 +3614,23 @@ fm_backend_herdr_wait_transition() {  # <session> <timeout_secs> <state_dir> <pa
   done < <(fm_backend_herdr_event_reader_cmd)
   [ "${#reader[@]}" -gt 0 ] || return 2
 
-  local fifo_dir fifo reader_pid line ws status agent raw record hit rc=1 reader_rc=0
+  local fifo_dir='' fifo reader_pid='' line ws status agent raw record hit rc=1 reader_rc=0
+  # Keep traps local to this wait. The watcher terminates the entire reader
+  # group; this shell reaps its direct reader and removes the FIFO on signals
+  # as well as ordinary returns, without replacing its caller's EXIT trap.
+  trap '[ -z "$reader_pid" ] || kill "$reader_pid" 2>/dev/null || true
+        [ -z "$reader_pid" ] || wait "$reader_pid" 2>/dev/null || true
+        exec 9<&-
+        [ -z "$fifo_dir" ] || rm -rf "$fifo_dir"' EXIT
+  trap 'exit 2' HUP INT TERM
   fifo_dir=$(mktemp -d "${TMPDIR:-/tmp}/fm-herdr-eventwait.XXXXXX") || return 2
   fifo="$fifo_dir/events"
   if ! mkfifo "$fifo" 2>/dev/null; then
-    rm -rf "$fifo_dir" 2>/dev/null || true
     return 2
   fi
   "${reader[@]}" "$sock" "$timeout" "${pane_ids[@]}" > "$fifo" 2>/dev/null &
   reader_pid=$!
   if ! exec 9< "$fifo"; then
-    kill "$reader_pid" 2>/dev/null || true
-    wait "$reader_pid" 2>/dev/null || true
-    rm -rf "$fifo_dir" 2>/dev/null || true
     return 2
   fi
   if ! IFS= read -r -u 9 line || [ "$line" != "@subscribed" ]; then
@@ -3568,10 +3690,9 @@ fm_backend_herdr_wait_transition() {  # <session> <timeout_secs> <state_dir> <pa
   # failure, exit non-zero -> return 2, caller sleeps and counts toward the
   # runtime-disable threshold).
   wait "$reader_pid" 2>/dev/null || reader_rc=$?
-  exec 9<&-
-  rm -rf "$fifo_dir" 2>/dev/null || true
+  reader_pid=
   [ "$rc" -eq 0 ] && return 0
   [ "$rc" -eq 2 ] && return 2
   [ "$reader_rc" -eq 0 ] && return 1
   return 2
-}
+)

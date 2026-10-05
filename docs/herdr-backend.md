@@ -282,6 +282,10 @@ The generic Herdr agent-liveness probe reuses the same classifier.
 A structurally gone pane becomes `missing`, a restored agent-less shell becomes `dead`, a registered agent becomes `alive`, and an unexpected read becomes `unreadable`.
 Unlike tmux process-name inspection, native registration can classify Pi without guessing from a generic interpreter name.
 opencode-v2 is the exception: its shuvcode hook registration outlives the TUI, so a caller that names that harness gets a pane classified from its foreground processes instead, `alive` for a shuvcode process and `dead` only through the idle-shell proof; [agent control](agent-control.md) owns how that endpoint fact combines with the native session.
+The idle-shell proof here also accepts a lone interactive login shell in its own foreground process group under exactly one `treehouse` wrapper below the pane shell, the shape a Treehouse-launched worker leaves after exit; any other intermediate or depth stays ambiguous, and pane-death cleanup still requires the bare pane shell.
+A caller that names any other harness while the pane still carries a shuvcode registration gets the same process classification for that harness's own identity, so a stale registration never proves a replacement up; until Herdr registers the new adapter, only its foreground process reads `alive`.
+The same foreground proof handles a matching adapter registration whose status is `unknown` during startup; an unrelated process stays ambiguous, and failed API reads are not treated as positive liveness.
+Watch, doorbell, crew-state, legacy teardown, and the restart-husk check pass the task's recorded harness so an exited opencode-v2 pane reads as agent-free there too.
 
 The session-start sweep uses this probe.
 Mid-session secondmate agent-process liveness is not implemented because idle secondmates are deliberately exempt from stale-pane escalation and need a separate periodic identity signal.
@@ -296,8 +300,9 @@ The watcher maps the pane back to the task and skips secondmate endpoints, decla
 The push path only shortens latency.
 Polling runs every cycle and remains the permanent fallback when protocol 16, the event schema, Python, connection, subscription, or repeated reader execution is unavailable.
 There is still one watcher process; the event reader is a bounded child of that watcher.
+HUP, INT, and TERM interrupt the event wait promptly; watcher cleanup terminates its private reader process group and removes the captured record, while the backend reaps the socket reader and removes its FIFO.
 
-`tests/fm-backend-herdr-eventwait-smoke.test.sh`, `tests/fm-transition-lib.test.sh`, and `tests/fm-supervision-events.test.sh` cover capability, subscribe-then-reconcile ordering, dedupe, exemptions, and polling fallback.
+`tests/fm-backend-herdr-eventwait-smoke.test.sh`, `tests/fm-transition-lib.test.sh`, and `tests/fm-supervision-events.test.sh` cover capability, subscribe-then-reconcile ordering, dedupe, exemptions, polling fallback, and signal shutdown through the portable socket fixture in `tests/fm-backend-herdr-eventwait.test.py`.
 
 ## Away-mode supervisor support
 

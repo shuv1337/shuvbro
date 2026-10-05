@@ -692,6 +692,44 @@ test_watcher_dead_pane_ignores_stale_busy_state() {
   pass "watcher: dead-pane recovery overrides stale busy state"
 }
 
+test_watcher_exited_herdr_v2_skips_stale_registration() {
+  local dir state out log pid rec
+  dir=$(setup_watch_case exited-herdr-v2)
+  state="$dir/state"; out="$dir/watch.out"; log="$dir/send.log"; : > "$log"
+  printf 'window=fm-lab-inbox:w1:p2\nbackend=herdr\nharness=opencode-v2\nkind=ship\n' > "$state/t1.meta"
+  cat > "$dir/fakebin/herdr" <<'SH'
+#!/usr/bin/env bash
+case "$1 $2" in
+  'status --json') printf '{"client":{"version":"0.9.1","protocol":14},"server":{"running":true}}\n' ;;
+  'pane get') printf '{"result":{"pane":{"pane_id":"w1:p2"}}}\n' ;;
+  'pane read') printf 'idle shell\n' ;;
+  'pane process-info') printf '{"result":{"type":"pane_process_info","process_info":{"pane_id":"w1:p2","shell_pid":22712,"foreground_process_group_id":22712,"foreground_processes":[{"pid":22712,"name":"zsh","argv":["-zsh"]}]}}}\n' ;;
+  'agent get') printf '{"result":{"agent":{"agent":"shuvcode","agent_status":"idle"}}}\n' ;;
+  'pane send-text'|'pane send-keys') printf '%s\n' "$*" >> "$FM_SEND_LOG" ;;
+  *) exit 1 ;;
+esac
+SH
+  cat > "$dir/fakebin/ps-proof" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  '-axo pid=,ppid=') printf '1 0\n22712 1\n' ;;
+  '-p 22712 -o stat=') printf 'Ss\n' ;;
+  *) exit 1 ;;
+esac
+SH
+  chmod +x "$dir/fakebin/herdr" "$dir/fakebin/ps-proof"
+  rec=$(inbox_lib "$state" fm_task_inbox_write "$state" t1 "please continue")
+  age_path "$rec"
+  watch_bg "$state" "$dir/fakebin" "$out" FM_SEND_LOG="$log" \
+    FM_HERDR_PS_BIN="$dir/fakebin/ps-proof" FM_TASK_INBOX_RING_MAX=99
+  pid=$!
+  wait_watcher_gone "$pid" || { kill "$pid" 2>/dev/null; fail "the watcher did not surface the exited Herdr worker"; }
+  [ ! -s "$log" ] || fail "the watcher typed into the exited Herdr worker's shell"
+  grep -qF 'agent has exited' "$state/.wake-queue" || fail "stale Herdr registration hid the dead-pane recovery path"
+  [ -f "$rec" ] || fail "the instruction must remain durable for recovery"
+  pass "watcher: recorded opencode-v2 defeats a stale Herdr registration without ringing the shell"
+}
+
 test_write_is_durable_and_exact
 test_doorbell_is_a_shell_noop
 test_doorbell_rejects_terminal_controls
@@ -712,3 +750,4 @@ test_watcher_surfaces_unwritable_ladder
 test_watcher_escalates_once_after_budget
 test_watcher_dead_pane_escalates_once_without_ringing
 test_watcher_dead_pane_ignores_stale_busy_state
+test_watcher_exited_herdr_v2_skips_stale_registration

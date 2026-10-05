@@ -316,6 +316,7 @@ try {
  const result=spawnSync(root+'/bin/fm-supervision-instructions.sh',['--harness','opencode-v2'],{encoding:'utf8',env:{...process.env,OPENCODE_SESSION_ID:r.sessionID,FM_ROOT_OVERRIDE:root,FM_HOME:home,FM_STATE_OVERRIDE:r.state,FM_CONFIG_OVERRIDE:r.config}});
  assert.equal(result.status,0,result.stderr);
  assert.match(result.stdout,/plugin already owns watcher continuity/);
+ assert.match(result.stdout,/delivers lead prompts as steers/);
  assert.doesNotMatch(result.stdout,/INACTIVE/);
  console.log('activated linked external-home lead retains native protocol');
 } finally {owner.publish('retire',r);owner.publish('cleanup-test-namespace',{});}

@@ -988,8 +988,8 @@ Each file is local and gitignored and is never inherited by a secondmate home, s
 | File | Environment | Holds |
 | --- | --- | --- |
 | `config/board-port` | `FM_BOARD_PORT` | Loopback port, default `8795`; `0` picks a free port. |
-| `config/board-hosts` | none | One bare host name per line, beyond the always-accepted loopback names, that the board may be reached by, such as this machine's tailnet name. |
-| `config/board-logins` | none | One Tailscale login per line; when present, a request is served only with an allowlisted `Tailscale-User-Login` header or as a direct loopback request with no proxy headers. |
+| `config/board-hosts` | none | One bare host name per line, beyond the always-accepted loopback names, that the board may be reached by, such as this machine's tailnet name; `serve` refuses to start when it lists a name and `config/board-logins` lists none. |
+| `config/board-logins` | none | One Tailscale login per line; a request is served only with an allowlisted `Tailscale-User-Login` header or as a direct loopback request with no proxy headers, so without it only direct local requests are served. |
 
 Blank lines and `#` comments are ignored in all three, and a malformed host name, login, or port stops `serve` naming the file to fix.
 `FM_BOARD_INTERVAL` (default 10, 2 to 300) sets how many seconds pass between rebuilds of the board's data.
@@ -1021,7 +1021,7 @@ FM_CONFIG_OVERRIDE=      # alternate config dir, mainly for tests
 FM_PROC_ROOT_OVERRIDE=   # alternate /proc root for Linux process-identity reads in fm-wake-lib.sh and fm-teardown.sh, mainly for tests
 FM_BACKEND=             # optional runtime backend override for new spawns; tmux/herdr/zellij/orca/cmux support ship/scout spawns, codex-app is not accepted
 FM_TRACE_CONTEXT=       # optional trace-context override; see "Trace context propagation"
-FM_TASK_ID=             # internal task-worker marker fm-spawn.sh exports into ship and scout panes, never set by hand; bin/fm-test-run.sh refuses to execute in the repository primary checkout while it is set
+FM_TASK_ID=             # internal task-worker marker fm-spawn.sh exports into ship and scout panes, never set by hand; bin/fm-test-run.sh refuses to execute in the repository primary checkout while it is set; while set, the sharkctl shim those panes have first on PATH refuses notify and ask (bin/fm-sharkctl-guard.sh)
 HERDR_SESSION=default  # herdr-only: named session for normal backend ops; not enough for destructive cleanup (docs/herdr-backend.md)
 FM_BACKEND_HERDR_SUBMIT_POLLS=6  # herdr-only: agent-state samples spread across each Enter attempt's budget when confirming a submit (docs/herdr-backend.md "Current transport behavior")
 FM_BACKEND_HERDR_SUBMIT_MIN_SLEEP=0.6  # herdr-only: minimum per-Enter confirmation budget before polling agent-state after an idle baseline

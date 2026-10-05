@@ -90,7 +90,9 @@ export function createAdmissionJournal(paths, sessionID, admit, report = console
         if (acknowledged(value)) { retries.delete(value.id); return true; }
         try {
           if (!allowed()) throw new Error("V2 admission cancelled after ownership loss or retirement");
-          const result = await admit({ sessionID, id: value.id, text: value.text, delivery: "queue" });
+          // A steer reaches a busy lead at its next step boundary. The slot
+          // remains occupied until canonical handling, not the native receipt.
+          const result = await admit({ sessionID, id: value.id, text: value.text, delivery: "steer" });
           if (result?.id !== value.id) throw new Error("native admission did not acknowledge the exact message ID");
           save({ ...value, phase: "admitted" });
           retries.delete(value.id);
@@ -99,7 +101,7 @@ export function createAdmissionJournal(paths, sessionID, admit, report = console
           if (attempt === 4) {
             const failures = (retry?.failures || 0) + 1;
             retries.set(value.id, { failures, after: Date.now() + Math.min(30000, 2000 * 2 ** Math.min(failures, 4)) });
-            if (failures === 1) report("V2 queued admission remains pending: " + error.message);
+            if (failures === 1) report("V2 steer admission remains pending: " + error.message);
             throw error;
           }
           await new Promise(resolve => setTimeout(resolve, 100 * 2 ** attempt));

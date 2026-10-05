@@ -174,7 +174,29 @@ record_pi_busy() {  # <state-dir> <id>
     --source pi-ext --event agent-start
 }
 
-reap() { kill "$1" 2>/dev/null || true; wait "$1" 2>/dev/null || true; }
+# Bash 5.2 can drop a TERM trap that fires while it parses a command
+# substitution ("trap: line 2: unexpected EOF while looking for matching `)'"),
+# leaving the watcher alive; an unbounded wait then hangs the whole file.
+reap() {
+  kill "$1" 2>/dev/null || true
+  wait_live "$1" 50 && kill -KILL "$1" 2>/dev/null
+  wait "$1" 2>/dev/null || true
+}
+
+# A watcher that survives TERM (the bash 5.2 dropped-trap race) must not hang
+# the file: reap escalates to KILL after a bounded wait.
+test_reap_kills_a_watcher_that_survives_term() {
+  local dir pid start
+  dir=$(make_case reap-term-survivor)
+  bash -c "trap '' TERM; : > '$dir/ready'; while :; do sleep 1; done" &
+  pid=$!
+  until [ -e "$dir/ready" ]; do sleep 0.1; done
+  start=$SECONDS
+  reap "$pid"
+  kill -0 "$pid" 2>/dev/null && fail "reap left a TERM-surviving process alive"
+  [ $((SECONDS - start)) -lt 30 ] || fail "reap did not return promptly for a TERM-surviving process"
+  pass "reap kills a watcher that survives TERM instead of waiting on it forever"
+}
 
 # --- pure classifier predicates (fm-classify-lib.sh) ------------------------
 
@@ -4772,6 +4794,7 @@ test_paused_until_that_passed_is_rechecked_before_the_cadence() {
 }
 
 
+test_reap_kills_a_watcher_that_survives_term
 test_status_span_actionable_classifier
 test_status_span_survives_a_later_routine_append
 test_status_span_respects_decision_closure

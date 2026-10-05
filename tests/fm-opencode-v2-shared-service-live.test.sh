@@ -137,6 +137,10 @@ http.createServer((req, res) => {
       || (process.env.MOCK_RESUME_CMD && /server restarted/i.test(userText) ? [null, process.env.MOCK_RESUME_CMD] : null)
       || (process.env.MOCK_STARTUP_CMD && userText.includes("bin/fm-session-start.sh") ? [null, process.env.MOCK_STARTUP_CMD] : null);
     const tools = (parsed.tools || []).map((t) => t.function?.name);
+    // Queued delivery allows the old busy prompt to complete its final response.
+    // A steer must be visible at the boundary after that prompt's tool finishes.
+    if (lastIsTool && userText.includes("busy-done") && process.env.MOCK_BUSY_RESPONSE_FILE)
+      appendFileSync(process.env.MOCK_BUSY_RESPONSE_FILE, "old busy prompt reached its final response\n");
     appendFileSync(log, JSON.stringify({ messages: messages.length, lastIsTool, run: match ? match[1] : null }) + "\n");
     res.writeHead(200, { "content-type": "text/event-stream" });
     const send = (o) => res.write(`data: ${JSON.stringify(o)}\n\n`);
@@ -157,7 +161,7 @@ EOF
 MOCK_WAKE_CMD='err=$(bin/fm-wake-drain.sh 2>&1 >/dev/null); seq=$(printf "%s\n" "$err" | sed -n "s/^WAKE_ACK_REQUIRED:.*--ack-through \([0-9][0-9]*\) --recovery-generation .*/\1/p"); gen=$(printf "%s\n" "$err" | sed -n "s/^WAKE_ACK_REQUIRED:.*--recovery-generation \([A-Za-z0-9._-][A-Za-z0-9._-]*\)$/\1/p"); [ -n "$seq" ] && [ -n "$gen" ] && bin/fm-wake-drain.sh --ack-through "$seq" --recovery-generation "$gen" && printf "acked %s %s\n" "$seq" "$(date +%s%N)" >> '"$LAB"'/handled.log'
 # Worker H's resumed turn runs on; worker H2's resumed turn finishes by itself.
 MOCK_RESUME_CMD="case \"\$PWD\" in */worker-h2) date +%s%N >> $LAB/h2.resumed ;; *) date +%s%N >> $LAB/h.resumed; while :; do date +%s%N > $LAB/h.beat; sleep 0.3; done ;; esac"
-MOCK_STARTUP_CMD='bash bin/fm-lock.sh' MOCK_WAKE_CMD="$MOCK_WAKE_CMD" MOCK_RESUME_CMD="$MOCK_RESUME_CMD" node "$LAB/mock.mjs" "$MOCK_PORT" "$LAB/mock.log" >/dev/null 2>&1 &
+MOCK_STARTUP_CMD='bash bin/fm-lock.sh' MOCK_WAKE_CMD="$MOCK_WAKE_CMD" MOCK_RESUME_CMD="$MOCK_RESUME_CMD" MOCK_BUSY_RESPONSE_FILE="$LAB/busy-response" node "$LAB/mock.mjs" "$MOCK_PORT" "$LAB/mock.log" >/dev/null 2>&1 &
 MOCK_PID=$!
 
 mkdir -p "$LAB/xdg/config/shuvcode"
@@ -482,16 +486,19 @@ fi
 termctrl stop observer >/dev/null 2>&1 || true
 fi
 
-# Leg G: queued wakes from two real workers, one while the lead is busy and one
+# Leg G: steered wakes from two real workers, one while the lead is busy and one
 # while it is idle. Each worker's real turn appends a status line to a task the
-# lead supervises; the lead's watcher wakes it; the wake is admitted queued and
+# lead supervises; the lead's watcher wakes it; the wake is admitted as a steer and
 # handled exactly once through the real drain/ack (counted by successful
 # canonical acknowledgements, not text).
 if leg G && [ -n "${W1:-}" ] && [ -n "${W2:-}" ]; then
   printf 'kind=ship\n' > "$HOME_A/state/t2.meta"
   : > "$LAB/handled.log"
-  api post "/api/session/$LEAD_A/prompt" "$(jq -nc --arg t "RUN: sleep 12; touch $LAB/busy-done" '{text: $t, delivery: "queue"}')" >/dev/null
-  sleep 2
+  # Leave time for W1's turn, the watcher successor and native admission before
+  # the busy tool completes, including on a loaded shared-service host.
+  api post "/api/session/$LEAD_A/prompt" "$(jq -nc --arg t "RUN: touch $LAB/busy-start; sleep 30; touch $LAB/busy-done" '{text: $t, delivery: "queue"}')" >/dev/null
+  busy_started() { [ -e "$LAB/busy-start" ]; }
+  wait_until 30 busy_started || live_fail "the busy-lead tool never started"
   run_in_session "$W1" "printf 'done: w1 finished\\n' >> $HOME_A/state/t1.status" || true
   acks() { local n; n=$(grep -c '^acked ' "$LAB/handled.log" 2>/dev/null); echo "${n:-0}"; }
   one_ack() { [ "$(acks)" -ge 1 ]; }
@@ -507,10 +514,10 @@ if leg G && [ -n "${W1:-}" ] && [ -n "${W2:-}" ]; then
   sleep 4
   api get "/api/experimental/session/$LEAD_A/export" > "$LAB/transcript-$LEAD_A.json" 2>/dev/null || true
   wake_msgs=$(jq '[.data.messages[]? | select(.type == "user" and (.text | test("WATCHER FIRED")))] | length' "$LAB/transcript-$LEAD_A.json")
-  if [ "$busy_done" = yes ] && [ "$(acks)" = 2 ] && [ "$wake_msgs" = 2 ] && [ -n "$first_ack_ns" ] && [ "$first_ack_ns" -ge "$done_ns" ]; then
-    pass "live leg G: a wake raised while the lead was busy was queued and handled after its turn, an idle-lead wake was handled promptly; two wakes, two canonical acks, no duplicate execution"
+  if [ "$busy_done" = yes ] && [ ! -e "$LAB/busy-response" ] && [ "$(acks)" = 2 ] && [ "$wake_msgs" = 2 ] && [ -n "$first_ack_ns" ] && [ "$first_ack_ns" -ge "$done_ns" ]; then
+    pass "live leg G: a busy-lead wake steers at the next tool boundary before the old prompt's final response, an idle-lead wake starts execution; two wakes, two canonical acks, no duplicate execution"
   else
-    live_fail "busy/idle wakes: busy-done=$busy_done acks=$(acks) wake-prompts=$wake_msgs first-ack=$first_ack_ns busy-turn-end=$done_ns handled=$(tr '\n' ';' < "$LAB/handled.log")"
+    live_fail "busy/idle wakes: busy-done=$busy_done old-response=$(test -e "$LAB/busy-response" && echo yes || echo no) acks=$(acks) wake-prompts=$wake_msgs first-ack=$first_ack_ns busy-tool-end=$done_ns handled=$(tr '\n' ';' < "$LAB/handled.log")"
   fi
 elif leg G; then
   live_fail "leg G needs the two workers from leg C"

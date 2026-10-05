@@ -330,7 +330,7 @@ family_for_basename() {
     fm-harness-liveness-drift-live-e2e.test.sh|\
     fm-muse-signals-live-e2e.test.sh|fm-rovo-signals-live-e2e.test.sh|\
     fm-herdr-version-floor-live-e2e.test.sh|\
-    fm-opencode-primary-live-e2e.test.sh|fm-opencode-v2-worker-live-e2e.test.sh|fm-pi-branch-live-e2e.test.sh|\
+    fm-opencode-primary-live-e2e.test.sh|fm-opencode-v2-worker-live-e2e.test.sh|fm-control-herdr-v2-live-e2e.test.sh|fm-pi-branch-live-e2e.test.sh|\
     fm-opencode-v2-shared-service-live.test.sh|fm-opencode-v2-herdr-detach-live.test.sh|\
     fm-opencode-v2-herdr-transport-smoke-live.test.sh|fm-opencode-v2-succession-live.test.sh|\
     fm-pi-branch-responsiveness-live-e2e.test.sh|\
@@ -348,6 +348,7 @@ family_for_basename() {
     fm-send-inbox.test.sh|fm-spawn-batch.test.sh|\
     fm-spawn-dispatch-profile.test.sh|fm-claude-trust.test.sh|\
     fm-trace-context-spawn.test.sh|fm-spawn-worktree-settle.test.sh|\
+    fm-sharkctl-guard.test.sh|\
     fm-teardown-endpoint-safety.test.sh)
       printf '%s\n' backend-dispatch
       ;;
@@ -729,6 +730,7 @@ tests/fm-session-start.test.sh 156952
 tests/fm-sessionstart-hook-live-e2e.test.sh 20
 tests/fm-sessionstart-instruction-refresh-live-e2e.test.sh 22
 tests/fm-sessionstart-nudge.test.sh 66194
+tests/fm-sharkctl-guard.test.sh 12000
 tests/fm-shared-captain-inheritance.test.sh 6108
 tests/fm-spawn-dispatch-profile.test.sh 63996
 tests/fm-spawn-pool-base-freshen.test.sh 34920
@@ -1454,6 +1456,9 @@ families_for_changed_path() {
       printf '%s\n' backend-dispatch
       printf '%s\n' pure-contract-unit
       printf '%s\n' live-harness-optin
+      ;;
+    bin/fm-sharkctl-guard.sh)
+      printf '%s\n' __script__:fm-sharkctl-guard.test.sh
       ;;
     bin/fm-shuvcode-lib.sh)
       printf '%s\n' "__script__:fm-harness-shuvcode.test.sh"

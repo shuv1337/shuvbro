@@ -94,7 +94,11 @@ step_ok() {  # <out> <index> <label>
   jq -e --argjson i "$2" '.steps[$i].ok == true' "$1" >/dev/null || fail "$3: $(jq -c --argjson i "$2" '{step: .steps[$i], failures}' "$1")"
 }
 
-notice_count() { jq '[.admitted[] | select(.text | contains("WATCHER FAILURE"))] | length' "$1"; }
+notice_count() {
+  jq -e 'all(.admitted[] | select(.text | contains("WATCHER FAILURE")); .delivery == "steer")' "$1" >/dev/null \
+    || fail "a repair notice was not explicitly steered"
+  jq '[.admitted[] | select(.text | contains("WATCHER FAILURE"))] | length' "$1"
+}
 
 test_notice_episodes() {
   tui_case notice-episodes 1
@@ -294,12 +298,12 @@ test_activation_publishes_and_nudges_once_without_events() {
   step_ok "$out" 0 "the startup nudge was never admitted"
   [ "$(startup_admissions "$out")" = 1 ] || fail "expected exactly one startup nudge admission: $(jq -c '.admitted' "$out")"
   jq -e '.admitted[0].id | startswith("msg_")' "$out" >/dev/null || fail "startup admission carried no stable message id"
-  jq -e '.admitted[0].delivery == "queue"' "$out" >/dev/null || fail "startup admission was not explicitly queued"
+  jq -e '.admitted[0].delivery == "steer"' "$out" >/dev/null || fail "startup admission was not explicitly steered"
   jq -e --arg c "$(jq -r .claimID "$out")" '.steps[1].record.claimID == $c' "$out" >/dev/null \
     || fail "the activation's exact claim was not registered: $(jq -c '.steps[1]' "$out")"
   jq -e --arg c "$(jq -r .claimID "$out")" '.firstmateV2Lead.claimID == $c and .firstmateV2Lead.sessionID == "ses_lead"' \
     <(jq '.ses_lead.metadata' "$CASE/sessions.json") >/dev/null || fail "the exact lead marker was not written: $(cat "$CASE/sessions.json")"
-  pass "tui: activation registers the exact claim and marker and admits one queued startup nudge with no session events"
+  pass "tui: activation registers the exact claim and marker and admits one steered startup nudge with no session events"
 }
 
 test_inactive_tui_stays_inert() {
@@ -505,7 +509,7 @@ test_interrupt_alone_admits_nothing_but_a_genuine_wake_does() {
 # --- wake delivery: identity, ordering, durability, successor ------------------
 
 # Every attempt of one logical wake carries the same immutable id and text and
-# explicit queue delivery; the first attempt happens only after the handling
+# explicit steer delivery; the first attempt happens only after the handling
 # handoff was confirmed (recovery marker in handling) with a live successor.
 assert_wake_delivery() {  # <out> <label>
   local prompts
@@ -514,7 +518,7 @@ assert_wake_delivery() {  # <out> <label>
   printf '%s' "$prompts" | jq -e '(map(.id) | unique | length) == 1 and (.[0].id | startswith("msg_"))' >/dev/null \
     || fail "$2: attempts of one wake used different or invalid message ids: $(printf '%s' "$prompts" | jq -c 'map(.id)')"
   printf '%s' "$prompts" | jq -e '(map(.text) | unique | length) == 1' >/dev/null || fail "$2: wake text changed between attempts"
-  printf '%s' "$prompts" | jq -e 'all(.delivery == "queue")' >/dev/null || fail "$2: a wake attempt was not explicitly queued"
+  printf '%s' "$prompts" | jq -e 'all(.delivery == "steer")' >/dev/null || fail "$2: a wake attempt was not explicitly steered"
   printf '%s' "$prompts" | jq -e '.[0].marker | test(":handling:")' >/dev/null \
     || fail "$2: the first wake admission preceded the handling handoff (marker $(printf '%s' "$prompts" | jq -c '.[0].marker'))"
   printf '%s' "$prompts" | jq -e '.[0].watcherLive == true' >/dev/null || fail "$2: no live successor watcher at the first wake admission"
@@ -553,7 +557,7 @@ outage_case() {  # <case> <reload:0|1>
 test_admission_outage_never_strands_the_wake() {
   v2_require_native outage || return $?
   outage_case outage 0
-  pass "tui: an outage-refused wake is admitted once under one id and text, queued, after the handoff, with rows durable and one watcher"
+  pass "tui: an outage-refused wake is admitted once under one id and text, steered, after the handoff, with rows durable and one watcher"
 }
 
 test_reload_during_outage_keeps_the_pending_id() {

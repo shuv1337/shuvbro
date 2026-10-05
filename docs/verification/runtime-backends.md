@@ -30,6 +30,38 @@ zsh
 A persistent parent shell waiting for a child remained reported as the parent process, while a shell that directly execed a simple command changed identity with the process itself.
 Pi and pi-signed 0.82.0 were reverified on 2026-07-27 through real isolated `fm-spawn.sh` launches.
 
+### Codex exit popup compatibility
+
+Verified on 2026-10-04 PDT with codex-cli 0.160.0 and tmux 3.7c on Linux.
+The probe used a private tmux socket, a disposable directory and `FM_HOME`, and an idle Codex TUI launched with `codex --no-daemon --no-alt-screen -C "$scratch"`.
+Folder trust was accepted and untrusted hooks were skipped before probing the ready composer; no model prompt was submitted.
+A PATH wrapper forwarded every control-path tmux call to `tmux -L "$socket"`, so the default server was never targeted.
+
+The Enter-only comparison used:
+
+```sh
+tmux -L "$socket" send-keys -t "$target" -l /quit
+sleep 2
+tmux -L "$socket" capture-pane -p -t "$target"
+tmux -L "$socket" send-keys -t "$target" Enter
+```
+
+Before Enter, the visible popup read `/quit  exit Codex` and the composer read `/quit`.
+Enter exited with `CODEX_EXIT_STATUS=0` from the launch wrapper; the reported swallowing failure was not reproduced in this version.
+In a separate ready TUI, Escape removed the popup and preserved the `/quit` draft; the following Enter also exited with status 0.
+
+The actual control path used a disposable task metadata record identifying the same endpoint and `harness=codex`:
+
+```sh
+FM_HOME="$probe_home" PATH="$socket_wrapper_dir:$PATH" bin/fm-control.sh probe exit
+```
+
+Observed key transport was literal `/quit`, Escape, then Enter.
+The backend's `fm_backend_agent_state tmux "$target" codex` returned `alive` before control and `dead` afterward.
+Control returned `stopped probe harness=codex backend=tmux`; the TUI exited with status 0 and `ps` on its terminal showed only the preserved shells, with no Codex process.
+These observations establish idle-tmux compatibility for Escape then Enter, not that Escape is necessary in every version, nor live verification of Herdr or busy interruption.
+Portable regressions for delivery ordering remain `tests/fm-control.test.sh` and `tests/fm-backend-herdr.test.sh`; their simulated swallowing case is not empirical evidence for this Codex version.
+
 ### Agent liveness name sources
 
 The earlier record that every harness is observed under its own `#{pane_current_command}` no longer holds and has been replaced by the per-harness evidence below.
@@ -1004,6 +1036,45 @@ ok - real herdr: the watcher fast-path enqueues a stale wake naming the task win
 
 Polling remained active and is covered as the fallback for capability, connect, subscribe, and repeated reader failure.
 
+On 2026-10-04 PDT, the real watcher, Herdr adapter, and Python socket reader were exercised against a private fake Unix socket on Linux x86_64 with Bash 5.3.20 and Python 3.14.7, without a live Herdr session:
+
+```sh
+python3 tests/fm-backend-herdr-eventwait.test.py
+```
+
+Observed output:
+
+```text
+Ran 7 tests in 41.925s
+OK
+watcher SIGTERM shutdown: 0.026s, pipes closed and reader/FIFO/output removed
+watcher SIGHUP shutdown: 0.021s, pipes closed and reader/FIFO/output removed
+watcher SIGINT shutdown: 0.025s, pipes closed and reader/FIFO/output removed
+watcher SIGTERM shutdown: 0.025s, pipes closed and reader/FIFO/output removed
+```
+
+The final case interrupts the subscription acknowledgement wait; the first three interrupt the subscribed stream wait with a 60-second poll budget.
+The regression verifies a mode-0600 captured record, output-pipe EOF within one second, removal of the watcher lock and temporary files, and absence of every captured reader-tree PID.
+`tests/fm-supervision-events.test.sh` runs this portable fixture and separately checks transition handling, clean-budget waits, capability memoization, and repeated-failure polling fallback.
+
+The live event-wait smoke was also refreshed on 2026-10-04 PDT with Herdr `0.9.1-shuv.6+9059819d8043`, Bash 5.3.20, and Python 3.14.7 in a generated non-default lab session:
+
+```sh
+HERDR_LAB_HELPER=bin/fm-herdr-lab.sh \
+  bash tests/fm-backend-herdr-eventwait-smoke.test.sh
+```
+
+Observed output:
+
+```text
+ok - real herdr (0.9.1-shuv.6+9059819d8043): events.subscribe capability gate passes (protocol >= 16, events surface present in api schema)
+ok - real herdr (0.9.1-shuv.6+9059819d8043): a driven idle->blocked transition returns the blocked record in 0.048s (pane w1:p2)
+ok - real herdr: the watcher fast-path enqueues a stale wake naming the task window from the live blocked transition
+ok - real herdr: watcher TERM retires the socket reader, output pipes and temporary files in 0.023s
+```
+
+The smoke routes every CLI call, including watcher subprocess calls, through the lab helper and completed teardown with the default-session fleet-state tripwire unchanged.
+
 ### Agent lifecycle control
 
 Herdr is one of the two backends whose recovery-grade agent-state classifier the control plane may trust ([agent-control.md](../agent-control.md)), so its lifecycle gating is measured against the real binary; reverified 2026-08-08 on Herdr 0.8.0, and first measured 2026-08-02 on Herdr 0.7.5 with identical results:
@@ -1612,7 +1683,19 @@ The test runs relocated XDG native paths, a disposable registered shared service
 Its second and third results are the live guard for `bin/fm-control.sh` on opencode-v2: the tmux classifier attributed the real worker processes, `exit` reported `native-session=idle`, and `relaunch` kept the recorded session ID, the endpoint and the worktree while the resumed worker acted on its progress note.
 Only Treehouse allocation is replaced with entry into the disposable worktree.
 The guard requires configured model credentials and is opt-in, outside portable CI.
-Herdr was not exercised live for these control paths; its process-based opencode-v2 endpoint read is covered by `tests/fm-backend-herdr.test.sh`, `tests/fm-control.test.sh`, and the real-binary `tests/fm-control-herdr-smoke.test.sh` lab case.
+Herdr's real Treehouse path was verified on 2026-10-04 at 15:17 PDT on Linux with Herdr 0.9.1-shuv.5+ecb35624bc44, Treehouse 2.0.0, and shuvcode v2.0.22-shuv.1:
+
+```sh
+FM_CONTROL_HERDR_V2_LIVE=1 bin/fm-test-run.sh tests/fm-control-herdr-v2-live-e2e.test.sh
+```
+
+```text
+ok - shuvcode v2.0.22-shuv.1: real Herdr/Treehouse nested-shell exit, in-place relaunch and second exit
+```
+
+After exit, the sole foreground process was `zsh -l`, with a foreground process-group ID different from the pane shell PID; the recorded native session was idle and relaunch completed in the same pane and Treehouse worktree.
+This opt-in guard uses the named-session helper's default-session tripwire, isolated XDG service and worker registry settings, and lab-only `MISE_YES=1`, never global mise trust changes.
+The stale-registration harness switch (refused without, and confirmed only by, the target adapter's own foreground process), matching-adapter `unknown` startup status, and recorded-harness consumers have portable regressions in `tests/fm-control-relaunch.test.sh`, `tests/fm-backend-herdr.test.sh`, `tests/fm-crew-state.test.sh`, and `tests/fm-task-inbox.test.sh`.
 The same day, a read-only `fm_backend_agent_state herdr <session>:<pane> opencode-v2` against a running shuvcode worker pane on Herdr 0.9.1-shuv.5 printed `alive` from its three foreground processes (owner attach wrapper, node launcher, compiled `shuvcode` binary).
 
 The installed root TUI rejects `--model`; its `mini --model` path did not honor
@@ -1625,4 +1708,20 @@ The native route is implemented but is not yet qualified for the combined issue 
 On 2026-10-02, isolated Linux probes with installed shuvcode v2.0.22-shuv.1 demonstrated native package loading, exact TUI-owned lock and pathless binding RPC, a real typed cd-guard refusal, unrelated-root execution, observer environment recovery, ordinary session-ID spoof refusal, one durable queued wake and shared-worker attachment, plus natural TUI retirement with the shared service surviving.
 Those probes used a deterministic local provider, not a paid/vendor model, and did not qualify the actual two-home/two-worker/Herdr, busy-and-idle delivery or restarted-service positive matrix.
 The isolated worker-live probe was rerun on 2026-10-04 (see above); the endpoint and worker execution-reconciliation changes otherwise have portable regression coverage only until their opt-in live tests are rerun.
+The current [lead steer admission contract](../supervision-protocols/opencode-v2.md) has portable coverage in `tests/fm-opencode-v2-wake-admission.test.sh`, `tests/fm-opencode-v2-plugin.test.sh` and `tests/fm-opencode-v2-tui-acceptance.test.sh`; the earlier queued-wake probe above predates that change.
+The isolated shared-service guard was rerun on 2026-10-04 at 19:51 PDT on Linux with shuvcode v2.0.22-shuv.2 and the 30-second busy-tool window.
+Legs A, C and G passed, including busy-lead steering before the old prompt's final response, idle-lead execution, two wakes and two canonical acknowledgements.
+The [rerun log](https://github.com/shuv1337/shuvbro/pull/45#issuecomment-5987282004) records the exact output from this command:
+
+```sh
+FM_OPENCODE_V2_BIN=/home/shuv/.npm-global/lib/node_modules/shuvcode/node_modules/shuvcode-linux-x64/bin/shuvcode FM_OPENCODE_V2_SHARED_LIVE=1 FM_V2_LIVE_LEGS=CG bin/fm-test-run.sh --jobs 1 tests/fm-opencode-v2-shared-service-live.test.sh
+```
+
+```text
+ok - live leg G: a busy-lead wake steers at the next tool boundary before the old prompt's final response, an idle-lead wake starts execution; two wakes, two canonical acks, no duplicate execution
+not ok - 2 live qualification check(s) failed
+```
+
+The complete guard exited 1 solely because its two capability-probe checks reject the installed v2.0.22-shuv.2 under the v2.0.22-shuv.1 allowlist; qualifying that version remains separate from the passing wake-delivery legs.
+The explicit binary override selects the installed Linux glibc build, because the test's default glob selected a musl build that could not run on this host.
 No upstream `opencode2`, cross-host split or V2 secondmate qualification is claimed.

@@ -41,6 +41,7 @@ opencode-v2 executes on a shared service, so its pane and its execution are sepa
 Its interrupt cancels the exact recorded native session rather than sending a key, and its exit does that before typing `/exit`.
 Its exit is confirmed, and reported with `native-session=idle`, only when the endpoint no longer runs a shuvcode process and that session has no active execution; an unprovable session refuses before anything is typed.
 On Herdr its endpoint state comes from the pane's foreground processes, because the shuvcode hook registration outlives the TUI.
+That surviving registration also cannot confirm a replacement on another harness; [`herdr-backend.md`](herdr-backend.md) owns that classification.
 Claude exposes no lifecycle acknowledgement for a manual interrupt, so delivery succeeds with `cancel=unconfirmed` and its adapter-owned busy state remains as observed.
 muse's session log records `terminal=cancelled` for the interrupted run, so the control plane reports `cancel=confirmed` only after observing that exact acknowledgement.
 
@@ -121,7 +122,7 @@ Backend capability comes from each adapter's real surface, not from a policy cho
 | cmux | yes | yes | yes | yes | no |
 | orca | no | yes | yes | no | no |
 
-Per-harness interrupt keys, repeat counts, composer clears, exit commands, and supported task kinds live in `bin/fm-control-lib.sh` and are exercised for every verified harness by `tests/fm-control.test.sh`.
+Per-harness interrupt keys, repeat counts, composer clears, exit commands, exit dismiss keys, and supported task kinds live in `bin/fm-control-lib.sh` and are exercised for every verified harness by `tests/fm-control.test.sh`.
 The empirical basis for each adapter's value is the `harness-adapters` skill's verification record for that adapter.
 
 ## Verification
@@ -130,3 +131,4 @@ The empirical basis for each adapter's value is the `harness-adapters` skill's v
 - `tests/fm-control-relaunch.test.sh` - the relaunch transaction: identity preservation, harness switching, the progress note, checkpoint refusals, rollback after a failed launch, and opencode-v2's same-session relaunch and agent-free gate.
 - `tests/fm-control-herdr-smoke.test.sh` - the second state-verified backend against the real herdr binary, on an isolated throwaway lab session.
 - `tests/fm-opencode-v2-worker-live-e2e.test.sh` - opt-in: a real shuvcode worker on an isolated shared service is exited and relaunched into its recorded session.
+- `tests/fm-control-herdr-v2-live-e2e.test.sh` - opt-in: a real shuvcode worker in a Treehouse worktree on Herdr is exited through its nested shell and relaunched in place.

@@ -292,7 +292,7 @@ fm_test_run_spawn() {
     FM_STATE_OVERRIDE="$home/state" FM_DATA_OVERRIDE="$home/data" \
     FM_PROJECTS_OVERRIDE="$home/projects" FM_CONFIG_OVERRIDE="$home/config" \
     FM_SPAWN_NO_GUARD=1 FM_FAKE_PANE_PATH="$pane" TMUX="${TMUX:-fake,1,0}" \
-    PATH="$fakebin:$PATH" \
+    PATH="$(fm_test_path_with_real_node "$fakebin")" \
     "$ROOT/bin/fm-spawn.sh" "$@" 2>&1
 }
 

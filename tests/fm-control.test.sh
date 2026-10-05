@@ -105,7 +105,13 @@ case "${1:-}" in
     payload=${1:-}
     if [ "$literal" = 1 ]; then
       printf '%s\n' "$payload" >> "$D/literal"
-      if [ -z "${FM_FAKE_NEVER_DIES:-}" ] \
+      # Model the reported historical swallow, not codex-cli 0.160.0, whose
+      # Enter-only probe also exited. In this fixture Enter is consumed until
+      # Escape closes the popup, then the next Enter stops the agent.
+      if [ -n "${FM_FAKE_CODEX_POPUP:-}" ] \
+         && { [ "$payload" = /exit ] || [ "$payload" = /quit ]; }; then
+        printf 'open\n' > "$D/popup"
+      elif [ -z "${FM_FAKE_NEVER_DIES:-}" ] \
          && { [ "$payload" = /exit ] || [ "$payload" = /quit ]; }; then
         printf 'zsh' > "$D/command"
       fi
@@ -114,6 +120,14 @@ case "${1:-}" in
       esac
     else
       printf '%s\n' "$payload" >> "$D/keys"
+      if [ -n "${FM_FAKE_CODEX_POPUP:-}" ] && [ "$payload" = Escape ] \
+         && [ -f "$D/popup" ]; then
+        printf 'closed\n' > "$D/popup"
+      fi
+      if [ -n "${FM_FAKE_CODEX_POPUP:-}" ] && [ "$payload" = Enter ] \
+         && [ "$(cat "$D/popup" 2>/dev/null || true)" = closed ]; then
+        printf 'zsh' > "$D/command"
+      fi
       if [ -n "${FM_FAKE_INTERRUPT_STOPS_AGENT:-}" ] \
          && { [ "$payload" = Escape ] || [ "$payload" = C-c ]; }; then
         printf 'zsh' > "$D/command"
@@ -209,6 +223,8 @@ run_control() {
     FM_FAKE_MUSE_LOG="${FM_FAKE_MUSE_LOG:-}" \
     FM_FAKE_MUSE_DISAPPEAR_BEFORE_ACK="${FM_FAKE_MUSE_DISAPPEAR_BEFORE_ACK:-}" \
     FM_FAKE_INTERRUPT_STOPS_AGENT="${FM_FAKE_INTERRUPT_STOPS_AGENT:-}" \
+    FM_FAKE_CODEX_POPUP="${FM_FAKE_CODEX_POPUP:-}" \
+    FM_CONTROL_EXIT_SETTLE="${FM_CONTROL_EXIT_SETTLE:-0.01}" \
     "$CONTROL" "$@" 2>&1
 }
 
@@ -1102,6 +1118,38 @@ test_fm_send_still_marks_the_same_secondmate_task() {
   pass "fm-control's arrival leaves fm-send's from-firstmate marking untouched"
 }
 
+test_codex_exit_dismisses_slash_popup_before_enter() {
+  local dir out rc
+  dir=$(new_case codex-popup)
+  add_task "$dir" t1 codex
+  alive_as "$dir" codex
+  [ "$(fm_control_exit_dismiss_key codex)" = Escape ] \
+    || fail "codex exit must dismiss its slash popup with Escape"
+  [ -z "$(fm_control_exit_dismiss_key claude)" ] \
+    || fail "claude exit must not grow a dismiss key"
+  [ -z "$(fm_control_exit_dismiss_key pi)" ] \
+    || fail "pi exit must not grow a dismiss key"
+  fm_control_exit_dismiss_key '' \
+    && fail "an empty harness must not invent an exit dismiss key"
+  fm_control_exit_dismiss_key someagent \
+    && fail "an unrecognized harness must not invent an exit dismiss key"
+  out=$(FM_FAKE_CODEX_POPUP=1 run_control "$dir" t1 exit); rc=$?
+  expect_code 0 "$rc" "codex exit should succeed once the slash popup is dismissed"$'\n'"$out"
+  [ "$(literals "$dir")" = /quit ] \
+    || fail "codex exit should type /quit once, got: $(literals "$dir")"
+  # Enter while the popup is open does not stop the agent. The recorded keys
+  # must dismiss first, then submit. A leading Enter would leave the fake alive
+  # and this exit would time out.
+  [ "$(cat "$dir/fake/keys")" = $'Escape\nEnter' ] \
+    || fail "codex exit should send Escape before the submitting Enter, got: $(cat "$dir/fake/keys")"
+  [ "$(cat "$dir/fake/popup")" = closed ] \
+    || fail "the slash popup should be closed after exit"
+  [ "$(cat "$dir/fake/command")" = zsh ] \
+    || fail "the agent should be stopped only after the dismissed Enter"
+  assert_contains "$out" "stopped t1 harness=codex" "exit should report the stop"
+  pass "fm-control exit: codex dismisses the /quit slash popup before Enter"
+}
+
 test_exit_types_each_harness_verified_command
 test_interrupt_sends_each_harness_verified_key
 test_opencode_interrupts_twice_and_others_once
@@ -1143,5 +1191,6 @@ test_opencode_v2_exit_refuses_an_unverifiable_service
 test_opencode_v2_already_exited_tui_is_idempotent
 test_opencode_v2_tui_that_ignores_exit_is_unconfirmed
 test_opencode_v2_herdr_exit_ignores_the_stale_registration
+test_codex_exit_dismisses_slash_popup_before_enter
 test_secondmate_control_command_carries_no_marker
 test_fm_send_still_marks_the_same_secondmate_task

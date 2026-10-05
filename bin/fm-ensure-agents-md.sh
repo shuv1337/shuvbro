@@ -1,28 +1,28 @@
 #!/usr/bin/env bash
 # Ensure a project worktree follows the agent-memory file convention.
-# AGENTS.md is the real project-intrinsic knowledge file; CLAUDE.md is a
-# real regular file whose canonical content is the two-line @AGENTS.md pointer
-# that Claude Code inlines at load time. Creates a minimal AGENTS.md skeleton
-# when neither file exists, promotes a real CLAUDE.md file when it is the only
-# file present (unless it is already the canonical pointer), converts a correct
-# CLAUDE.md -> AGENTS.md symlink into the pointer file, and refuses to clobber
-# distinct real files or wrong symlinks.
-# Owns the canonical "## Maintaining this file" self-governance wording for
-# project AGENTS.md files, injecting it idempotently into created skeletons,
-# promoted CLAUDE.md files, and existing AGENTS.md files lacking both the exact
-# heading and the project-owned mark below (exact first line, LF or CRLF):
+# AGENTS.md is the real project-intrinsic knowledge file. CLAUDE.md is a real
+# regular file whose canonical content is the two-line @AGENTS.md pointer that
+# Claude Code inlines at load time, except when an existing CLAUDE.md symlink
+# is already present: that symlink is left in place.
+# Creates a minimal AGENTS.md skeleton when neither file exists, promotes a
+# real CLAUDE.md file when it is the only file present (unless it is already
+# the canonical pointer), and refuses to clobber distinct real files or wrong
+# symlinks.
+# Owns the canonical "## Maintaining this file" self-governance wording.
+# That section is included in a skeleton this helper creates.
+# It is not appended to an existing AGENTS.md, or to a real CLAUDE.md file
+# promoted into AGENTS.md, when that file does not already carry the section.
+# A first-line project-owned mark is left untouched when present (exact first
+# line, LF or CRLF):
 # <!-- firstmate:maintained-by-project -->
-# Projects may place this mark at the start of the file and retain equivalent
-# maintenance guidance under their own heading. It declares guidance is present, not
-# permission to remove governance. No prose equivalence is inferred.
+# Existing files keep their current text. The mark stays in place and does not
+# select a different edit. No prose equivalence is inferred.
 # Owns the canonical CLAUDE.md pointer content (the exact two-line @AGENTS.md
-# form). A real-file pointer cannot follow a write into AGENTS.md, which is why
-# the installer never creates a CLAUDE.md symlink.
-# Refuses a case-variant real memory file such as a lowercase agents.md, so the
+# form). The helper writes that pointer when CLAUDE.md is absent, and after
+# promoting a real CLAUDE.md file. It never replaces an existing symlink.
+# Refuses a case-variant real memory file such as a lowercase agents.md, so a
 # pointer's @AGENTS.md import resolves to a real AGENTS.md on a case-sensitive
-# filesystem (issue #389). The real-file pointer also eliminates the old
-# uppercase-literal-target dangling-symlink hazard that a CLAUDE.md -> AGENTS.md
-# link would have carried for that same mismatch.
+# filesystem (issue #389).
 # This is a worktree utility for crewmates, not a supervision script, so it does
 # not call fm-guard.sh.
 # Usage: fm-ensure-agents-md.sh [repo-or-worktree-dir]
@@ -32,11 +32,15 @@ usage() {
   echo "usage: fm-ensure-agents-md.sh [repo-or-worktree-dir]" >&2
   cat >&2 <<'EOF'
 
-To retain equivalent project-owned maintenance guidance without adding the
-canonical section, use this exact first line of AGENTS.md (LF or CRLF):
+An existing AGENTS.md keeps its current text, including any maintenance guidance.
+The canonical "## Maintaining this file" section is added only inside a skeleton
+created when no memory file exists yet.
+An existing CLAUDE.md symlink is left in place.
+A missing CLAUDE.md is filled with the real @AGENTS.md pointer, and a real
+CLAUDE.md that is the only memory file is promoted to AGENTS.md before that
+pointer is written.
+A first-line mark is left untouched when present (LF or CRLF):
 <!-- firstmate:maintained-by-project -->
-The mark declares retained guidance, not permission to remove governance.
-Without the first-line mark or exact canonical heading, the helper adds the section.
 EOF
 }
 
@@ -74,12 +78,11 @@ write_maintenance_section_with_eol() {
   done < <(write_maintenance_section)
 }
 
-# Idempotently append the canonical self-governance section to AGENTS.md when
-# neither its heading nor the first-line project-owned mark is present. Sets
-# MAINT_INJECTED=1 when it appends and 0 otherwise, for caller change reporting.
-MAINT_INJECTED=0
+# Append the canonical self-governance section to a newly created AGENTS.md.
+# Callers use this only for a skeleton this helper just created. An existing
+# project file is not passed here, so a project that does not already carry
+# the section does not gain it.
 ensure_maintenance_section() {
-  MAINT_INJECTED=0
   if grep -Fqx -e '## Maintaining this file' -e $'## Maintaining this file\r' "$AGENTS" ||
     head -n 1 "$AGENTS" | grep -Fqx -e '<!-- firstmate:maintained-by-project -->' \
       -e $'<!-- firstmate:maintained-by-project -->\r'; then
@@ -100,7 +103,6 @@ ensure_maintenance_section() {
     printf '%s' "$sep"
     write_maintenance_section_with_eol "$eol"
   } >> "$AGENTS"
-  MAINT_INJECTED=1
 }
 
 write_skeleton() {
@@ -128,16 +130,18 @@ is_canonical_claude_pointer() {
   claude_pointer_content | cmp -s - "$CLAUDE"
 }
 
-# Write the canonical pointer as a regular file. Unlink a symlink first so the
-# write cannot follow it and destroy AGENTS.md. Never overwrite a distinct real
-# file; callers classify that as a conflict before invoking this.
+# Write the canonical pointer as a regular file when CLAUDE.md is absent.
+# Never replace an existing symlink or overwrite a distinct real file; callers
+# classify those as leave-in-place or conflict before invoking this.
 install_claude_pointer() {
   if is_canonical_claude_pointer; then
     return 0
   fi
   if [ -L "$CLAUDE" ]; then
-    rm -- "$CLAUDE"
-  elif [ -e "$CLAUDE" ]; then
+    echo "error: internal: refuse to replace existing CLAUDE.md symlink" >&2
+    exit 1
+  fi
+  if [ -e "$CLAUDE" ]; then
     echo "error: internal: refuse to overwrite existing CLAUDE.md" >&2
     exit 1
   fi
@@ -195,36 +199,20 @@ fi
 if [ -e "$AGENTS" ]; then
   if [ -L "$CLAUDE" ]; then
     if is_correct_claude_symlink; then
-      ensure_maintenance_section
-      install_claude_pointer
-      if [ "$MAINT_INJECTED" -eq 1 ]; then
-        echo "updated: added ## Maintaining this file to AGENTS.md and wrote CLAUDE.md @AGENTS.md pointer in $DIR"
-      else
-        echo "updated: replaced CLAUDE.md symlink with @AGENTS.md pointer in $DIR"
-      fi
+      echo "unchanged: kept existing CLAUDE.md symlink in $DIR"
       exit 0
     fi
     echo "conflict: CLAUDE.md is a symlink in $DIR but does not point to AGENTS.md" >&2
     exit 1
   fi
   if [ ! -e "$CLAUDE" ]; then
-    ensure_maintenance_section
     install_claude_pointer
-    if [ "$MAINT_INJECTED" -eq 1 ]; then
-      echo "updated: added ## Maintaining this file to AGENTS.md and wrote CLAUDE.md @AGENTS.md pointer in $DIR"
-    else
-      echo "wrote: CLAUDE.md @AGENTS.md pointer in $DIR"
-    fi
+    echo "wrote: CLAUDE.md @AGENTS.md pointer in $DIR"
     exit 0
   fi
   if [ -f "$CLAUDE" ]; then
     if is_canonical_claude_pointer; then
-      ensure_maintenance_section
-      if [ "$MAINT_INJECTED" -eq 1 ]; then
-        echo "updated: added ## Maintaining this file to AGENTS.md in $DIR"
-      else
-        echo "unchanged: AGENTS.md with CLAUDE.md @AGENTS.md pointer in $DIR"
-      fi
+      echo "unchanged: AGENTS.md with CLAUDE.md @AGENTS.md pointer in $DIR"
       exit 0
     fi
     echo "conflict: both AGENTS.md and CLAUDE.md are real files in $DIR; reconcile them manually" >&2
@@ -237,8 +225,7 @@ fi
 if [ -L "$CLAUDE" ]; then
   if is_correct_claude_symlink; then
     write_skeleton
-    install_claude_pointer
-    echo "created: AGENTS.md and wrote CLAUDE.md @AGENTS.md pointer in $DIR"
+    echo "created: AGENTS.md and kept CLAUDE.md symlink in $DIR"
     exit 0
   fi
   echo "conflict: CLAUDE.md is a symlink in $DIR but AGENTS.md is missing and the link does not point to AGENTS.md" >&2
@@ -253,7 +240,6 @@ if [ -e "$CLAUDE" ]; then
       exit 0
     fi
     mv "$CLAUDE" "$AGENTS"
-    ensure_maintenance_section
     install_claude_pointer
     echo "promoted: moved CLAUDE.md to AGENTS.md and wrote CLAUDE.md @AGENTS.md pointer in $DIR"
     exit 0
