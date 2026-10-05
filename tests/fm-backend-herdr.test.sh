@@ -4492,7 +4492,7 @@ SH
   rc=$?
   [ "$rc" -ne 0 ] || fail "peek should fail when the herdr server cannot be started"
   [ "$(grep -c '^error:' "$err")" -eq 1 ] || fail "peek should print one error line when the session server is down:"$'\n'"$(cat "$err")"
-  grep -q '^error: herdr server for session' "$err" || fail "peek's error should name the herdr server:"$'\n'"$(cat "$err")"
+  grep -q "^error: herdr server for session 'default' did not report running" "$err" || fail "peek's error should report the server did not come up:"$'\n'"$(cat "$err")"
   pass "fm-peek: a down herdr session server is a one-line error"
 }
 

@@ -43,14 +43,4 @@ T=$(fm_backend_resolve_selector "$RAW_TARGET" "$STATE")
 BACKEND=$(fm_backend_of_selector "$RAW_TARGET" "$T" "$STATE")
 EXPECTED_LABEL=$(fm_backend_expected_label_of_selector "$RAW_TARGET" "$STATE")
 
-peek_err=$(mktemp)
-if ! fm_backend_capture "$BACKEND" "$T" "$N" "$EXPECTED_LABEL" 2>"$peek_err"; then
-  if [ -s "$peek_err" ]; then
-    cat "$peek_err" >&2
-  elif [ "$BACKEND" = herdr ]; then
-    echo "error: herdr server for session '${T%%:*}' is not running" >&2
-  fi
-  rm -f "$peek_err"
-  exit 1
-fi
-rm -f "$peek_err"
+fm_backend_capture "$BACKEND" "$T" "$N" "$EXPECTED_LABEL"
