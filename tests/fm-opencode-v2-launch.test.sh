@@ -83,28 +83,80 @@ chmod +x "$TMP_ROOT/bin/shuvcode"
 export TEST_LOG="$TMP_ROOT/order" TEST_CREATE="$TMP_ROOT/create.json" TEST_RECORD="$TMP_ROOT/worker.opencode-v2-session.json" TEST_WORK="$TMP_ROOT/work"
 printf '%s\n' task-fixture > "$TMP_ROOT/worker.meta"
 
-# Read-only target/runtime probe: no service API, launch or worktree side effects.
+# Read-only target/runtime probe: only help/version calls and local package reads.
 ROOT="$ROOT" LAB="$TMP_ROOT/capability" node --input-type=module <<'JS'
 import * as fs from 'node:fs'; import assert from 'node:assert/strict'; import {pathToFileURL} from 'node:url';
 const {probeCapabilities}=await import(pathToFileURL(process.env.ROOT+'/bin/fm-opencode-v2-capability.mjs'));
+const {installPackage}=await import(pathToFileURL(process.env.ROOT+'/tests/assets/fm-opencode-v2-capability-fixture.mjs'));
 const lab=process.env.LAB,runtime=lab+'/.opencode/plugins';fs.mkdirSync(runtime,{recursive:true});
 const binary=lab+'/shuvcode',log=lab+'/calls';
-fs.writeFileSync(binary,`#!/bin/bash\necho "$*" >> '${log}'\ncase "$1" in --version) echo "\${PROBE_VERSION:-shuvcode v2.0.22-shuv.2}" ;; --help) echo "\${PROBE_FLAGS:---server --session --auto}" ;; *) exit 99 ;; esac\n`,{mode:0o700});
-for (const version of ['shuvcode v1.0.0','shuvcode v2.0.22-shuv.1','shuvcode v2.0.22-shuv.3']) {
+fs.writeFileSync(binary,`#!/bin/bash\necho "$*" >> '${log}'\ncase "$*" in --version) echo "\${PROBE_VERSION:-shuvcode v2.0.23-shuv.1}" ;; --help) echo "\${PROBE_FLAGS:---server --session --auto}" ;; 'api --help') echo "\${PROBE_API_FLAGS:---server --data --param}" ;; *) exit 99 ;; esac\n`,{mode:0o700});
+for (const version of ['opencode v1.0.0','opencode2 v2.0.23','shuvcode v1.0.0','shuvcode v2.0.23','shuvcode v2.0.23-shuv.1-rc.1']) {
   process.env.PROBE_VERSION=version;
-  await assert.rejects(probeCapabilities(lab,binary),/unqualified target.*use qualified shuvcode v2\.0\.22-shuv\.2/);
+  await assert.rejects(probeCapabilities(lab,binary),/unsupported target.*install stable shuvcode V2/);
+}
+for (const version of ['shuvcode v2.0.22-shuv.1','shuvcode v2.0.21-shuv.99','shuvcode v2.0.9-shuv.99']) {
+  process.env.PROBE_VERSION=version;
+  await assert.rejects(probeCapabilities(lab,binary),/below the supported floor.*upgrade shuvcode/);
 }
 delete process.env.PROBE_VERSION;
-process.env.PROBE_FLAGS='--session --auto';await assert.rejects(probeCapabilities(lab,binary),/missing native --server/);delete process.env.PROBE_FLAGS;
+for (const flags of ['--session --auto','--serverish --session --auto']) {
+  process.env.PROBE_FLAGS=flags;await assert.rejects(probeCapabilities(lab,binary),/missing native --server/);
+}
+delete process.env.PROBE_FLAGS;
+process.env.PROBE_API_FLAGS='--server --data';await assert.rejects(probeCapabilities(lab,binary),/missing native --param/);delete process.env.PROBE_API_FLAGS;
+await assert.rejects(probeCapabilities(lab,binary),/no matching shuvcode package.*reinstall/);
+installPackage(binary);
 await assert.rejects(probeCapabilities(lab,binary),/npm ci/);
-fs.mkdirSync(runtime+'/node_modules/effect',{recursive:true});
-fs.writeFileSync(runtime+'/package.json',JSON.stringify({dependencies:{effect:'4.0.0-rc.112'}}));
-fs.writeFileSync(runtime+'/node_modules/effect/package.json',JSON.stringify({name:'effect',version:'4.0.0-rc.112',type:'module',exports:'./index.js'}));
-fs.writeFileSync(runtime+'/node_modules/effect/index.js','export const Data={TaggedError(){}}; export const Effect={gen(){},promise(){},tryPromise(){},runPromise(){},flatMap(){},fail(){}};');
-assert.deepEqual(await probeCapabilities(lab,binary),{version:'shuvcode v2.0.22-shuv.2',runtime:'effect',qualified:true});
-assert.ok(fs.readFileSync(log,'utf8').trim().split('\n').every(line=>['--version','--help'].includes(line)),'probe accessed service or dispatch');
+function makeRuntime(root, version='4.0.0-rc.112', code='export const Data={TaggedError(){}}; export const Effect={void:{},gen(){},promise(){},tryPromise(){},runPromise(){},flatMap(){},fail(){}};') {
+  const runtime=root+'/.opencode/plugins';
+  fs.mkdirSync(runtime+'/node_modules/effect',{recursive:true});
+  fs.writeFileSync(runtime+'/package.json',JSON.stringify({dependencies:{effect:'4.0.0-rc.112'}}));
+  fs.writeFileSync(runtime+'/node_modules/effect/package.json',JSON.stringify({name:'effect',version,type:'module',exports:'./index.js'}));
+  fs.writeFileSync(runtime+'/node_modules/effect/index.js',code);
+}
+makeRuntime(lab);
+for (const version of ['2.0.22-shuv.2','2.0.22-shuv.3','2.0.23-shuv.1','2.0.23-shuv.1+build.1','2.0.100-shuv.12','2.1.0-shuv.1']) {
+  process.env.PROBE_VERSION='shuvcode v'+version;
+  installPackage(binary,version);
+  assert.deepEqual(await probeCapabilities(lab,binary),{version:'shuvcode v'+version,runtime:'effect',qualified:true});
+}
+delete process.env.PROBE_VERSION;
+installPackage(binary);
+process.env.PROBE_LEGACY_MESSAGE='1';await probeCapabilities(lab,binary);delete process.env.PROBE_LEGACY_MESSAGE;
+for (const operation of ['session.active','session.environment','session.interrupt','session.prompt','message.list','model.default']) {
+  process.env.PROBE_MISSING_API=operation;
+  await assert.rejects(probeCapabilities(lab,binary),/missing .* API capability.*reinstall/);
+}
+delete process.env.PROBE_MISSING_API;
+process.env.PROBE_DROP_DELIVERY='1';await assert.rejects(probeCapabilities(lab,binary),/incompatible session.prompt request contract/);delete process.env.PROBE_DROP_DELIVERY;
+process.env.PROBE_DROP_RESUME='1';await assert.rejects(probeCapabilities(lab,binary),/incompatible session.interrupt request contract/);delete process.env.PROBE_DROP_RESUME;
+for (const event of ['session.inbox.enqueued','session.execution.started','session.execution.succeeded','session.execution.failed','session.execution.interrupted']) {
+  installPackage(binary);
+  const types=lab+'/client/generated/types.d.ts';
+  fs.writeFileSync(types,fs.readFileSync(types,'utf8').replace('"'+event+'"','"other.event"'));
+  await assert.rejects(probeCapabilities(lab,binary),error => error.message.includes('missing '+event+' event capability'));
+}
+installPackage(binary,'2.0.22-shuv.2');await assert.rejects(probeCapabilities(lab,binary),/executable and bundled client versions differ/);
+installPackage(binary);
+makeRuntime(lab+'/wrong-runtime','4.0.0-rc.1');await assert.rejects(probeCapabilities(lab+'/wrong-runtime',binary),/does not match the pinned version.*npm ci/);
+makeRuntime(lab+'/broken-runtime','4.0.0-rc.112','export const Data={}; export const Effect={};');await assert.rejects(probeCapabilities(lab+'/broken-runtime',binary),/native guard capabilities are missing.*npm ci/);
+// Resolve only this executable's package, including native npm distributions
+// and symlinks; never substitute an unrelated global installation.
+for (const layout of ['nested','hoisted']) {
+  const base=lab+'/'+layout+'/node_modules',owner=base+'/shuvcode';
+  const native=(layout==='nested'?owner+'/node_modules':base)+'/shuvcode-linux-x64';
+  fs.mkdirSync(native+'/bin',{recursive:true});fs.mkdirSync(owner+'/bin',{recursive:true});
+  installPackage(owner+'/shuvcode');
+  fs.writeFileSync(owner+'/package.json',JSON.stringify({name:'shuvcode',version:'2.0.23-shuv.1',type:'module',optionalDependencies:{'shuvcode-linux-x64':'2.0.23-shuv.1'}}));
+  fs.copyFileSync(binary,native+'/bin/shuvcode');
+  fs.writeFileSync(native+'/package.json',JSON.stringify({name:'shuvcode-linux-x64',version:'2.0.23-shuv.1'}));
+  fs.symlinkSync(native+'/bin/shuvcode',lab+'/'+layout+'-entry');
+  await probeCapabilities(lab,lab+'/'+layout+'-entry');
+}
+assert.ok(fs.readFileSync(log,'utf8').trim().split('\n').every(line=>['--version','--help','api --help'].includes(line)),'probe accessed service or dispatch');
 JS
-pass 'capability probe refuses unqualified version, missing CLI and runtime; qualified stand-in is read-only'
+pass 'capability probe admits compatible newer forks and refuses V1, old builds, missing CLI/API/events and mismatched runtime without service access'
 # The live guard must use dispatch's own native choice in its CPU/libc order
 # independently of locale, and fail when that choice cannot run instead of
 # moving to another variant or the node launcher.

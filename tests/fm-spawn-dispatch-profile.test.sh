@@ -534,10 +534,11 @@ SH
   # may depend on whether this host has one installed.
   cat > "$fakebin/shuvcode" <<'SH'
 #!/usr/bin/env bash
-case "${1:-}" in --version) echo 'shuvcode v2.0.22-shuv.2'; exit 0 ;; --help) echo '--server --session --auto'; exit 0 ;; esac
+case "$*" in 'api --help') echo '--server --param --data'; exit 0 ;; --version) echo 'shuvcode v2.0.23-shuv.1'; exit 0 ;; --help) echo '--server --session --auto'; exit 0 ;; esac
 exit 93
 SH
   chmod +x "$fakebin/shuvcode"
+  node "$ROOT/tests/assets/fm-opencode-v2-capability-fixture.mjs" "$fakebin/shuvcode"
 }
 
 run_opencode_v2_spawn() {  # <id> [fm-spawn args...]
@@ -733,7 +734,7 @@ make_opencode_v2_native_service() {
   cat > "$FAKEBIN_DIR/shuvcode" <<'SH'
 #!/usr/bin/env bash
 set -eu
-case "$1" in --version) echo 'shuvcode v2.0.22-shuv.2'; exit 0 ;; --help) echo '--server --session --auto'; exit 0 ;; esac
+case "$*" in 'api --help') echo '--server --param --data'; exit 0 ;; --version) echo 'shuvcode v2.0.23-shuv.1'; exit 0 ;; --help) echo '--server --session --auto'; exit 0 ;; esac
 if [ "$1" = debug ]; then echo "state $FM_FAKE_V2_NATIVE/native-state"; exit 0; fi
 [ "$1" = api ] && [ "$2" = --server ] && [ "$3" = http://127.0.0.1:12345 ] && [ "$OPENCODE_PASSWORD" = fixture ] || exit 92
 case "$4" in
@@ -749,6 +750,7 @@ session.interrupt)
 esac
 SH
   chmod +x "$FAKEBIN_DIR/shuvcode"
+  node "$ROOT/tests/assets/fm-opencode-v2-capability-fixture.mjs" "$FAKEBIN_DIR/shuvcode"
 }
 
 test_opencode_v2_secondmate_requires_exact_charter_without_composer_enter() {
@@ -1435,7 +1437,7 @@ SH
   out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" opencode-v2 --secondmate)
   status=$?
   [ "$status" -ne 0 ] || fail "an explicit opencode-v2 secondmate spawned on an unqualified build"$'\n'"$out"
-  assert_contains "$out" "unqualified target shuvcode v2.0.22-shuv.1" "unqualified V2 secondmate was not refused by the capability probe"
+  assert_contains "$out" "shuvcode v2.0.22-shuv.1 is below the supported floor" "unqualified V2 secondmate was not refused by the capability probe"
   assert_not_contains "$out" "spawned $id" "unqualified V2 secondmate reported a spawn"
   assert_absent "$HOME_DIR/state/$id.meta" "unqualified V2 secondmate published task metadata"
   assert_absent "$HOME_DIR/state/$id.opencode-v2-session.json" "unqualified V2 secondmate published a session record"

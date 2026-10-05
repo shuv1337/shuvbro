@@ -1664,42 +1664,49 @@ A throwaway scout was spawned through `bin/fm-spawn.sh --scout --harness omp --m
 
 ## Shuvcode explicit-model worker
 
-Verified on 2026-10-04 at 18:29 PDT on Linux with shuvcode v2.0.22-shuv.2, Node v26.10.0 and tmux 3.7c, using `opencode/space-bunny-free#low` on the current shared-service launcher:
+Verified on 2026-10-05 at 10:38 PDT on Linux with shuvcode v2.0.23-shuv.1, Node v26.10.0 and tmux 3.7c, using `opencode/space-bunny-free#low` on the current shared-service launcher:
 
 ```sh
-FM_OPENCODE_V2_WORKER_LIVE=1 bash tests/fm-opencode-v2-worker-live-e2e.test.sh
+FM_OPENCODE_V2_WORKER_LIVE=1 FM_OPENCODE_V2_SHARED_LIVE=1 FM_V2_LIVE_LEGS=ABCDEGH FM_OPENCODE_V2_SUCCESSION_LIVE=1 \
+  bin/fm-test-run.sh --jobs 1 tests/fm-opencode-v2-worker-live-e2e.test.sh \
+    tests/fm-opencode-v2-shared-service-live.test.sh tests/fm-opencode-v2-succession-live.test.sh
 ```
 
 Observed result:
 
 ```text
-ok - shuvcode v2.0.22-shuv.2 explicit model/variant, unattended ask, explicit deny, busy/idle, turn-end and persistent follow-up
-ok - shuvcode v2.0.22-shuv.2 exit is confirmed only once the TUI has left the pane and the recorded session is idle
-ok - shuvcode v2.0.22-shuv.2 relaunch resumes the recorded session in the same endpoint and worktree and the note is acted on
+ok - shuvcode v2.0.23-shuv.1 explicit model/variant, unattended ask, explicit deny, busy/idle, turn-end and persistent follow-up
+ok - shuvcode v2.0.23-shuv.1 exit is confirmed only once the TUI has left the pane and the recorded session is idle
+ok - shuvcode v2.0.23-shuv.1 relaunch resumes the recorded session in the same endpoint and worktree and the note is acted on
 ```
 
 The test runs relocated XDG native paths, a disposable registered shared service and an explicit non-default ownership namespace.
 Its second and third results are the live guard for `bin/fm-control.sh` on opencode-v2: the tmux classifier attributed the real worker processes, `exit` reported `native-session=idle`, and `relaunch` kept the recorded session ID, the endpoint and the worktree while the resumed worker acted on its progress note.
 Only Treehouse allocation is replaced with entry into the disposable worktree.
 The guard submits diagnostic prompts and is opt-in, outside portable CI; this run used the free model and required no paid credentials.
-The capability probe now accepts exactly `shuvcode v2.0.22-shuv.2`, following its existing policy of one qualified build at a time.
-`tests/fm-opencode-v2-launch.test.sh` covers acceptance of shuv.2 and refusal of shuv.1, shuv.3, missing launch flags and missing runtime.
-Herdr's real Treehouse path was verified on 2026-10-04 at 18:30 PDT on Linux with Herdr client/server 0.9.1-shuv.6+9059819d8043, Treehouse 2.0.0, and shuvcode v2.0.22-shuv.2:
+`bin/fm-opencode-v2-capability.mjs` owns the offline compatibility policy; admission of a newer build is separate from the live evidence recorded here.
+`tests/fm-opencode-v2-launch.test.sh` covers compatible newer releases, V1/non-fork refusal, the minimum build, CLI/API/event capabilities, package-version binding and the pinned guard runtime.
+Its fake transport also detects dropped queued/steered delivery and `resume=false` cancellation fields without opening a service.
+Herdr's real Treehouse path was verified on 2026-10-05 at 10:43 PDT on Linux with Herdr client 0.9.1-shuv.6+9059819d8043, Treehouse 2.0.0, and shuvcode v2.0.23-shuv.1:
 
 ```sh
-FM_CONTROL_HERDR_V2_LIVE=1 bin/fm-test-run.sh tests/fm-control-herdr-v2-live-e2e.test.sh
+FM_HERDR_LAB_HELPER=/home/shuv/repos/shuvbro/bin/fm-herdr-lab.sh \
+  FM_HERDR_LAB_LABEL=sb-v2-qualify-shuv231 SHELL=/bin/zsh FM_CONTROL_HERDR_V2_LIVE=1 \
+  bin/fm-test-run.sh --jobs 1 tests/fm-control-herdr-v2-live-e2e.test.sh
 ```
 
-The recorded run executed from an isolated task worktree and set `FM_HERDR_LAB_HELPER` to the main checkout's `bin/fm-herdr-lab.sh`, as that task's isolation contract required; elsewhere the test defaults to the running checkout's own `$ROOT/bin/fm-herdr-lab.sh`, so the portable command above omits the override.
+The run used the guarded helper from the primary checkout, a fresh named lab session, and the zsh nested-login-shell premise.
+It exited 0 after the helper verified the default session was unchanged.
 
 ```text
-ok - shuvcode v2.0.22-shuv.2: real Herdr/Treehouse nested-shell exit, in-place relaunch and second exit
+ok - shuvcode v2.0.23-shuv.1: real Herdr/Treehouse nested-shell exit, in-place relaunch and second exit
+ok - shuvcode v2.0.23-shuv.1: V2 secondmate owns its home, runs startup, delivers parent status, resumes its session/profile and retires cleanly
 ```
 
 After exit, the sole foreground process was `zsh -l`, with a foreground process-group ID different from the pane shell PID; the recorded native session was idle and relaunch completed in the same pane and Treehouse worktree.
 This opt-in guard uses the named-session helper's default-session tripwire, isolated XDG service and worker registry settings, and lab-only `MISE_YES=1`, never global mise trust changes.
 The stale-registration harness switch (refused without, and confirmed only by, the target adapter's own foreground process), matching-adapter `unknown` startup status, and recorded-harness consumers have portable regressions in `tests/fm-control-relaunch.test.sh`, `tests/fm-backend-herdr.test.sh`, `tests/fm-crew-state.test.sh`, and `tests/fm-task-inbox.test.sh`.
-The same day, a read-only `fm_backend_agent_state herdr <session>:<pane> opencode-v2` against a running shuvcode worker pane on Herdr 0.9.1-shuv.5 printed `alive` from its three foreground processes (owner attach wrapper, node launcher, compiled `shuvcode` binary).
+On 2026-10-04, a read-only `fm_backend_agent_state herdr <session>:<pane> opencode-v2` against a running shuvcode worker pane on Herdr 0.9.1-shuv.5 printed `alive` from its three foreground processes (owner attach wrapper, node launcher, compiled `shuvcode` binary).
 
 The installed root TUI rejects `--model`; its `mini --model` path did not honor
 the requested model in the live probe and lacks the root's `--auto` contract.
@@ -1750,12 +1757,10 @@ This qualifies home-local Linux secondmate launch and relaunch on the capability
 The native route is implemented but is not yet qualified for the combined issue #1 matrix.
 On 2026-10-02, isolated Linux probes with installed shuvcode v2.0.22-shuv.1 demonstrated native package loading, exact TUI-owned lock and pathless binding RPC, a real typed cd-guard refusal, unrelated-root execution, observer environment recovery, ordinary session-ID spoof refusal, one durable queued wake and shared-worker attachment, plus natural TUI retirement with the shared service surviving.
 Those probes used a deterministic local provider, not a paid/vendor model, and did not qualify the actual two-home/two-worker/Herdr, busy-and-idle delivery or restarted-service positive matrix.
-On 2026-10-04 at 21:05:47 PDT on Linux with installed shuvcode v2.0.22-shuv.2, Node v26.10.0 and termctrl 0.6.0, the isolated shared-service guard exited 0 for all requested legs A/B/C/D/E/G/H.
+On 2026-10-05 at 10:39:55 PDT on Linux with installed shuvcode v2.0.23-shuv.1, Node v26.10.0 and termctrl 0.6.0, the isolated shared-service guard exited 0 for all requested legs A/B/C/D/E/G/H.
 The guard used the dispatch-selected AVX2 executable `/home/shuv/.npm-global/lib/node_modules/shuvcode/node_modules/shuvcode-linux-x64/bin/shuvcode`, recorded in its output before service startup:
 
-```sh
-FM_OPENCODE_V2_SHARED_LIVE=1 FM_V2_LIVE_LEGS=ABCDEGH bash tests/fm-opencode-v2-shared-service-live.test.sh
-```
+The combined guard command in "Shuvcode explicit-model worker" above refreshes this result.
 
 ```text
 ok - live leg B: two homes on one service each have their own active owner; lead A cannot take home B
@@ -1768,11 +1773,9 @@ ok - live leg H: after the confirmed successor cancellation ordinary teardown re
 ```
 
 The run also passed package inventory, typed guard refusals, exact TUI-owned lock, owner rebind after service restart, interruption of the successor's resumed worker, and bounded settlement for workers that finished after or before restart.
-On the same host at 21:08:28 PDT, the complete succession guard exited 0 using the same AVX2 executable, with its default ten cycles and private-server case enabled:
+On the same host at 10:42:20 PDT, the complete succession guard exited 0 using the same AVX2 executable, with its default ten cycles and private-server case enabled:
 
-```sh
-FM_OPENCODE_V2_SUCCESSION_LIVE=1 bash tests/fm-opencode-v2-succession-live.test.sh
-```
+The combined guard command in "Shuvcode explicit-model worker" above refreshes this result.
 
 ```text
 ok - first arm: one watcher, no turn-end-guard prompt, first wake acknowledged
@@ -1796,22 +1799,7 @@ Their shared resolver reuses dispatch's `fm_shuvcode_native_binary` in `bin/fm-s
 The portable launcher regression exercises the four real x64 package names as native executables under both `C` and `en_US.UTF-8`, asserting AVX2, non-AVX2 and libc preferences, failure when dispatch's preferred variant cannot load even though another variant works, refusal of the node launcher, and explicit-override refusal.
 The direct Herdr detach/attach leg F was excluded because its interactive client bypasses the named-session helper required by this qualification's isolation contract.
 The separate real Herdr/Treehouse worker lifecycle guard above passed, but does not qualify that primary detach/attach leg.
-The real-model evidence remains the single-worker free-model guard above; a real-model two-home/two-worker combined Herdr matrix remains pending, so these results qualify worker dispatch on shuv.2 without claiming the complete native shared-service matrix.
+The real-model evidence remains the single-worker free-model guard above; a real-model two-home/two-worker combined Herdr matrix remains pending, so these results qualify worker dispatch on v2.0.23-shuv.1 without claiming the complete native shared-service matrix.
 
-The current [lead steer admission contract](../supervision-protocols/opencode-v2.md) has portable coverage in `tests/fm-opencode-v2-wake-admission.test.sh`, `tests/fm-opencode-v2-plugin.test.sh` and `tests/fm-opencode-v2-tui-acceptance.test.sh`; the earlier queued-wake probe above predates that change.
-The isolated shared-service guard was rerun on 2026-10-04 at 19:51 PDT on Linux with shuvcode v2.0.22-shuv.2 and the 30-second busy-tool window.
-Legs A, C and G passed, including busy-lead steering before the old prompt's final response, idle-lead execution, two wakes and two canonical acknowledgements.
-The [rerun log](https://github.com/shuv1337/shuvbro/pull/45#issuecomment-5987282004) records the exact output from this command:
-
-```sh
-FM_OPENCODE_V2_BIN=/home/shuv/.npm-global/lib/node_modules/shuvcode/node_modules/shuvcode-linux-x64/bin/shuvcode FM_OPENCODE_V2_SHARED_LIVE=1 FM_V2_LIVE_LEGS=CG bin/fm-test-run.sh --jobs 1 tests/fm-opencode-v2-shared-service-live.test.sh
-```
-
-```text
-ok - live leg G: a busy-lead wake steers at the next tool boundary before the old prompt's final response, an idle-lead wake starts execution; two wakes, two canonical acks, no duplicate execution
-not ok - 2 live qualification check(s) failed
-```
-
-That 19:51 guard exited 1 solely because its two capability-probe checks rejected the installed v2.0.22-shuv.2 under the v2.0.22-shuv.1 allowlist; the complete 21:05:47 run above supersedes those version-probe failures.
-That 19:51 run used an explicit override to select the installed Linux glibc build because the guard's then-default glob selected a musl build that could not run on this host; the shared dispatch resolver above replaces that glob.
+The current [lead steer admission contract](../supervision-protocols/opencode-v2.md) has portable coverage in `tests/fm-opencode-v2-wake-admission.test.sh`, `tests/fm-opencode-v2-plugin.test.sh` and `tests/fm-opencode-v2-tui-acceptance.test.sh`, and live busy/idle delivery proof in leg G above.
 No upstream `opencode2` or cross-host split qualification is claimed; the home-local V2 secondmate evidence above is separate from this combined matrix.
