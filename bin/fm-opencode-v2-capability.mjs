@@ -32,6 +32,7 @@ function installedPackage(executable, release) {
   }
   if (!binary) throw new Error("cannot resolve the probed executable");
   // Handle both a launcher symlink and nested/hoisted native npm packages.
+  let native = false;
   for (let dir = dirname(binary); ; dir = dirname(dir)) {
     let pkg;
     try { pkg = JSON.parse(readFileSync(join(dir, "package.json"), "utf8")); } catch {}
@@ -41,12 +42,15 @@ function installedPackage(executable, release) {
     }
     if (/^shuvcode-(linux|darwin|windows)-/.test(pkg?.name || "")) {
       if (pkg.version !== release) throw new Error("native package and executable versions differ");
+      native = true;
       const sibling = join(dirname(dir), "shuvcode");
       let owner;
       try { owner = JSON.parse(readFileSync(join(sibling, "package.json"), "utf8")); } catch {}
       if (owner?.name === "shuvcode" && owner.version === release && owner.optionalDependencies?.[pkg.name] === release) return sibling;
     }
-    if (dirname(dir) === dir) return undefined;
+    if (dirname(dir) !== dir) continue;
+    if (native) throw new Error("native package has no matching shuvcode owner package with an offline client");
+    return undefined;
   }
 }
 

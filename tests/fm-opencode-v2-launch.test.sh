@@ -158,6 +158,16 @@ for (const layout of ['nested','hoisted']) {
   fs.symlinkSync(native+'/bin/shuvcode',lab+'/'+layout+'-entry');
   await probeCapabilities(lab,lab+'/'+layout+'-entry');
 }
+const orphan=lab+'-orphan/node_modules',orphanNative=orphan+'/shuvcode-linux-x64';
+fs.mkdirSync(orphanNative+'/bin',{recursive:true});fs.copyFileSync(binary,orphanNative+'/bin/shuvcode');
+fs.writeFileSync(orphanNative+'/package.json',JSON.stringify({name:'shuvcode-linux-x64',version:'2.0.23-shuv.1'}));
+fs.symlinkSync(orphanNative+'/bin/shuvcode',lab+'/orphan-entry');
+await assert.rejects(probeCapabilities(lab,lab+'/orphan-entry'),/native package has no matching shuvcode owner package.*reinstall/);
+for (const owner of [{version:'2.0.22-shuv.2',optionalDependencies:{'shuvcode-linux-x64':'2.0.22-shuv.2'}},{version:'2.0.23-shuv.1'}]) {
+  installPackage(orphan+'/shuvcode/shuvcode');
+  fs.writeFileSync(orphan+'/shuvcode/package.json',JSON.stringify({name:'shuvcode',type:'module',...owner}));
+  await assert.rejects(probeCapabilities(lab,lab+'/orphan-entry'),/native package has no matching shuvcode owner package.*reinstall/);
+}
 const standalone=lab+'-standalone/bin/shuvcode';
 fs.mkdirSync(lab+'-standalone/bin',{recursive:true});fs.copyFileSync(binary,standalone);
 assert.deepEqual(await probeCapabilities(lab,standalone),{version:'shuvcode v2.0.23-shuv.1',runtime:'effect',qualified:true});
