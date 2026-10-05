@@ -378,9 +378,11 @@ The [Relay configuration reference](configuration.md#promised-public-replies-sta
 
 ## Project memory belongs to projects
 
-Durable project-intrinsic agent knowledge lives in each project's committed `AGENTS.md`, with `CLAUDE.md` as a real `@AGENTS.md` import pointer.
-Ship briefs prompt crewmates to create or update those files through the normal delivery path; `data/projects.md` stays a thin private registry.
-Each project `AGENTS.md` carries self-governance guidance; [`bin/fm-ensure-agents-md.sh`](../bin/fm-ensure-agents-md.sh) owns the canonical wording and idempotent insertion, while its header and help document the explicit mark for equivalent project-owned guidance.
+Durable project-intrinsic agent knowledge lives in each project's committed `AGENTS.md`.
+`CLAUDE.md` is a real `@AGENTS.md` import pointer when [`bin/fm-ensure-agents-md.sh`](../bin/fm-ensure-agents-md.sh) writes it, and an existing symlink to `AGENTS.md` stays a symlink.
+Ship briefs tell crewmates to update those files through the normal delivery path when the task produced durable project-intrinsic knowledge; `data/projects.md` stays a thin private registry.
+That helper owns the canonical self-governance wording for a skeleton it creates, leaves that section off an existing file that does not already carry it, and leaves an existing `CLAUDE.md` symlink in place.
+Its header and help own that contract.
 It refuses a case-variant real memory file such as a lowercase `agents.md`, so the pointer's `@AGENTS.md` import resolves to a real `AGENTS.md` on a case-sensitive filesystem, and surfaces the mismatch for manual reconciliation.
 The full ownership rule - what is project-intrinsic versus fleet-private, and how firstmate keeps the two apart without writing into project clones - is owned by [`AGENTS.md`](../AGENTS.md) (project and knowledge management).
 

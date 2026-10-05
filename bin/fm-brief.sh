@@ -60,10 +60,13 @@
 # process state/<id>.inbox/*.msg in order and acknowledge each by moving it to
 # handled/ (record, doorbell, and ladder owned by bin/fm-task-inbox-lib.sh).
 # Ship tasks include a project-memory section so durable project-intrinsic
-# learnings can be committed to AGENTS.md through the project's delivery path;
-# it carries the AGENTS.md authoring bar (widely useful knowledge only, pointers
-# over copied detail) and defers self-governance recognition and insertion to
-# fm-ensure-agents-md.sh's contract.
+# learnings can be committed to AGENTS.md through the project's delivery path.
+# That section runs fm-ensure-agents-md.sh only when the task produced that
+# knowledge. The helper owns file-convention handling: it leaves an existing
+# CLAUDE.md symlink in place and does not retrofit self-governance onto an
+# AGENTS.md that does not already carry it. The section also carries the
+# AGENTS.md authoring bar (widely useful knowledge only, pointers over copied
+# detail).
 # Scaffolds carry no role scope: fm-spawn.sh supplies fm_brief_worker_role from
 # fm-dod-lib.sh to every ship/scout launch brief, so this file never becomes a
 # second owner of a contract that must stay current across relaunches.
@@ -502,7 +505,7 @@ $ASK_USER_BLOCK
 $INBOX_SECTION
 
 # Project memory
-If \`AGENTS.md\` or \`CLAUDE.md\` already exists, or if this task produced durable project-intrinsic knowledge, run \`$FM_ROOT/bin/fm-ensure-agents-md.sh .\` in the worktree.
+Run \`$FM_ROOT/bin/fm-ensure-agents-md.sh .\` in the worktree only when this task produced durable project-intrinsic knowledge to record in \`AGENTS.md\`.
 Record only project knowledge useful to almost every future session.
 For anything the codebase already shows, prefer a pointer to the authoritative file, command, or doc over copying the detail.
 If you touch a project \`AGENTS.md\`, follow \`$FM_ROOT/bin/fm-ensure-agents-md.sh\`'s self-governance contract in the same pass.
