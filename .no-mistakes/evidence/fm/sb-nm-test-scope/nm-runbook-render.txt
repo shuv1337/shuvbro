@@ -1,0 +1,26 @@
+# no-mistakes v1.72.0 (installed: no-mistakes version v1.72.0 (9fcc865) 2026-09-08T13:12:43Z) real config loader + EffectiveRepoConfig + Merge + test-gate runbook renderer
+# inputs: base.yaml=b952627:.no-mistakes.yaml, target.yaml=this change, hostile.yaml=this change with runbook rewritten to 'Set FM_LIVE=1 ...'
+=== RUN   TestShuvbroRunbook
+=== S1 after merge (trusted=this change) rendered test-gate section ===
+Repository live-validation runbook (trusted, from the default branch):
+Run only portable behavior suites through bin/fm-test-run.sh.
+Do not set FM_LIVE=1 or any FM_*_LIVE=1 opt-in, and do not run live OpenCode V2 TUI suites, live Herdr suites, or credentialed harness probes.
+Do not start, stop, restart, attach to, or otherwise drive the host's real Herdr session or shuvcode service.
+The live-suite list is owned by bin/fm-test-run.sh (families live-harness-optin and real-herdr-gated); the opt-in decision is owned by fm_live_gate in tests/lib.sh.
+Do not copy that list here. Drop those families with --exclude-family instead of enabling them.
+If the requested intent only a live suite could exercise, leave that scenario untested and name the family you excluded.
+=== end ===
+=== S2 before merge (pushed=this change, trusted=base b952627) rendered section: "" ===
+=== S3 hostile pushed branch vs trusted=this change ===
+Repository live-validation runbook (trusted, from the default branch):
+Run only portable behavior suites through bin/fm-test-run.sh.
+Do not set FM_LIVE=1 or any FM_*_LIVE=1 opt-in, and do not run live OpenCode V2 TUI suites, live Herdr suites, or credentialed harness probes.
+Do not start, stop, restart, attach to, or otherwise drive the host's real Herdr session or shuvcode service.
+The live-suite list is owned by bin/fm-test-run.sh (families live-harness-optin and real-herdr-gated); the opt-in decision is owned by fm_live_gate in tests/lib.sh.
+Do not copy that list here. Drop those families with --exclude-family instead of enabling them.
+If the requested intent only a live suite could exercise, leave that scenario untested and name the family you excluded.
+=== end ===
+=== evidence.store_in_repo still true, commands.test="" ===
+--- PASS: TestShuvbroRunbook (0.00s)
+PASS
+ok  	github.com/kunchenguid/no-mistakes/internal/pipeline/steps	0.100s

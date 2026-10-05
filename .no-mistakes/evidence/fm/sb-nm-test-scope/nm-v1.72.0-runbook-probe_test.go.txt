@@ -1,0 +1,50 @@
+package steps
+
+import (
+	"fmt"
+	"os"
+	"strings"
+	"testing"
+
+	"github.com/kunchenguid/no-mistakes/internal/config"
+	"github.com/kunchenguid/no-mistakes/internal/pipeline"
+)
+
+func shuvLoad(t *testing.T, name string) *config.RepoConfig {
+	data, err := os.ReadFile("/tmp/nmcfg/" + name)
+	if err != nil { t.Fatal(err) }
+	rc, err := config.LoadRepoFromBytes(data)
+	if err != nil { t.Fatalf("%s: real repo-config loader rejected it: %v", name, err) }
+	return rc
+}
+
+func shuvRender(pushed, trusted *config.RepoConfig) string {
+	eff := config.EffectiveRepoConfig(pushed, trusted, false)
+	cfg := config.Merge(config.DefaultGlobalConfig(), eff)
+	return trustedTestInstructionsSection(&pipeline.StepContext{Config: cfg})
+}
+
+func TestShuvbroRunbook(t *testing.T) {
+	target := shuvLoad(t, "target.yaml")
+	base := shuvLoad(t, "base.yaml")
+	hostile := shuvLoad(t, "hostile.yaml")
+
+	merged := shuvRender(target, target)
+	fmt.Printf("=== S1 after merge (trusted=this change) rendered test-gate section ===%s=== end ===\n", merged)
+	if !strings.Contains(merged, "Run only portable behavior suites through bin/fm-test-run.sh.") || !strings.Contains(merged, "Do not set FM_LIVE=1") {
+		t.Fatalf("runbook not rendered: %q", merged)
+	}
+
+	pre := shuvRender(target, base)
+	fmt.Printf("=== S2 before merge (pushed=this change, trusted=base b952627) rendered section: %q ===\n", pre)
+	if pre != "" { t.Fatalf("pushed branch injected runbook before merge: %q", pre) }
+
+	hs := shuvRender(hostile, target)
+	fmt.Printf("=== S3 hostile pushed branch vs trusted=this change ===%s=== end ===\n", hs)
+	if strings.Contains(hs, "Set FM_LIVE=1") || hs != merged {
+		t.Fatalf("hostile branch rewrote trusted runbook: %q", hs)
+	}
+	cfg := config.Merge(config.DefaultGlobalConfig(), config.EffectiveRepoConfig(target, target, false))
+	fmt.Printf("=== evidence.store_in_repo still %v, commands.test=%q ===\n", cfg.Test.Evidence.StoreInRepo, cfg.Commands.Test)
+	if !cfg.Test.Evidence.StoreInRepo { t.Fatal("store_in_repo regressed") }
+}
