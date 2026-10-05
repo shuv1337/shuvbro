@@ -17,8 +17,9 @@
 # serve    Run the board for the active FM_HOME in the foreground, bound to
 #          127.0.0.1 only, through bin/fm-board.mjs (node; no npm dependency).
 #          The page rebuilds its data every FM_BOARD_INTERVAL seconds (default
-#          10, 2..300) from `model`. While it runs it keeps one private record,
+#          10, 2..300) from `model`. While it runs it keeps a private serve record,
 #          state/board/serve.json (pid, port, instance), removed on exit.
+#          bin/fm-board.mjs owns the persistent answer-confirmation records.
 # status   Exit 0 and print the local URL when this home's board answers its
 #          health check; exit 1 and say why otherwise. Reads only.
 # model    Print the board's fm-board.v1 view as JSON, built only from
@@ -51,21 +52,21 @@
 # The card's close mode is declared by the board for every card it renders,
 # from the structured row: a question row (kind captain) closes, and any other
 # held work item is released so it can proceed, which keeps an approval from
-# ever marking unlanded work complete. Only Yes or a declared option releases
-# held work: No, a typed reply, and Later on a held work item use the intake's
-# `record` mode, which keeps the hold, so the merge entrypoints keep refusing
-# that work until the lead acts. A declared option on held work is therefore a
-# way for it to go ahead; a choice that should stop it is a reply or Later. A card is pinned by a digest of the
-# exact question shown (id, title, reason, hold-set stamp, hold-until, declared
-# options, kind); `answer` refuses a digest that no longer matches a fresh
-# snapshot, so a question re-asked while the page was open is never answered
-# with the old click.
+# ever marking unlanded work complete. Only Yes releases held work: No, a
+# declared option, a typed reply, and Later on a held work item use the
+# intake's `record` mode, which keeps the hold, so the merge entrypoints keep
+# refusing that work until the lead acts on the recorded choice. A card is
+# pinned by a digest of the exact question shown (id, title, reason, hold-set
+# stamp, hold-until, declared options, kind); `answer` holds the task's control
+# lock from that check through its last captain-hold write, so a question
+# re-asked while the page was open, or while the answer is being written, is
+# never answered with the old click.
 #
 # answer prints exactly one JSON line, {"ok":true,"outcome":...,"message":...}
 # or {"ok":false,"code":...,"message":...}, and exits 0 when recorded (a Later
-# whose deferral fails after its answer was recorded records it again, so the
-# answer stays newer than the rewritten hold-set stamp, reports outcome
-# not_deferred, and still wakes the lead), 2 for an
+# whose deferral fails after its answer was recorded verifies a repair intake
+# write before reporting not_deferred and waking the lead; a failed repair
+# still wakes the lead and returns repair_failed instead of success), 2 for an
 # invalid request, 3 when the item is no longer the one the captain saw, and 1
 # when recording failed. Free text is at most 500 characters and becomes one
 # line; dates must be after today (UTC) and at most 366 days out.
@@ -73,8 +74,10 @@
 # Configuration (all optional, local, gitignored, never inherited by
 # secondmate homes; docs/configuration.md "Live board" owns the schema):
 #   config/board-port    FM_BOARD_PORT   loopback port, default 8795
-#   config/board-hosts   extra host names the page may be reached by
-#   config/board-logins  Tailscale logins allowed through tailscale serve
+#   config/board-hosts   extra host names the page may be reached by; needs
+#                        config/board-logins, or `serve` refuses to start
+#   config/board-logins  Tailscale logins allowed through tailscale serve;
+#                        without it only direct loopback requests are served
 # docs/live-board.md owns setup, exposure, and the threat model.
 #
 # Environment:
@@ -416,11 +419,32 @@ valid_until() {  # <YYYY-MM-DD> <today>
       and $a > $b and ($a - $b) <= (366 * 86400)' >/dev/null
 }
 
+ANSWER_LOCK=
+ANSWER_LOCK_PID=
+
+# The task control lock bin/fm-captain-hold.sh takes for every write to a
+# captain call. Its holder's pid, passed as FM_CAPTAIN_HOLD_LOCKED_BY, lets the
+# captain-hold writes this answer makes run inside it instead of waiting on it.
+answer_lock_acquire() {  # <task-id>
+  # shellcheck source=bin/fm-wake-lib.sh
+  # shellcheck disable=SC1091
+  . "$SCRIPT_DIR/fm-wake-lib.sh"
+  fm_current_pid ANSWER_LOCK_PID || return 1
+  ANSWER_LOCK="$STATE/.control-$1.lock"
+  fm_lock_acquire_wait "$ANSWER_LOCK" || { ANSWER_LOCK=; return 1; }
+}
+
+answer_lock_release() {
+  [ -n "$ANSWER_LOCK" ] || return 0
+  fm_lock_release "$ANSWER_LOCK" || true
+  ANSWER_LOCK=
+}
+
 command_answer() {
   local id=${1:-} card='' choice='' until='' text_file='' login='' text='' have_text=0
   local item lead source label answer_value mode intake_mode reason title outcome rc out note_body note_out note_id
   local today summary defer_error='' option
-  trap model_cleanup EXIT
+  trap 'model_cleanup; answer_lock_release' EXIT
   [ "$#" -ge 1 ] || { usage >&2; exit 2; }
   shift
   while [ "$#" -gt 0 ]; do
@@ -485,6 +509,8 @@ command_answer() {
     answer_result 2 bad_request "Only Later carries a date."
   fi
 
+  answer_lock_acquire "$id" \
+    || answer_result 1 record_failed "The board could not lock this item, so nothing was recorded."
   build_model || answer_result 1 snapshot_failed "The board could not read the fleet records, so nothing was recorded."
   item=$(printf '%s' "$MODEL_JSON" | jq -c --arg id "$id" \
     'first(.waiting_on_you[] | select(.answerable and .id == $id)) // empty')
@@ -521,7 +547,8 @@ command_answer() {
   [ -z "$login" ] || source="live board, signed in as $login"
 
   case "$mode:$choice" in
-    *:later|release:no|release:reply) intake_mode=record ;;
+    release:yes) intake_mode=release ;;
+    release:*|*:later) intake_mode=record ;;
     *) intake_mode=$mode ;;
   esac
   case "$choice" in
@@ -548,7 +575,7 @@ command_answer() {
   label=$(printf '%s' "$label" | tr '\t\r\n' '   ')
   feed_intake() {
     printf '%s\t%s\t%s\t%s\n' "$id" "$answer_value" "$label" "$intake_mode" \
-      | "$SCRIPT_DIR/fm-captain-hold.sh" answers --source "$source" 2>/dev/null
+      | FM_CAPTAIN_HOLD_LOCKED_BY=$ANSWER_LOCK_PID "$SCRIPT_DIR/fm-captain-hold.sh" answers --source "$source" 2>/dev/null
   }
   out=$(feed_intake) || true
   if ! printf '%s\n' "$out" | grep -Fxq -e "closed: $id" -e "recorded: $id"; then
@@ -568,15 +595,20 @@ command_answer() {
     done <<EOF
 $(printf '%s' "$item" | jq -r 'if .choices[0].id == "yes" then empty else .choices[].label end')
 EOF
-    if out=$("$SCRIPT_DIR/fm-captain-hold.sh" "$@" 2>&1 </dev/null); then
+    if out=$(FM_CAPTAIN_HOLD_LOCKED_BY=$ANSWER_LOCK_PID "$SCRIPT_DIR/fm-captain-hold.sh" "$@" 2>&1 </dev/null); then
       outcome=deferred
     else
       outcome=not_deferred
-      feed_intake >/dev/null || true
       defer_error=$(printf '%s' "$out" | tail -1 | sed 's/^fm-captain-hold: //' | cut -c1-300)
+      # Record the failed date gate as new provenance, not an idempotent replay
+      # of the original Later. Its recovery write must actually land.
+      source="$source, date could not be set"
+      out=$(feed_intake) || true
+      printf '%s\n' "$out" | grep -Fxq "recorded: $id" || outcome=repair_failed
     fi
   fi
 
+  answer_lock_release
   note_body=$(
     printf 'Live board answer for %s: %s\n' "$id" "$summary"
     printf 'Question: %s' "$title"
@@ -589,8 +621,15 @@ EOF
       recorded) printf 'Recorded through the %s: the held work stays held until you act on this answer.\n' "$source" ;;
       deferred) printf 'Recorded through the %s: deferred until %s; it returns to the captain then.\n' "$source" "$until" ;;
       not_deferred) printf 'Recorded through the %s, but deferring until %s failed (%s); the work stays held, so re-hold it with that date.\n' "$source" "$until" "$defer_error" ;;
+      repair_failed) printf 'Later was recorded through the %s, but deferring until %s failed (%s) and the follow-up record did not land, so the outcome is uncertain; the work stays held: check the task, then re-hold it with that date or ask the captain.\n' "$source" "$until" "$defer_error" ;;
     esac
   )
+  if [ "$outcome" = repair_failed ]; then
+    if ! printf '%s\n' "$note_body" | "$SCRIPT_DIR/fm-inbox.sh" note - >/dev/null 2>&1; then
+      answer_result 1 repair_failed "Later was recorded, but the date and follow-up could not be confirmed. $lead was not notified. Mention it in chat; the work stays held."
+    fi
+    answer_result 1 repair_failed "Later could not be confirmed after the date failed. The work stays held. Refresh or ask $lead before answering again."
+  fi
   if ! note_out=$(printf '%s\n' "$note_body" | "$SCRIPT_DIR/fm-inbox.sh" note - 2>&1); then
     answer_result 0 "$outcome" "Recorded, but $lead was not notified. Mention it in chat." '' "$id"
   fi
@@ -638,6 +677,8 @@ EOF
   done <<EOF
 $(config_lines board-logins)
 EOF
+  [ "$hosts" = '[]' ] || [ "$logins" != '[]' ] \
+    || fail "$CONFIG/board-hosts lists host names but $CONFIG/board-logins is empty; list your Tailscale login there before sharing the board, or remove board-hosts to keep it on this computer only"
   config=$(jq -cn \
     --arg home "$FM_HOME" --arg state "$STATE" --arg board_sh "$SCRIPT_DIR/fm-board.sh" \
     --arg page "$SCRIPT_DIR/fm-board-page.html" --argjson port "$port" --argjson interval "$interval" \
