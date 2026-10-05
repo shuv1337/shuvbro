@@ -1,0 +1,18 @@
+FM_TEST_BEGIN 2026-10-05T05:58:21Z tests/fm-supervision-instructions.test.sh family=pure-contract-unit expected_gate_skip=none
+ok - renderer prints exactly the selected harness block
+ok - renderer falls back to unknown.md for unverified harness names
+ok - renderer includes read-only, afk, and effective x-mode current-state stanzas
+ok - renderer repair-line mode is harness-aware and honors conditional state
+ok - renderer preserves every harness ordinary-continuation and missing-cycle repair path
+ok - pi-signed keeps its identity while sharing Pi's supervision protocol
+ok - grok supervision is Claude-shaped background notify with passive Stop-hook backstop
+ok - grok rendered command sources the effective x-mode config
+ok - pi supervision snippet renders the effective extension path
+ok - opencode-v2 supervision instructions report inactive automatic supervision in a linked checkout and keep the plain primary block
+ok - opencode-v2 supervision instructions report inactive automatic supervision in a secondmate home
+ok - every other harness renders the same block and repair line in linked and plain checkouts
+ok - activated linked external-home lead retains native protocol
+FM_TEST_END 2026-10-05T05:58:22Z tests/fm-supervision-instructions.test.sh exit=0 duration_ms=1126 gate_skip=false
+FM_TEST_SUMMARY total=1 failed=0 skipped_gate=0 duration_ms=1151
+FM_TEST_SUMMARY_FAMILY family=pure-contract-unit count=1 duration_ms=1126 failed=0
+FM_TEST_SLOWEST rank=1 script=tests/fm-supervision-instructions.test.sh duration_ms=1126
