@@ -1238,23 +1238,7 @@ fi
 # locked harness resolution below, so configuration/record changes cannot evade
 # the gate. This reads the same selector precedence without adopting a task.
 V2_CAPABILITY_PROBED=0
-if [ "$KIND" = secondmate ]; then
-  capability_harness=${HARNESS_ARG:-}
-  if [ -z "$capability_harness" ]; then
-    if [ "$RELAUNCH" -eq 1 ]; then
-      capability_harness=$(fm_meta_get "$STATE/$ID.meta" harness)
-    else
-      case "${POS[1]:-}" in
-        opencode-v2) capability_harness=opencode-v2 ;;
-        *) capability_harness=${POS[2]:-$("$FM_ROOT/bin/fm-harness.sh" secondmate)} ;;
-      esac
-    fi
-  fi
-  if [ "$capability_harness" = opencode-v2 ]; then
-    node "$FM_ROOT/bin/fm-opencode-v2-capability.mjs" "$FM_ROOT" >/dev/null || exit 1
-    V2_CAPABILITY_PROBED=1
-  fi
-else
+if [ "$KIND" != secondmate ]; then
   if [ -n "$HARNESS_ARG" ]; then
     capability_harness=$HARNESS_ARG
   elif [ "$RELAUNCH" -eq 1 ]; then

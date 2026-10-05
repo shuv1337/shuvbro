@@ -1351,6 +1351,31 @@ test_claude_secondmate_launch_carries_the_attribution_policy() {
   pass "a claude secondmate launch carries the attribution-off policy too"
 }
 
+test_explicit_secondmate_harness_skips_pinned_v2_probe() {
+  local rec id sm out status
+  id=profile-secondmate-v2-pin-claude
+  rec=$(make_spawn_case profile-secondmate-v2-pin-claude codex "$id")
+  read_case_record "$rec"
+  printf '%s\n' opencode-v2 > "$HOME_DIR/config/secondmate-harness"
+  cat > "$FAKEBIN_DIR/shuvcode" <<'SH'
+#!/usr/bin/env bash
+echo 'shuvcode v2.0.22-shuv.1'
+SH
+  chmod +x "$FAKEBIN_DIR/shuvcode"
+  sm="$CASE_DIR/secondmate-home"
+  make_seeded_secondmate_home "$sm" "$id"
+  sm=$(cd "$sm" && pwd -P)
+  printf -- '- %s - pinned V2 fixture (home: %s; scope: test; projects: ; added 2026-10-04)\n' "$id" "$sm" \
+    > "$HOME_DIR/data/secondmates.md"
+
+  out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" claude --secondmate)
+  status=$?
+  expect_code 0 "$status" "an explicit claude secondmate must not be gated on the pinned V2 build"$'\n'"$out"
+  assert_contains "$out" "spawned $id harness=claude kind=secondmate" \
+    "explicit claude secondmate did not keep its requested harness"
+  pass "an explicit non-V2 secondmate proceeds despite an unqualified pinned V2 build"
+}
+
 test_active_dispatch_profile_does_not_block_secondmate_launch() {
   local rec id sm out status
   id=profile-secondmate-z16
@@ -1700,5 +1725,6 @@ test_non_claude_harness_ignores_config_dir
 test_claude_crewmate_launch_carries_the_attribution_policy
 test_claude_secondmate_launch_carries_the_attribution_policy
 test_active_dispatch_profile_does_not_block_secondmate_launch
+test_explicit_secondmate_harness_skips_pinned_v2_probe
 
 echo "# all fm-spawn-dispatch-profile tests passed"

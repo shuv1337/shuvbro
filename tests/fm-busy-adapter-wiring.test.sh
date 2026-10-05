@@ -537,6 +537,10 @@ SH
   }
   assert_contains "$out" 'unqualified target' \
     "a positional V2 secondmate must probe capabilities, not parse the harness as a home: $out"
+  assert_absent "$HOME_DIR/state/.spawn-$id.lock" 'V2 secondmate refusal must release the spawn lock'
+  assert_absent "$HOME_DIR/state/$id.meta" 'V2 secondmate refusal must precede task metadata'
+  assert_absent "$HOME_DIR/state/$id.status" 'V2 secondmate refusal must precede task status'
+  assert_absent "$HOME_DIR/state/$id.opencode-v2-session.json" 'V2 secondmate refusal must precede a session record'
   pass "positional V2 secondmate refuses an unqualified installed build before dispatch"
 }
 
