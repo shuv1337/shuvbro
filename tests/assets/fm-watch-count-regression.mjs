@@ -48,13 +48,17 @@ try {
   });
   await test("a parent exiting mid-read triggers a stable rescan", async ({ procRoot, put, options }) => {
     let scans = 0;
-    let parentReads = 0;
+    let subshellEnvironReads = 0;
+    let parentReadStarted = false;
     let fired = false;
     options.list = (path) => { scans++; return readdirSync(path); };
     options.read = (path, encoding) => {
-      // Root 20's initial read and its own two reads precede the subshell's
-      // parent read. Remove both old entries exactly at that parent read.
-      if (path === join(procRoot, "20/cmdline") && ++parentReads === 4) {
+      // After subshell 21's identity and environment are read, its parent 20
+      // is read next. Remove both old entries between that parent's stat and
+      // cmdline reads, and start a successor watcher.
+      if (path === join(procRoot, "21/environ")) subshellEnvironReads++;
+      if (!fired && subshellEnvironReads >= 2 && path === join(procRoot, "20/stat")) parentReadStarted = true;
+      if (!fired && parentReadStarted && path === join(procRoot, "20/cmdline")) {
         fired = true;
         rmSync(join(procRoot, "20"), { recursive: true });
         rmSync(join(procRoot, "21"), { recursive: true });
@@ -63,7 +67,8 @@ try {
       return readFileSync(path, encoding);
     };
     assert.equal(await countWatchers(home, options), 1);
-    assert.ok(fired && scans >= 3, "must invalidate the vanished-parent sample");
+    assert.ok(parentReadStarted && fired, "must remove the parent during the subshell parent read");
+    assert.ok(scans >= 3, "must invalidate the vanished-parent sample");
   });
   await test("a vanished candidate is tolerated", async ({ procRoot, options }) => {
     let fired = false;
