@@ -488,6 +488,41 @@ SH
   pass "sweep: V2 dead/missing recovery requires idle native proof; executing and uncertain endpoints are preserved"
 }
 
+test_sweep_herdr_non_v2_keeps_registry_classifier() {
+  local w fb tmuxfb herdrfb log herdr_log out
+  if ! command -v jq >/dev/null 2>&1; then
+    pass "sweep: Herdr non-V2 classifier skipped without jq"
+    return 0
+  fi
+  w=$(new_world sweep-herdr-claude)
+  add_sm_home "$w" sm1 fm-test:p1 claude
+  printf 'backend=herdr\n' >> "$w/home/state/sm1.meta"
+  fb=$(make_toolchain "$w"); tmuxfb=$(make_liveness_tmux "$w")
+  herdrfb=$(fm_fakebin "$w/herdr")
+  log="$w/calls.log"; : > "$log"
+  herdr_log="$w/herdr.log"; : > "$herdr_log"
+  cat > "$herdrfb/herdr" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$FM_TEST_HERDR_LOG"
+case "${1:-} ${2:-}" in
+  "pane get") printf '%s\n' '{"result":{"pane":{"pane_id":"p1"}}}' ;;
+  "agent get") printf '%s\n' '{"result":{"agent":{"agent":"claude","agent_status":"unknown"}}}' ;;
+  "pane process-info") printf '%s\n' '{"result":{"type":"pane_process_info","process_info":{"pane_id":"p1","foreground_processes":[{"name":"zsh"}]}}}' ;;
+esac
+exit 0
+SH
+  chmod +x "$herdrfb/herdr"
+
+  out=$(run_bootstrap "$herdrfb:$tmuxfb:$fb" "$w/home" zsh "$log" FM_TEST_HERDR_LOG="$herdr_log")
+
+  assert_contains "$out" "SECONDMATE_LIVENESS: secondmate sm1: skipped: endpoint probe unreadable" \
+    "a non-V2 Herdr registration reporting unknown status stays unreadable"
+  assert_not_contains "$(cat "$herdr_log")" "process-info" \
+    "non-V2 Herdr classification must not consult the foreground-process classifier"
+  assert_not_contains "$(cat "$herdr_log")" "close" "an unreadable non-V2 Herdr endpoint is never closed"
+  pass "sweep: non-V2 Herdr secondmates keep the registry classifier"
+}
+
 test_sweep_never_acts_on_ambiguous_existing_process() {
   local w fb tmuxfb log out
   w=$(new_world sweep-ambiguous)
@@ -613,6 +648,7 @@ test_sweep_leaves_alive_secondmate_untouched
 test_sweep_respawns_authoritatively_missing_pi_secondmate
 test_sweep_respawns_authoritatively_missing_pi_signed_secondmate
 test_sweep_opencode_v2_recovery_requires_idle_native_session
+test_sweep_herdr_non_v2_keeps_registry_classifier
 test_sweep_never_acts_on_ambiguous_existing_process
 test_sweep_never_acts_on_transient_unreadability
 test_sweep_reports_missing_endpoint_relaunch_failure

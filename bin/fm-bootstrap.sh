@@ -179,7 +179,7 @@ DATA="${FM_DATA_OVERRIDE:-$FM_HOME/data}"
 . "$SCRIPT_DIR/fm-x-lib.sh"
 # shellcheck source=bin/fm-backend.sh disable=SC1091
 . "$SCRIPT_DIR/fm-backend.sh"
-# shellcheck source=bin/fm-control-lib.sh
+# shellcheck source=bin/fm-control-lib.sh disable=SC1091
 . "$SCRIPT_DIR/fm-control-lib.sh"
 # shellcheck source=bin/fm-remote-readiness-lib.sh disable=SC1091
 . "$SCRIPT_DIR/fm-remote-readiness-lib.sh"
@@ -796,7 +796,11 @@ secondmate_liveness_one() {  # <meta> <id>
   backend=$(fm_backend_of_meta "$meta")
   target=$(fm_backend_target_of_meta "$meta")
   [ -n "$target" ] || target="$window"
-  agent_state=$(fm_backend_agent_state "$backend" "$target" "$harness" 2>/dev/null) || agent_state=unreadable
+  if [ "$harness" = opencode-v2 ]; then
+    agent_state=$(fm_backend_agent_state "$backend" "$target" "$harness" 2>/dev/null) || agent_state=unreadable
+  else
+    agent_state=$(fm_backend_agent_state "$backend" "$target" 2>/dev/null) || agent_state=unreadable
+  fi
   case "$harness" in
     claude|codex|opencode|opencode-v2|pi|pi-signed|grok|kimi|omp) ;;
     *)
