@@ -60,6 +60,7 @@ The worker wiring writes `.opencode/plugins/package.json` only when the project 
 Secondmates use the launch helper's `--secondmate` path, which activates a lead at the secondmate's own code root and `FM_HOME`, never the parent's lead claim.
 Install the pinned guard runtime in that seeded home too; a missing runtime refuses before any endpoint opens.
 The parent-owned session sidecar still supplies native execution proof for control, recovery and retirement, while the child owns its exact activation, session start and supervision.
+`bin/fm-bootstrap.sh`'s local secondmate liveness sweep recovers a dead or missing endpoint only after `bin/fm-control-lib.sh`'s native agent-free proof reports idle; it never interrupts execution to make startup recovery possible.
 The native TUI plugin admits its charter only after publishing the child's claim, guard marker and frozen environment.
 The existing secondmate profile pin and parent-channel contract are unchanged; [secondmate provisioning](../../../secondmate-provisioning/SKILL.md) owns them.
 Busy state comes from the Firstmate-owned worker plugin's `session.execution.started` (busy) and its `session.execution.succeeded`, `failed`, or `interrupted` terminal event (idle), latched to the worker's own root session; shuvcode publishes no `session.status` or `session.idle` event to plugins.

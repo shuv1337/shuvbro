@@ -181,7 +181,7 @@ test_herdr_agent_state_preserves_husk_classifier() {
 # --- unit level: the generic dispatchers ------------------------------------
 
 test_agent_state_dispatcher_and_compatibility() {
-  local fb out
+  local fb out row
 
   fb=$(make_probe_tmux "$TMP_ROOT/dispatch-tmux" claude)
   out=$(PATH="$fb:$BASE_PATH" bash -c '. "$0/bin/fm-backend.sh"; fm_backend_agent_state tmux sess:win' "$ROOT")
@@ -189,6 +189,17 @@ test_agent_state_dispatcher_and_compatibility() {
 
   out=$(bash -c '. "$0/bin/fm-backend.sh"; fm_backend_source herdr; fm_backend_herdr_pane_agent_state() { printf "live"; }; fm_backend_agent_state herdr sess:p1' "$ROOT")
   [ "$out" = alive ] || fail "detailed dispatcher should route Herdr, got '$out'"
+
+  # A stale hook says live, but V2 must use foreground/presence evidence.
+  for row in 'dead missing' 'present dead' 'unknown unreadable'; do
+    out=$(FM_TEST_PANE_STATE="${row%% *}" bash -c '
+      . "$0/bin/fm-backend.sh"; fm_backend_source herdr
+      fm_backend_herdr_pane_agent_state() { printf live; }
+      fm_backend_herdr_pane_presence_state() { printf "%s" "$FM_TEST_PANE_STATE"; }
+      fm_backend_herdr_pane_process_agent_state() { printf dead; }
+      fm_backend_agent_state herdr sess:p1 opencode-v2' "$ROOT")
+    [ "$out" = "${row#* }" ] || fail "V2 Herdr ${row%% *} must use adapter-specific evidence, got '$out'"
+  done
 
   out=$(bash -c '. "$0/bin/fm-backend.sh"; fm_backend_agent_state zellij sess:7' "$ROOT")
   [ "$out" = unverified ] || fail "Zellij should remain unverified, got '$out'"
@@ -424,6 +435,59 @@ test_sweep_respawns_authoritatively_missing_pi_signed_secondmate() {
   pass "sweep: an authoritatively missing pi-signed secondmate window is relaunched"
 }
 
+test_sweep_opencode_v2_recovery_requires_idle_native_session() {
+  local w fb tmuxfb log out pane execution native_log row
+  # The durable replacement pin stays codex in this fixture: recovery uses the
+  # recorded V2 session for safety, then the normal spawn/profile resolution.
+  for row in 'zsh idle' 'missing idle' 'zsh executing' 'missing executing' 'missing unproven' 'missing unreadable' 'node idle' 'unreadable idle' 'shuvcode executing'; do
+    pane=${row%% *}; execution=${row#* }
+    w=$(new_world "sweep-v2-$pane-$execution")
+    add_sm_home "$w" sm1 firstmate:fm-sm1 opencode-v2
+    fb=$(make_toolchain "$w"); tmuxfb=$(make_liveness_tmux "$w")
+    log="$w/calls.log"; : > "$log"
+    native_log="$w/native.log"
+    cat > "$fb/node" <<'SH'
+#!/usr/bin/env bash
+case "${1:-} ${2:-}" in
+  *fm-opencode-v2-session.mjs\ status)
+    printf '%s\n' "$*" >> "$FM_TEST_NATIVE_LOG"
+    case "$FM_TEST_EXECUTION" in
+      idle) printf '%s\n' '{"executing":false}' ;;
+      executing) printf '%s\n' '{"executing":true}' ;;
+      unproven) printf '%s\n' '{"executing":null}' ;;
+      unreadable) exit 1 ;;
+    esac
+    ;;
+esac
+SH
+    chmod +x "$fb/node"
+    out=$(run_bootstrap "$tmuxfb:$fb" "$w/home" "$pane" "$log" \
+      FM_TEST_NATIVE_LOG="$native_log" FM_TEST_EXECUTION="$execution")
+    case "$pane:$execution" in
+      zsh:idle|missing:idle)
+        assert_contains "$(cat "$log")" new-window "idle native V2 session permits recovery of $pane endpoint"
+        assert_not_contains "$out" 'unverified for recovery' "V2 is verified for recovery"
+        [ "$pane" != missing ] || assert_not_contains "$(cat "$log")" kill-window "missing V2 endpoint needs no kill"
+        ;;
+      *)
+        [ ! -s "$log" ] || fail "V2 $pane/$execution must not kill or respawn"
+        case "$pane" in
+          zsh|missing) assert_contains "$out" "native execution $execution" "unsafe native proof must be reported" ;;
+          node) assert_contains "$out" 'ambiguous agent process' "ambiguous V2 endpoint is preserved" ;;
+          unreadable) assert_contains "$out" 'endpoint probe unreadable' "unreadable V2 endpoint is preserved" ;;
+        esac
+        ;;
+    esac
+    case "$pane" in
+      zsh|missing)
+        assert_contains "$(cat "$native_log")" "status $w/home/state/sm1.opencode-v2-session.json $w/sm1" "recovery probes exact V2 session and home"
+        ;;
+      *) [ ! -e "$native_log" ] || fail "live/ambiguous/unreadable endpoints must not need a native recovery probe" ;;
+    esac
+  done
+  pass "sweep: V2 dead/missing recovery requires idle native proof; executing and uncertain endpoints are preserved"
+}
+
 test_sweep_never_acts_on_ambiguous_existing_process() {
   local w fb tmuxfb log out
   w=$(new_world sweep-ambiguous)
@@ -548,6 +612,7 @@ test_sweep_respawns_confirmed_dead_secondmate
 test_sweep_leaves_alive_secondmate_untouched
 test_sweep_respawns_authoritatively_missing_pi_secondmate
 test_sweep_respawns_authoritatively_missing_pi_signed_secondmate
+test_sweep_opencode_v2_recovery_requires_idle_native_session
 test_sweep_never_acts_on_ambiguous_existing_process
 test_sweep_never_acts_on_transient_unreadability
 test_sweep_reports_missing_endpoint_relaunch_failure
