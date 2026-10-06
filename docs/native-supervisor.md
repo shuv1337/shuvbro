@@ -15,6 +15,8 @@ External supervisor endpoints are unsupported for this profile.
 `up` and `sync` each reconcile once; `watch` reconciles every two seconds with a five-second status lease.
 Stopping or losing the adapter changes expired display observations to unknown and leaves native execution running.
 Restarting the adapter reads its exact home-local journal and current bindings.
+`watch` holds the home lock only during each pass, so explicit `cleanup` and `reopen` run while it continues.
+One entry's failure does not stop other entries from being created or reported; the pass still exits nonzero.
 Use `control` with typed native supervisor arguments for work operations; it prints the native command's result.
 The adapter never admits durable prompts through pane input.
 

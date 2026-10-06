@@ -63,9 +63,14 @@ async function main() {
     process.stdout.write(await native(journal, [...tail, "--home", home], false));
     return;
   }
-  const unlock = await lock(home);
-  try {
-    const current = JSON.parse(await readFile(file, "utf8"));
+  if (verb === "watch") {
+    for (;;) {
+      try { await locked(home, file, async current => { ready(current); await sync(current, file); output(current); }); }
+      catch (error) { console.error(`Native display unavailable: ${error.message}`); }
+      await new Promise(done => setTimeout(done, 2000));
+    }
+  }
+  await locked(home, file, async current => {
     if (verb === "init") {
       await negotiate(current); // Refuse incompatible display before native init or any view.
       await herdr(current, "workspace.get", { workspace_id: current.herdr.parentWorkspaceID });
@@ -78,7 +83,7 @@ async function main() {
       output(current);
       return;
     }
-    if (!current.initialized) throw new Error("Native initialization is incomplete; retain this home for inspection and choose a new home");
+    ready(current);
     if (verb === "up") {
       await native(current, ["up", "--home", home, "--profile", profile, ...nativeOptions(options)], false);
       await sync(current, file);
@@ -122,12 +127,19 @@ async function main() {
       output(current);
       return;
     }
-    do {
-      try { await sync(current, file); output(current); }
-      catch (error) { if (verb !== "watch") throw error; console.error(`Native display unavailable: ${error.message}`); }
-      if (verb === "watch") await new Promise(done => setTimeout(done, 2000));
-    } while (verb === "watch");
-  } finally { await unlock(); }
+    await sync(current, file);
+    output(current);
+  });
+}
+
+function ready(journal) {
+  if (!journal.initialized) throw new Error("Native initialization is incomplete; retain this home for inspection and choose a new home");
+}
+
+async function locked(home, file, action) {
+  const unlock = await lock(home);
+  try { return await action(JSON.parse(await readFile(file, "utf8"))); }
+  finally { await unlock(); }
 }
 
 function nativeOptions(options) {
@@ -149,19 +161,22 @@ async function save(file, value) {
 }
 
 async function lock(home) {
-  const directory = join(home, ".native-display-lock");
-  try { await mkdir(directory, { mode: 0o700 }); }
-  catch (error) {
-    if (error.code !== "EEXIST") throw error;
-    const pid = Number(await readFile(join(directory, "pid"), "utf8"));
+  const directory = join(home, ".native-display-lock"), deadline = Date.now() + 10000;
+  for (;;) {
+    const staging = `${directory}.${randomUUID()}.tmp`;
+    await mkdir(staging, { mode: 0o700 });
+    await writeFile(join(staging, "pid"), String(process.pid), { mode: 0o600 });
+    try { await rename(staging, directory); return () => rm(directory, { recursive: true }); }
+    catch (error) { await rm(staging, { recursive: true }); if (!["EEXIST", "ENOTEMPTY"].includes(error.code)) throw error; }
+    let pid;
+    try { pid = Number(await readFile(join(directory, "pid"), "utf8")); }
+    catch (error) { if (error.code === "ENOENT") continue; throw error; }
     if (!Number.isSafeInteger(pid) || pid < 2) throw new Error("Ambiguous native display lock; retain it for inspection");
-    try { process.kill(pid, 0); throw new Error("Native display adapter is already running"); }
-    catch (alive) { if (alive.code !== "ESRCH") throw alive; }
-    await rm(directory, { recursive: true });
-    await mkdir(directory, { mode: 0o700 });
+    try { process.kill(pid, 0); }
+    catch (alive) { if (alive.code !== "ESRCH") throw alive; await rm(directory, { recursive: true, force: true }); continue; }
+    if (Date.now() > deadline) throw new Error("Native display adapter is busy");
+    await new Promise(done => setTimeout(done, 100));
   }
-  await writeFile(join(directory, "pid"), String(process.pid), { mode: 0o600 });
-  return () => rm(directory, { recursive: true });
 }
 
 async function native(journal, args, json) {
@@ -217,7 +232,7 @@ async function presentation(journal) {
   if (projection.version !== 1 || projection.homeID !== journal.homeID || projection.home !== journal.home || !Array.isArray(projection.entries)) throw new Error("Native projection has a different home identity");
   const ids = new Set();
   for (const entry of projection.entries) {
-    if (typeof entry.id !== "string" || !entry.id || ids.has(entry.id) || !["lead", "ship", "scout"].includes(entry.role) || !["idle", "working", "blocked", "done", "unknown"].includes(entry.state) || typeof entry.available !== "boolean" || typeof entry.settled !== "boolean" || typeof entry.retired !== "boolean" || !isAbsolute(entry.location) || entry.attachment?.provider !== "shuvcode" || entry.attachment.home_id !== journal.homeID || entry.attachment.session_id !== entry.sessionID || entry.attachment.location !== entry.location || entry.attachment.host_id !== "local") throw new Error("Invalid or nonlocal native presentation entry");
+    if (typeof entry.id !== "string" || !entry.id || ids.has(entry.id) || !["lead", "ship", "scout"].includes(entry.role) || !["idle", "working", "blocked", "done", "unknown"].includes(entry.state) || typeof entry.available !== "boolean" || typeof entry.settled !== "boolean" || typeof entry.retired !== "boolean" || entry.role !== "lead" && (typeof entry.title !== "string" || !entry.title.trim()) || !isAbsolute(entry.location) || entry.attachment?.provider !== "shuvcode" || entry.attachment.home_id !== journal.homeID || entry.attachment.session_id !== entry.sessionID || entry.attachment.location !== entry.location || entry.attachment.host_id !== "local") throw new Error("Invalid or nonlocal native presentation entry");
     ids.add(entry.id);
     const args = entry.attachment.attach_argv;
     const suffix = ["supervisor", "attach", "--home", journal.home, "--home-id", journal.homeID, "--session", entry.sessionID, "--location", entry.location];
@@ -243,18 +258,23 @@ async function owned(journal, entry) {
 async function sync(journal, file) {
   const projection = await presentation(journal);
   await negotiate(journal); // No creations on old Herdr, even after runtime up.
+  const failures = [];
   for (const fact of projection.entries) {
-    if (!journal.entries[fact.id]) {
-      if (!fact.available || fact.retired) continue;
-      journal.entries[fact.id] = record(journal, fact);
-      await save(file, journal);
-    }
-    await reconcile(journal, file, fact);
+    try {
+      if (!journal.entries[fact.id]) {
+        if (!fact.available || fact.retired) continue;
+        journal.entries[fact.id] = record(journal, fact);
+        await save(file, journal);
+      }
+      await reconcile(journal, file, fact);
+    } catch (error) { failures.push(`${fact.id}: ${error.message}`); }
   }
   for (const entry of Object.values(journal.entries)) {
     if (projection.entries.some(fact => fact.id === entry.id) || entry.phase !== "ready") continue;
-    await report(journal, file, entry, { state: "unknown", label: "native entry unavailable" });
+    try { await refresh(journal, file, entry, { state: "unknown", label: "native entry unavailable" }); }
+    catch (error) { failures.push(`${entry.id}: ${error.message}`); }
   }
+  if (failures.length) throw new Error(failures.join("; "));
 }
 
 async function reconcile(journal, file, fact) {
@@ -264,10 +284,11 @@ async function reconcile(journal, file, fact) {
   if (entry.phase === "create_pending") throw new Error(`Uncertain creation for ${fact.id}; retain journal and inspect Herdr before allocating another view`);
   if (entry.phase === "new") {
     if (!fact.available || fact.retired) return;
+    const label = fact.role === "lead" ? (journal.role === "secondmate" ? "2ndmate" : "firstmate") : fact.title.slice(0, 100);
     await herdr(journal, "workspace.get", { workspace_id: journal.herdr.parentWorkspaceID });
     entry.phase = "create_pending";
     await save(file, journal);
-    const created = await herdr(journal, "workspace.create", { source_workspace_id: journal.herdr.parentWorkspaceID, cwd: fact.location, focus: false, label: fact.role === "lead" ? (journal.role === "secondmate" ? "2ndmate" : "firstmate") : fact.title.slice(0, 100) });
+    const created = await herdr(journal, "workspace.create", { source_workspace_id: journal.herdr.parentWorkspaceID, cwd: fact.location, focus: false, label });
     if (!created.root_pane?.pane_id || created.root_pane.workspace_id !== created.workspace?.workspace_id || created.root_pane.tab_id !== created.tab?.tab_id) throw new Error("Invalid created presentation topology; retain pending creation");
     entry.paneID = created.root_pane.pane_id; entry.workspaceID = created.workspace.workspace_id; entry.tabID = created.tab.tab_id;
     entry.phase = "bind_pending";
@@ -309,13 +330,15 @@ async function reconcile(journal, file, fact) {
     catch (error) { if (!["not_found", "pane_not_found"].includes(error.code)) throw error; entry.phase = "closed"; await save(file, journal); return; }
     throw new Error(`Uncertain cleanup for ${fact.id}; repeat explicit cleanup after settlement`);
   }
-  if (entry.phase === "ready") {
-    try { await report(journal, file, entry, fact); }
-    catch (error) {
-      if (!["not_found", "pane_not_found"].includes(error.code)) throw error;
-      entry.phase = "closed"; // Display disappeared; never substitute another running view.
-      await save(file, journal);
-    }
+  if (entry.phase === "ready") await refresh(journal, file, entry, fact);
+}
+
+async function refresh(journal, file, entry, fact) {
+  try { await report(journal, file, entry, fact); }
+  catch (error) {
+    if (!["not_found", "pane_not_found"].includes(error.code)) throw error;
+    entry.phase = "closed"; // Display disappeared; never substitute another running view.
+    await save(file, journal);
   }
 }
 

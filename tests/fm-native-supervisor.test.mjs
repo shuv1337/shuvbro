@@ -13,7 +13,7 @@ async function fixture(t) {
   const directory = await mkdtemp(join(tmpdir(), "fm-native-test-"));
   const home = join(directory, "native"), socket = join(directory, "herdr.sock"), project = join(directory, "project"), fake = join(directory, "shuvcode.mjs");
   await mkdir(project);
-  await writeFile(fake, `import { readFile, writeFile, appendFile } from 'node:fs/promises';\nimport { join } from 'node:path';\nconst base=process.argv[2], args=process.argv.slice(3);\nawait appendFile(join(base,'native-calls.jsonl'),JSON.stringify(args)+'\\n');\nconst home=args[args.indexOf('--home')+1];\nif(args[1]==='init'){const profile=JSON.parse(await readFile(args[args.indexOf('--profile')+1],'utf8'));if(profile.id!=='shuvbro'||!profile.leadInstructions.includes('native supervisor'))process.exit(2);await writeFile(join(home,'settings.json'),JSON.stringify({pilotID:'native-home-id'}));}\nif(args[1]==='presentation')process.stdout.write(await readFile(join(base,'projection.json'),'utf8'));\n`);
+  await writeFile(fake, `import { readFile, writeFile, appendFile } from 'node:fs/promises';\nimport { join } from 'node:path';\nconst base=process.argv[2], args=process.argv.slice(3);\nawait appendFile(join(base,'native-calls.jsonl'),JSON.stringify(args)+'\\n');\nconst home=args[args.indexOf('--home')+1];\nif(args[1]==='init'){const profile=JSON.parse(await readFile(args[args.indexOf('--profile')+1],'utf8'));if(profile.version!==1||profile.id!=='shuvbro'||typeof profile.leadInstructions!=='string'||!profile.leadInstructions.trim())process.exit(2);await writeFile(join(home,'settings.json'),JSON.stringify({pilotID:'native-home-id'}));}\nif(args[1]==='presentation')process.stdout.write(await readFile(join(base,'projection.json'),'utf8'));\n`);
   await writeFile(fake, await readFile(fake, "utf8") + "if(args[1]==='status')process.stdout.write('typed native output\\n');\n");
   const facts = ["lead", "ship", "scout"].map((role, index) => ({ id: `entry-${index}`, role, taskID: index ? `task-${index}` : undefined, title: `View ${index}`, sessionID: `ses_${index}`, location: project, state: index === 2 ? "blocked" : index === 1 ? "working" : "idle", available: true, settled: false, retired: false, attachment: { provider: "shuvcode", home_id: "native-home-id", session_id: `ses_${index}`, location: project, host_id: "local", attach_argv: ["/private/shuvcode", "supervisor", "attach", "--home", home, "--home-id", "native-home-id", "--session", `ses_${index}`, "--location", project] } }));
   const projection = { version: 1, homeID: "native-home-id", home, entries: facts, observedAt: 0, endpoint: "http://127.0.0.1:1" };
@@ -71,10 +71,22 @@ async function fixture(t) {
       child.on("close", code => resolveResult({ code, stdout, stderr }));
     });
   }
+  function start(...args) {
+    const child = spawn(process.execPath, [executable, ...args], { env: { PATH: process.env.PATH, HOME: directory }, stdio: ["ignore", "ignore", "ignore"] });
+    const closed = new Promise(resolve => child.on("close", resolve));
+    t.after(() => { child.kill(); return closed; });
+    return { child, closed };
+  }
+  async function until(predicate) {
+    for (const deadline = Date.now() + 15000; Date.now() < deadline; await new Promise(resolve => setTimeout(resolve, 50))) {
+      try { const value = await predicate(); if (value) return value; } catch {}
+    }
+    throw new Error("Timed out waiting for native display state");
+  }
   async function init(extra = []) { return run("init", "--home", home, "--project", project, "--herdr-socket", socket, "--herdr-session", "native-test", "--parent-workspace", "@parent", "--shuvcode-command", JSON.stringify([process.execPath, fake, directory]), ...extra); }
   async function journal() { return JSON.parse(await readFile(join(home, "native-display.json"), "utf8")); }
   async function nativeCalls() { return (await readFile(join(directory, "native-calls.jsonl"), "utf8")).trim().split("\n").map(line => JSON.parse(line)); }
-  return { directory, home, projection, facts, state, publish, run, init, journal, nativeCalls };
+  return { directory, home, projection, facts, state, publish, run, start, until, init, journal, nativeCalls };
 }
 
 test("native init/profile and explicit up converge on exact no-focus views; cleanup needs settlement", async t => {
@@ -120,13 +132,63 @@ test("lost binding/report replies reconcile retained identity and increasing seq
   strictEqual(f.state.bindings.get(entry.paneID).seq, entry.seq); strictEqual(entry.seq, 3);
 });
 
-test("lost create result remains uncertain and never allocates a duplicate", async t => {
+test("lost create result remains uncertain without blocking or duplicating other views", async t => {
   const f = await fixture(t); strictEqual((await f.init()).code, 0);
   f.state.lose = "workspace.create";
+  const failed = await f.run("sync", "--home", f.home);
+  strictEqual(failed.code, 1); match(failed.stderr, /entry-0: Uncertain|entry-0: Herdr workspace.create/);
+  strictEqual(f.state.creates, 3); strictEqual(f.state.launches, 2);
+  const first = await f.journal();
+  strictEqual(first.entries["entry-0"].phase, "create_pending");
+  strictEqual(first.entries["entry-1"].phase, "ready"); strictEqual(first.entries["entry-2"].phase, "ready");
   strictEqual((await f.run("sync", "--home", f.home)).code, 1);
+  strictEqual(f.state.creates, 3); strictEqual(f.state.launches, 2);
+  const second = await f.journal();
+  strictEqual(second.entries["entry-0"].phase, "create_pending");
+  for (const id of ["entry-1", "entry-2"]) {
+    strictEqual(second.entries[id].seq, first.entries[id].seq + 1);
+    strictEqual(f.state.bindings.get(second.entries[id].paneID).seq, second.entries[id].seq);
+  }
+});
+
+test("a worker without a title is refused before any pending creation is journaled", async t => {
+  const f = await fixture(t); strictEqual((await f.init()).code, 0);
+  delete f.facts[1].title; await f.publish();
   strictEqual((await f.run("sync", "--home", f.home)).code, 1);
-  strictEqual(f.state.creates, 1); strictEqual(f.state.launches, 0);
-  strictEqual((await f.journal()).entries["entry-0"].phase, "create_pending");
+  strictEqual(f.state.creates, 0); deepStrictEqual((await f.journal()).entries, {});
+  f.facts[1].title = "View 1"; await f.publish();
+  strictEqual((await f.run("sync", "--home", f.home)).code, 0);
+  strictEqual(f.state.creates, 3);
+  ok(Object.values((await f.journal()).entries).every(entry => entry.phase === "ready"));
+});
+
+test("an entry gone from the projection whose pane disappears becomes closed", async t => {
+  const f = await fixture(t); strictEqual((await f.init()).code, 0); strictEqual((await f.run("sync", "--home", f.home)).code, 0);
+  f.projection.entries.splice(1, 1); await f.publish();
+  strictEqual((await f.run("sync", "--home", f.home)).code, 0);
+  const gone = (await f.journal()).entries["entry-1"];
+  strictEqual(gone.phase, "ready"); strictEqual(f.state.bindings.get(gone.paneID).state, "unknown");
+  f.state.panes.delete(gone.paneID); f.state.bindings.delete(gone.paneID);
+  strictEqual((await f.run("sync", "--home", f.home)).code, 0);
+  strictEqual((await f.journal()).entries["entry-1"].phase, "closed");
+  strictEqual((await f.run("sync", "--home", f.home)).code, 0);
+  strictEqual((await f.run("cleanup", "--home", f.home, "--entry", "entry-1")).code, 0);
+  strictEqual(f.state.creates, 3);
+});
+
+test("explicit cleanup proceeds while watch runs and watch keeps the cleanup result", async t => {
+  const f = await fixture(t); strictEqual((await f.init()).code, 0);
+  const watch = f.start("watch", "--home", f.home);
+  const before = await f.until(async () => { const journal = await f.journal(); return Object.values(journal.entries).length === 3 && Object.values(journal.entries).every(entry => entry.phase === "ready") && journal; });
+  f.facts[1].settled = true; f.facts[1].retired = true; await f.publish();
+  const cleanup = await f.run("cleanup", "--home", f.home, "--entry", "entry-1");
+  strictEqual(cleanup.code, 0, cleanup.stderr);
+  ok(!f.state.panes.has(before.entries["entry-1"].paneID));
+  const seq = (await f.journal()).entries["entry-0"].seq;
+  const after = await f.until(async () => { const journal = await f.journal(); return journal.entries["entry-0"].seq >= seq + 2 && journal; });
+  strictEqual(after.entries["entry-1"].phase, "closed");
+  strictEqual(f.state.creates, 3); strictEqual(f.state.launches, 3);
+  strictEqual(watch.child.exitCode, null);
 });
 
 test("lost launch and Herdr restore of bound view never submit attach input twice", async t => {
