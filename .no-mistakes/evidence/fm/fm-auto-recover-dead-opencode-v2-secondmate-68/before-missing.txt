@@ -1,0 +1,21 @@
+=== scenario: missing  (checkout: /tmp/fmbase-qtIs)
+--- tmux windows BEFORE:
+firstmate:main pane_cmd=sleep pane_id=%0
+--- real native probe (node fm-opencode-v2-session.mjs status):
+    V2 task has no recorded native session; no busy record reports execution.
+    {"executing":false,"recorded":false}
+--- fm-bootstrap.sh SECONDMATE_LIVENESS / RESPAWN output:
+    (bootstrap exit=0)
+    SECONDMATE_LIVENESS: secondmate sm1: skipped: recorded harness 'opencode-v2' is unverified for recovery (backend=tmux)
+    SECONDMATE_SYNC: secondmate sm1: skipped: primary default-branch commit cannot be resolved
+--- tmux windows AFTER:
+firstmate:main pane_cmd=sleep pane_id=%0
+--- recorded meta AFTER:
+    window=firstmate:fm-sm1
+    kind=secondmate
+    harness=opencode-v2
+    home=/tmp/fmlive-missing-KK57/sm1
+--- pane %0 screen:
+--- replacement agent launches:
+    (none)
+workdir=/tmp/fmlive-missing-KK57

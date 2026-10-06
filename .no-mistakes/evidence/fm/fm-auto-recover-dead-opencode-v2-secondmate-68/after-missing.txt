@@ -1,0 +1,38 @@
+=== scenario: missing  (checkout: bdc358f)
+--- tmux windows BEFORE:
+firstmate:main pane_cmd=sleep pane_id=%0
+--- real native probe (node fm-opencode-v2-session.mjs status):
+    V2 task has no recorded native session; no busy record reports execution.
+    {"executing":false,"recorded":false}
+--- fm-bootstrap.sh SECONDMATE_LIVENESS / RESPAWN output:
+    (bootstrap exit=0)
+    BOOTSTRAP_INFO: secondmate sm1 relaunched after recorded endpoint confidently missing (backend=tmux)
+    SECONDMATE_SYNC: secondmate sm1: skipped: primary default-branch commit cannot be resolved
+--- tmux windows AFTER:
+firstmate:main pane_cmd=sleep pane_id=%0
+firstmate:fm-sm1 pane_cmd=sleep pane_id=%1
+--- recorded meta AFTER:
+    window=firstmate:fm-sm1
+    endpoint_task_id=sm1
+    worktree=/tmp/fmlive-missing-752r/sm1
+    project=/tmp/fmlive-missing-752r/sm1
+    harness=codex
+    kind=secondmate
+    mode=secondmate
+    yolo=off
+    tasktmp=/tmp/fm-sm1
+    model=default
+    effort=default
+    spawn_gen=s1791324151.1472528.9670
+    home=/tmp/fmlive-missing-752r/sm1
+    projects=
+--- pane %0 screen:
+--- pane %1 screen:
+    752r/home' FM_HOME='/tmp/fmlive-missing-752r/sm1' FM_TRACE_CONTEXT=off FM_SUPERV
+    ISION_MODEL=persistent env -u CURSOR_AGENT -u CURSOR_INVOKED_AS -u GEMINI_CLI co
+    dex --dangerously-bypass-approvals-and-sandbox "$('/home/shuv/.no-mistakes/workt
+    rees/8a7692f99431/01M49KPCY48NX6FJ4T63RN92FZ/bin/fm-operational-input.sh' encode
+     launch-brief < '/tmp/fmlive-missing-752r/sm1/data/charter.md')"
+--- replacement agent launches:
+    codex-standin launched --dangerously-bypass-approvals-and-sandbox ⁣FIRSTMATE_OP: v1 launch-brief: charter
+workdir=/tmp/fmlive-missing-752r

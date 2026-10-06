@@ -1,0 +1,39 @@
+=== scenario: dead-shell  (checkout: bdc358f)
+--- tmux windows BEFORE:
+firstmate:main pane_cmd=sleep pane_id=%0
+firstmate:fm-sm1 pane_cmd=bash pane_id=%1
+--- real native probe (node fm-opencode-v2-session.mjs status):
+    V2 task has no recorded native session; no busy record reports execution.
+    {"executing":false,"recorded":false}
+--- fm-bootstrap.sh SECONDMATE_LIVENESS / RESPAWN output:
+    (bootstrap exit=0)
+    BOOTSTRAP_INFO: secondmate sm1 relaunched after confirmed agent absence on existing endpoint (backend=tmux)
+    SECONDMATE_SYNC: secondmate sm1: skipped: primary default-branch commit cannot be resolved
+--- tmux windows AFTER:
+firstmate:main pane_cmd=sleep pane_id=%0
+firstmate:fm-sm1 pane_cmd=sleep pane_id=%2
+--- recorded meta AFTER:
+    window=firstmate:fm-sm1
+    endpoint_task_id=sm1
+    worktree=/tmp/fmlive-dead-shell-8tN3/sm1
+    project=/tmp/fmlive-dead-shell-8tN3/sm1
+    harness=codex
+    kind=secondmate
+    mode=secondmate
+    yolo=off
+    tasktmp=/tmp/fm-sm1
+    model=default
+    effort=default
+    spawn_gen=s1791324154.1474883.27917
+    home=/tmp/fmlive-dead-shell-8tN3/sm1
+    projects=
+--- pane %0 screen:
+--- pane %2 screen:
+    ll-8tN3/home' FM_HOME='/tmp/fmlive-dead-shell-8tN3/sm1' FM_TRACE_CONTEXT=off FM_
+    SUPERVISION_MODEL=persistent env -u CURSOR_AGENT -u CURSOR_INVOKED_AS -u GEMINI_
+    CLI codex --dangerously-bypass-approvals-and-sandbox "$('/home/shuv/.no-mistakes
+    /worktrees/8a7692f99431/01M49KPCY48NX6FJ4T63RN92FZ/bin/fm-operational-input.sh'
+    encode launch-brief < '/tmp/fmlive-dead-shell-8tN3/sm1/data/charter.md')"
+--- replacement agent launches:
+    codex-standin launched --dangerously-bypass-approvals-and-sandbox ⁣FIRSTMATE_OP: v1 launch-brief: charter
+workdir=/tmp/fmlive-dead-shell-8tN3
