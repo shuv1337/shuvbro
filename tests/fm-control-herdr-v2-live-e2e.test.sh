@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Real shuvcode exit/relaunch through a real Treehouse nested login shell on
-# Herdr. Opt in with FM_CONTROL_HERDR_V2_LIVE=1 (submits diagnostic prompts).
+# Herdr. The nested shell is Herdr's configured pane shell ([terminal]
+# default_shell, else $SHELL, else /bin/sh), not a hardcoded zsh.
+# Opt in with FM_CONTROL_HERDR_V2_LIVE=1 (submits diagnostic prompts).
 # FM_HERDR_LAB_HELPER and FM_HERDR_LAB_LABEL select the guarded helper and lab label.
 # Every Herdr call uses the guarded named-session helper, including backend
 # calls routed through a lab-only CLI shim. XDG, mise approval, service and
@@ -14,7 +16,8 @@ LAB=$(cd "$LAB" && pwd -P)
 HERDR_LAB_HELPER=${FM_HERDR_LAB_HELPER:-"$ROOT/bin/fm-herdr-lab.sh"}
 HERDR_LAB_SESSION=$("$HERDR_LAB_HELPER" name "${FM_HERDR_LAB_LABEL:-control-v2-live}")
 ORIGINAL_PATH=$PATH
-export HERDR_LAB_HELPER HERDR_LAB_SESSION ORIGINAL_PATH
+HERDR_SHELL_CONFIG=${HERDR_CONFIG_PATH:-${XDG_CONFIG_HOME:-$HOME/.config}/herdr/config.toml}
+export HERDR_LAB_HELPER HERDR_LAB_SESSION ORIGINAL_PATH HERDR_SHELL_CONFIG
 cleanup_lab() {
   local status=$?
   "$HERDR_LAB_HELPER" teardown "$HERDR_LAB_SESSION" || status=1
@@ -111,7 +114,44 @@ chmod +x "$LAB/bin/herdr"
   PANE=$(sed -n 's/^herdr_pane_id=//p' "$HOME_DIR/state/nested.meta")
   "$ROOT/bin/fm-control.sh" nested exit > "$LAB/exit.log" 2>&1
   herdr pane process-info --pane "$PANE" --session "$HERDR_LAB_SESSION" > "$LAB/after-exit.json"
-  jq -e '.result.process_info | .foreground_process_group_id != .shell_pid and (.foreground_processes | length) == 1 and .foreground_processes[0].name == "zsh"' "$LAB/after-exit.json" >/dev/null
+  # Herdr resolves the pane shell from [terminal] default_shell when it is
+  # set, otherwise from the server's SHELL, otherwise /bin/sh. Read
+  # the same config the running server loaded (resolved before the lab XDG
+  # override, which is for shuvcode, not Herdr) so a bash-login host is not
+  # required to be zsh.
+  configured_shell=
+  if [ -f "$HERDR_SHELL_CONFIG" ]; then
+    configured_shell=$(awk '
+      /^[[:space:]]*#/ { next }
+      /^[[:space:]]*\[/ { section=$0; sub(/#.*/, "", section); gsub(/[[:space:]]/, "", section); next }
+      section == "[terminal]" && $0 ~ /^[[:space:]]*default_shell[[:space:]]*=/ {
+        val=$0
+        sub(/^[^=]*=[[:space:]]*/, "", val)
+        if (val ~ /^"/) { sub(/^"/, "", val); sub(/".*/, "", val) }
+        else if (val ~ /^\047/) { sub(/^\047/, "", val); sub(/\047.*/, "", val) }
+        print val
+        exit
+      }
+    ' "$HERDR_SHELL_CONFIG")
+  fi
+  if [ -z "$configured_shell" ]; then
+    configured_shell=${SHELL:-}
+  fi
+  if [ -z "$configured_shell" ]; then
+    configured_shell=/bin/sh
+  fi
+  configured_shell=${configured_shell##*/}
+  configured_shell=${configured_shell#-}
+  jq -e --arg shell "$configured_shell" '
+    .result.process_info
+    | .foreground_process_group_id != .shell_pid
+    and (.foreground_processes | length) == 1
+    and .foreground_processes[0].name == $shell
+  ' "$LAB/after-exit.json" >/dev/null || {
+    echo "not ok - after exit the sole nested foreground process was not $configured_shell" >&2
+    jq '.result.process_info' "$LAB/after-exit.json" >&2 || true
+    exit 1
+  }
   "$ROOT/bin/fm-control.sh" nested relaunch --note 'Continue the fixture: reply FIXTURE_DONE, no tools or changes.' > "$LAB/relaunch.log" 2>&1
   grep -q '^relaunched nested harness=opencode-v2 from=opencode-v2' "$LAB/relaunch.log"
   wait_idle

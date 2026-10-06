@@ -1755,7 +1755,8 @@ ok - shuvcode v2.0.22-shuv.2: V2 secondmate owns its home, runs startup, deliver
 FM_TEST_SUMMARY total=1 failed=0 skipped_gate=0 duration_ms=134072
 ```
 
-The command pins zsh because the guard's pre-existing nested-shell assertion expects that shell.
+That command pinned zsh because the guard's nested-shell assertion then expected zsh.
+The fixture now asserts Herdr's configured pane shell (`[terminal] default_shell`, otherwise `$SHELL`, otherwise `/bin/sh`), so the unpinned documented command no longer requires a zsh login host; no unpinned live run is recorded yet.
 This qualifies home-local Linux secondmate launch and relaunch on the capability-qualified build; it does not extend the separate combined shared-service or cross-host matrix below.
 
 ### Native shared-service qualification status
