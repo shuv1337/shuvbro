@@ -1,7 +1,14 @@
 # Live board
 
 The live board is an optional web page for one home that shows what is waiting on you, what is in flight, heads-up notes, what is queued, and what recently finished, and lets you answer what is waiting on you with a click.
-It rebuilds itself every few seconds, says so plainly when updates stop (judged by the board's own clock, so a phone whose clock is off does not misreport it), and puts the number of items waiting on you in the browser tab title.
+It does not rebuild while nobody is asking for the page or its data, so a board left running with no one looking stays quiet.
+Opening it shows the current records without waiting for a background timer.
+While the page is open it keeps checking, reuses the last rebuild when the backlog, heads-up notes, secondmate registry, task metadata, and status logs are unchanged, and still fully rebuilds at least once a minute (or once per check, when checks are slower), so worker liveness, secondmate-home questions, and other inputs outside those files can lag up to that long while the page is open.
+That age starts when the rebuild starts, so the next check is not early.
+The page's update time is that check.
+An in-flight card's checked time is the last full rebuild, which can be older when those records have not changed.
+Answering always rebuilds after the write, so the page does not keep the question you just answered.
+It says so plainly when updates stop (judged by the board's own clock, so a phone whose clock is off does not misreport it), and puts the number of items waiting on you in the browser tab title.
 A home that never starts it behaves exactly as before.
 
 ## Start it
@@ -71,4 +78,4 @@ A raw TCP forward can omit the proxy headers and look like a direct local reques
 
 ## Verification
 
-`tests/fm-board.test.sh` covers the rendered view, every request guard above, each answer kind landing through the intake with its wake, a declared choice keeping held work held, a re-ask racing an answer, failed Later recovery including notification failure, the stale and offline indicators against a skewed phone clock, the page handling a lost committed response while a new question is asked, restart-safe retries, and a home that never starts the board staying untouched.
+`tests/fm-board.test.sh` covers the rendered view, every request guard above, each answer kind landing through the intake with its wake, a declared choice keeping held work held, a re-ask racing an answer, failed Later recovery including notification failure, the stale and offline indicators against a skewed phone clock, the page handling a lost committed response while a new question is asked, restart-safe retries, an unchanged fleet not rebuilding on the page's check, a request after the full-rebuild bound still rebuilding, a check one interval later rebuilding when that bound matches the check interval, and a home that never starts the board staying untouched.

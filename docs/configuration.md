@@ -993,7 +993,8 @@ Each file is local and gitignored and is never inherited by a secondmate home, s
 | `config/board-logins` | none | One Tailscale login per line; a request is served only with an allowlisted `Tailscale-User-Login` header or as a direct loopback request with no proxy headers, so without it only direct local requests are served. |
 
 Blank lines and `#` comments are ignored in all three, and a malformed host name, login, or port stops `serve` naming the file to fix.
-`FM_BOARD_INTERVAL` (default 10, 2 to 300) sets how many seconds pass between rebuilds of the board's data.
+`FM_BOARD_INTERVAL` (default 10, 2 to 300) is how many seconds pass between the open page's checks.
+`bin/fm-board.sh`'s header owns when a check reuses the last rebuild instead of taking one; [the live board](live-board.md) owns what that looks like.
 
 `data/board-notes.json` is the lead's curated list of notes the fleet records do not carry, a JSON list of objects:
 
@@ -1172,7 +1173,7 @@ FM_INBOX_ASK_MODEL=     # overrides config/inbox-ask-model for fm-inbox.sh ask
 FM_INBOX_PROFILE=       # overrides config/inbox-profile; explicitly empty forces ambient credentials
 # live board; see "Live board" above
 FM_BOARD_PORT=          # overrides config/board-port; 0 picks a free loopback port
-FM_BOARD_INTERVAL=10    # seconds between board data rebuilds, 2..300
+FM_BOARD_INTERVAL=10    # seconds between open-page checks, 2..300
 ```
 
 `fm-teardown.sh` retries only Git's `Unable to create '...index.lock': File exists` return failure up to `FM_TREEHOUSE_RETURN_LOCK_RETRIES` times.

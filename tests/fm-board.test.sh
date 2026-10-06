@@ -1019,6 +1019,59 @@ EOF
   pass "a committed answer with unavailable confirmation storage reports uncertainty and does not reapply"
 }
 
+test_unchanged_records_are_not_rebuilt_on_each_check() {
+  local home first snap1 second snap2 third snap3
+  home=$(make_home cache)
+  start_board "$home"
+  first=$(board_data)
+  snap1=$(printf '%s' "$first" | jq -r '.snapshot_generated')
+  [ -n "$snap1" ] && [ "$snap1" != null ] || fail "the first view had no snapshot time: $first"
+  sleep 3
+  second=$(board_data)
+  snap2=$(printf '%s' "$second" | jq -r '.snapshot_generated')
+  [ "$snap1" = "$snap2" ] || fail "unchanged records rebuilt the snapshot: $snap1 then $snap2"
+  printf '%s' "$second" | jq -e '.age_seconds < 5' >/dev/null \
+    || fail "a reused view was not marked checked: $second"
+  hold "$home" sample-ship --reason "Ship the sample widget now?"
+  third=$(board_data)
+  snap3=$(printf '%s' "$third" | jq -r '.snapshot_generated')
+  [ "$snap3" != "$snap1" ] || fail "a backlog change reused the old snapshot: $third"
+  printf '%s' "$third" | jq -e 'any(.waiting_on_you[]; .id == "sample-ship" and .answerable)' >/dev/null \
+    || fail "a backlog change was not on the next check: $third"
+  pass "an unchanged fleet reuses its snapshot, and a backlog change shows up on the next check"
+}
+
+test_a_request_after_the_full_interval_rebuilds() {
+  local home first snap1 second snap2
+  home=$(make_home full-refresh)
+  FM_BOARD_TEST_FULL_INTERVAL=2 start_board "$home"
+  first=$(board_data)
+  snap1=$(printf '%s' "$first" | jq -r '.snapshot_generated')
+  sleep 3
+  second=$(board_data)
+  snap2=$(printf '%s' "$second" | jq -r '.snapshot_generated')
+  [ -n "$snap2" ] && [ "$snap2" != "$snap1" ] \
+    || fail "a request after the full interval reused the old snapshot: $snap1 then $snap2"
+  pass "a request after the full interval rebuilds even when the records are unchanged"
+}
+
+# Scaled stand-in for FM_BOARD_INTERVAL >= 60, where the full bound equals the
+# check interval. The second check arrives one interval after the rebuild
+# started, and still inside the bound if age were measured from when it finished.
+test_one_interval_later_rebuilds_when_the_bound_matches_the_check() {
+  local home first snap1 second snap2
+  home=$(make_home interval-bound)
+  FM_BOARD_TEST_FULL_INTERVAL=2 start_board "$home"
+  first=$(board_data)
+  snap1=$(printf '%s' "$first" | jq -r '.snapshot_generated')
+  sleep 1.2
+  second=$(board_data)
+  snap2=$(printf '%s' "$second" | jq -r '.snapshot_generated')
+  [ -n "$snap2" ] && [ "$snap2" != "$snap1" ] \
+    || fail "a check one interval after the rebuild reused the snapshot: $snap1 then $snap2"
+  pass "a check one interval later rebuilds when the full bound matches the check interval"
+}
+
 test_a_home_that_never_opts_in_is_untouched() {
   local home stamp changed
   home=$(make_home opt-out)
@@ -1062,4 +1115,7 @@ test_page_recovers_a_lost_committed_response
 test_page_recovers_a_lost_committed_response reask-after-loss
 test_answer_replay_survives_restart_without_reapplying
 test_confirmation_storage_failure_reports_unknown
+test_unchanged_records_are_not_rebuilt_on_each_check
+test_a_request_after_the_full_interval_rebuilds
+test_one_interval_later_rebuilds_when_the_bound_matches_the_check
 test_a_home_that_never_opts_in_is_untouched

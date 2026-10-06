@@ -16,8 +16,15 @@
 #
 # serve    Run the board for the active FM_HOME in the foreground, bound to
 #          127.0.0.1 only, through bin/fm-board.mjs (node; no npm dependency).
-#          The page rebuilds its data every FM_BOARD_INTERVAL seconds (default
-#          10, 2..300) from `model`. While it runs it keeps a private serve record,
+#          The page asks for data every FM_BOARD_INTERVAL seconds (default 10,
+#          2..300). A rebuild from `model` runs only for a data request
+#          that needs one: not while nobody is asking, and not again while the
+#          backlog, heads-up notes, secondmate registry, task metadata, and
+#          status logs are unchanged unless that rebuild started at least
+#          60 seconds ago (or FM_BOARD_INTERVAL, when that is longer), with a
+#          small margin so the next check is not early. An answer always
+#          rebuilds after its write, so the page never keeps the
+#          question it just answered. While it runs it keeps a private serve record,
 #          state/board/serve.json (pid, port, instance), removed on exit.
 #          bin/fm-board.mjs owns the persistent answer-confirmation records.
 # status   Exit 0 and print the local URL when this home's board answers its
@@ -83,8 +90,10 @@
 # Environment:
 #   FM_HOME              operational home whose records are shown.
 #   FM_BOARD_PORT        overrides config/board-port; 0 picks a free port.
-#   FM_BOARD_INTERVAL    refresh seconds, default 10.
+#   FM_BOARD_INTERVAL    seconds between page checks, default 10 (2..300).
 #   FM_BOARD_TODAY       UTC date used to validate Later dates (tests only).
+#   FM_BOARD_TEST_FULL_INTERVAL
+#                        shortens the 60-second full rebuild bound (tests only).
 set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -680,10 +689,10 @@ EOF
   [ "$hosts" = '[]' ] || [ "$logins" != '[]' ] \
     || fail "$CONFIG/board-hosts lists host names but $CONFIG/board-logins is empty; list your Tailscale login there before sharing the board, or remove board-hosts to keep it on this computer only"
   config=$(jq -cn \
-    --arg home "$FM_HOME" --arg state "$STATE" --arg board_sh "$SCRIPT_DIR/fm-board.sh" \
+    --arg home "$FM_HOME" --arg state "$STATE" --arg data "$DATA" --arg board_sh "$SCRIPT_DIR/fm-board.sh" \
     --arg page "$SCRIPT_DIR/fm-board-page.html" --argjson port "$port" --argjson interval "$interval" \
     --argjson hosts "$hosts" --argjson logins "$logins" \
-    '{home: $home, state_dir: $state, board_sh: $board_sh, page: $page, port: $port,
+    '{home: $home, state_dir: $state, data_dir: $data, board_sh: $board_sh, page: $page, port: $port,
       interval: $interval, hosts: $hosts, logins: $logins}')
   FM_BOARD_SERVE_CONFIG=$config exec node "$SCRIPT_DIR/fm-board.mjs"
 }
