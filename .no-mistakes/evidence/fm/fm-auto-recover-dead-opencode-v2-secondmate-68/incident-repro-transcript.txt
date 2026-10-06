@@ -1,0 +1,51 @@
+### BASE 1281945 (before fix)
+fatal: not a git repository (or any parent up to mount point /)
+Stopping at filesystem boundary (GIT_DISCOVERY_ACROSS_FILESYSTEM not set).
+== checkout: 1281945 (base)  native execution: idle
+== meta:
+   window=fm-test:p1
+   kind=secondmate
+   harness=opencode-v2
+   home=/tmp/fm-secondmate-liveness.0ULGMq/incident-idle/sc-mate
+   backend=herdr
+== bootstrap SECONDMATE_LIVENESS / relaunch lines:
+   SECONDMATE_LIVENESS: secondmate sc-mate: skipped: recorded harness 'opencode-v2' is unverified for recovery (backend=herdr)
+   SECONDMATE_SYNC: secondmate sc-mate: skipped: primary default-branch commit cannot be resolved
+== native session status probes:
+   (none)
+== herdr calls:
+   pane get p1 --session fm-test
+
+### TARGET 0be9769 (after fix), native idle
+== checkout: 0be9769  native execution: idle
+== meta:
+   window=fm-test:p1
+   kind=secondmate
+   harness=opencode-v2
+   home=/tmp/fm-secondmate-liveness.H0Titt/incident-idle/sc-mate
+   backend=herdr
+== bootstrap SECONDMATE_LIVENESS / relaunch lines:
+   BOOTSTRAP_INFO: secondmate sc-mate relaunched after recorded endpoint confidently missing (backend=herdr)
+   SECONDMATE_SYNC: secondmate sc-mate: skipped: primary default-branch commit cannot be resolved
+== native session status probes:
+   /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M49HQSCH9HZ7FDPM2SJEE8V9/bin/fm-opencode-v2-session.mjs status /tmp/fm-secondmate-liveness.H0Titt/incident-idle/home/state/sc-mate.opencode-v2-session.json /tmp/fm-secondmate-liveness.H0Titt/incident-idle/sc-mate
+   /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M49HQSCH9HZ7FDPM2SJEE8V9/bin/fm-opencode-v2-session.mjs status /tmp/fm-secondmate-liveness.H0Titt/incident-idle/home/state/sc-mate.opencode-v2-session.json /tmp/fm-secondmate-liveness.H0Titt/incident-idle/sc-mate
+== herdr calls:
+   pane get p1 --session fm-test
+   pane get p1 --session fm-test
+
+### TARGET 0be9769 (after fix), native session still executing (guard)
+== checkout: 0be9769  native execution: executing
+== meta:
+   window=fm-test:p1
+   kind=secondmate
+   harness=opencode-v2
+   home=/tmp/fm-secondmate-liveness.uvVtj8/incident-executing/sc-mate
+   backend=herdr
+== bootstrap SECONDMATE_LIVENESS / relaunch lines:
+   SECONDMATE_LIVENESS: secondmate sc-mate: skipped: native execution executing (backend=herdr)
+   SECONDMATE_SYNC: secondmate sc-mate: skipped: primary default-branch commit cannot be resolved
+== native session status probes:
+   /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M49HQSCH9HZ7FDPM2SJEE8V9/bin/fm-opencode-v2-session.mjs status /tmp/fm-secondmate-liveness.uvVtj8/incident-executing/home/state/sc-mate.opencode-v2-session.json /tmp/fm-secondmate-liveness.uvVtj8/incident-executing/sc-mate
+== herdr calls:
+   pane get p1 --session fm-test
