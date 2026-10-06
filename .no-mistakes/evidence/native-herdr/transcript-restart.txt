@@ -1,0 +1,17 @@
+
+### init
+$ fm-native.mjs init --home $TMP/native --project $TMP/project --herdr-socket $TMP/herdr.sock --herdr-session native-drive --parent-workspace @parent --shuvcode-command ["/usr/bin/node","$TMP/shuvcode.mjs","$TMP"]
+exit=0
+stdout: {"version":1,"homeID":"native-home-id","home":"$TMP/native","herdr":{"socket":"$TMP/herdr.sock","session":"native-drive","parentWorkspaceID":"@parent"},"entries":[]}
+herdr calls: ping | workspace.get
+after watch #1 3s: {"entry-0":"ready pane=@native-1:1:1 seq=2 binding=880d7bf8","entry-1":"ready pane=@native-2:1:1 seq=2 binding=8a964192","entry-2":"ready pane=@native-3:1:1 seq=2 binding=49220b7e"}
+creates/launches: [3,3]
+adapter stopped; binding states (expire to unknown via ttl_ms=5000 in Herdr): ["idle","working","working"]
+after independent restart watch #2: {"entry-0":"ready pane=@native-1:1:1 seq=4 binding=880d7bf8","entry-1":"ready pane=@native-2:1:1 seq=4 binding=8a964192","entry-2":"ready pane=@native-3:1:1 seq=4 binding=49220b7e"}
+creates/launches (unchanged=3/3): [3,3]
+worker A binding state now: blocked
+
+### status while watch runs (lock only per pass)
+$ fm-native.mjs status --home $TMP/native
+exit=0
+stdout: {"version":1,"homeID":"native-home-id","home":"$TMP/native","herdr":{"socket":"$TMP/herdr.sock","session":"native-drive","parentWorkspaceID":"@parent"},"entries":[{"id":"entry-0","role":"lead","sessionID":"ses_0","attachment":{"provider":"shuvcode","home_id":"native-home-id","session_id":"ses_0","location":"$TMP/project","host_id":"shuvdev","attach_argv":["/private/shuvcode","supervisor","attach","--home","$TMP/native","--home-id","native-home-id","--session","ses_0","--location","$TMP/project"]},"bindingID":"shuvbro:native-home-id:0d4d1a1e-7fbb-48b2-bbc3-6695880d7bf8","phase":"ready","seq":4,"paneID":"@native-1:1:1","workspaceID":"@native-1","tabID":"@native-1:1","state":"idle"},{"id":"entry-1","role":"ship","taskID":"task-1","sessionID":"ses_1","attachment":{"provider":"shuvcode","home_id":"native-home-id","session_id":"ses_1","location":"$TMP/project","host_id":"shuvdev","attach_argv":["/private/shuvcode","supervisor","attach","--home","$TMP/native","--home-id","native-home-id","--session","ses_1","--location","$TMP/project"]},"bindingID":"shuvbro:native-home-id:6b64537b-7911-48d9-9973-2f948a964192","phase":"ready","seq":4,"paneID":"@native-2:1:1","workspaceID":"@native-2","tabID":"@native-2:1","state":"blocked"},{"id":"entry-2","role":"ship","taskID":"task-2","sessionID":"ses_2","attachment":{"provider":"shuvcode","home_id":"native-home-id","session_id":"ses_2","location":"$TMP/project","host_id":"shuvdev","attach_argv":["/private/shuvcode","supervisor","attach","--home",

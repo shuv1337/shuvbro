@@ -1,0 +1,25 @@
+FM_TEST_BEGIN 2026-10-06T10:09:55Z tests/fm-native-supervisor.test.sh family=unclassified expected_gate_skip=none
+✔ native init/profile and explicit up converge on exact no-focus views; cleanup needs settlement (719.231386ms)
+✔ lost binding/report replies reconcile retained identity and increasing sequence (399.418002ms)
+✔ lost create result remains uncertain without blocking or duplicating other views (206.332979ms)
+✔ a worker without a title is refused before any pending creation is journaled (223.314538ms)
+✔ an entry gone from the projection whose pane disappears becomes closed (463.515794ms)
+✔ explicit cleanup proceeds while watch runs and watch keeps the cleanup result (4270.353062ms)
+✔ concurrent passes hand off the home lock without overlapping (854.233143ms)
+✔ a stale lock from a stopped adapter is reclaimed by exactly one concurrent pass at a time (866.057118ms)
+✔ an ambiguous lock is retained rather than taken over (85.310078ms)
+✔ lost launch and Herdr restore of bound view never submit attach input twice (389.871321ms)
+✔ display close and explicit reopen never control native execution (313.43577ms)
+✔ old Herdr, legacy homes, changed bindings and retired unavailable entries fail closed (353.845764ms)
+ℹ tests 12
+ℹ suites 0
+ℹ pass 12
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 9185.462592
+FM_TEST_END 2026-10-06T10:10:05Z tests/fm-native-supervisor.test.sh exit=0 duration_ms=9224 gate_skip=false
+FM_TEST_SUMMARY total=1 failed=0 skipped_gate=0 duration_ms=9251
+FM_TEST_SUMMARY_FAMILY family=unclassified count=1 duration_ms=9224 failed=0
+FM_TEST_SLOWEST rank=1 script=tests/fm-native-supervisor.test.sh duration_ms=9224

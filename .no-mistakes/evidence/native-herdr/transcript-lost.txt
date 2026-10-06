@@ -1,0 +1,22 @@
+
+### init
+$ fm-native.mjs init --home $TMP/native --project $TMP/project --herdr-socket $TMP/herdr.sock --herdr-session native-drive --parent-workspace @parent --shuvcode-command ["/usr/bin/node","$TMP/shuvcode.mjs","$TMP"]
+exit=0
+stdout: {"version":1,"homeID":"native-home-id","home":"$TMP/native","herdr":{"socket":"$TMP/herdr.sock","session":"native-drive","parentWorkspaceID":"@parent"},"entries":[]}
+herdr calls: ping | workspace.get
+
+### sync with lost workspace.create reply for lead
+$ fm-native.mjs sync --home $TMP/native
+exit=1
+stderr: Native ShuvBro: entry-0: Herdr workspace.create disconnected; retain pending outcome
+herdr calls: ping | workspace.get | workspace.create focus=false source=@parent label="firstmate" | workspace.get | workspace.create focus=false source=@parent label="Ship A" | pane.bind_runtime | pane.get | pane.get_runtime | pane.get | pane.get_runtime | pane.process_info | pane.send_input | pane.get | pane.get_runtime | pane.report_runtime state=working seq=1 ttl=5000 | workspace.get | workspace.create focus=false source=@parent label="Ship B" | pane.bind_runtime | pane.get | pane.get_runtime | pane.get | pane.get_runtime | pane.process_info | pane.send_input | pane.get | pane.get_runtime | pane.report_runtime state=working seq=1 ttl=5000
+journal phases: {"entry-0":"create_pending pane=undefined seq=0 binding=4ad3012e","entry-1":"ready pane=@native-2:1:1 seq=1 binding=dcd2de2d","entry-2":"ready pane=@native-3:1:1 seq=1 binding=afb26797"}
+creates: 3
+
+### sync again: uncertain creation stays pending, others reported
+$ fm-native.mjs sync --home $TMP/native
+exit=1
+stderr: Native ShuvBro: entry-0: Uncertain creation for entry-0; retain journal and inspect Herdr before allocating another view
+herdr calls: ping | pane.get | pane.get_runtime | pane.report_runtime state=working seq=2 ttl=5000 | pane.get | pane.get_runtime | pane.report_runtime state=working seq=2 ttl=5000
+journal phases: {"entry-0":"create_pending pane=undefined seq=0 binding=4ad3012e","entry-1":"ready pane=@native-2:1:1 seq=2 binding=dcd2de2d","entry-2":"ready pane=@native-3:1:1 seq=2 binding=afb26797"}
+creates (no duplicate): 3

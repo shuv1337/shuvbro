@@ -1,0 +1,34 @@
+
+### default Herdr session refused
+$ fm-native.mjs init --home $TMP/native --project $TMP/project --herdr-socket $TMP/herdr.sock --herdr-session default --parent-workspace @parent --shuvcode-command ["/usr/bin/node","$TMP/shuvcode.mjs","$TMP"]
+exit=1
+stderr: Native ShuvBro: Use absolute project/socket paths and an explicit non-default Herdr session
+
+### credential in attach argv refused
+$ fm-native.mjs init --home $TMP/native --project $TMP/project --herdr-socket $TMP/herdr.sock --herdr-session native-drive --parent-workspace @parent --shuvcode-command ["/usr/bin/node","--token=abc"]
+exit=1
+stderr: Native ShuvBro: shuvcode-command must be a credential-free argv array with an absolute executable
+
+### old Herdr without runtime methods refused before native init
+$ fm-native.mjs init --home $TMP/native --project $TMP/project --herdr-socket $TMP/herdr.sock --herdr-session native-drive --parent-workspace @parent --shuvcode-command ["/usr/bin/node","$TMP/shuvcode.mjs","$TMP"]
+exit=1
+stderr: Native ShuvBro: Herdr lacks required native runtime attachment methods
+herdr calls: ping
+native CLI calls so far: []
+creates: 0
+
+### re-init over an existing home refused (no takeover)
+$ fm-native.mjs init --home $TMP/native --project $TMP/project --herdr-socket $TMP/herdr.sock --herdr-session native-drive --parent-workspace @parent --shuvcode-command ["/usr/bin/node","$TMP/shuvcode.mjs","$TMP"]
+exit=1
+stderr: Native ShuvBro: EEXIST: file already exists, mkdir '$TMP/native'
+
+### existing legacy home refused
+$ fm-native.mjs init --home $TMP/legacy --project $TMP/project --herdr-socket $TMP/herdr.sock --herdr-session native-drive --parent-workspace @parent --shuvcode-command ["/usr/bin/node","$TMP/shuvcode.mjs","$TMP"]
+exit=1
+stderr: Native ShuvBro: EEXIST: file already exists, mkdir '$TMP/legacy'
+
+### sync on a non-native legacy home refused
+$ fm-native.mjs sync --home $TMP/legacy
+exit=1
+stderr: Native ShuvBro: ENOENT: no such file or directory, open '$TMP/legacy/native-display.json'
+legacy home contents unchanged: {}

@@ -1,0 +1,112 @@
+
+### help
+$ fm-native.mjs --help
+exit=0
+stdout: Native ShuvBro (new homes only)
+Native ShuvBro NEW-home entrypoint. No legacy fleet initialization/controller.
+Usage: fm-native.mjs init --home NEW --project DIR --herdr-socket ABS
+  --herdr-session NONDEFAULT --parent-workspace ID [--role lead|secondmate]
+  [--host-id ID] [--shuvcode-command JSON_ARRAY] [--model PROVIDER/MODEL]
+  [--provider-url URL] [--auto]
+fm-native.mjs up --home HOME [--model MODEL] [--provider-url URL] [--auto]
+fm-native.mjs sync|watch|status --home HOME
+Keep watch running for 2-second heartbeats; up/sync are one-shot and status
+expires to unknown after 5 seconds. Stopping this adapter never stops work.
+fm-native.mjs control --home HOME -- NATIVE_SUBCOMMAND [typed CLI args...]
+fm-native.mjs cleanup|reopen --home HOME --entry EXACT_ENTRY_ID
+native-display.json owns presentation identity, pending operations and report
+high-water marks. Native settings/database own all execution/workflow state.
+Each display mutation is journaled first; a lost create/launch result remains
+uncertain rather than being repeated. Reopen is explicit and uses a new ID.
+Local destination-owned presentation only; run independently on each host.
+
+### init new native home (lead role)
+$ fm-native.mjs init --home $TMP/native --project $TMP/project --herdr-socket $TMP/herdr.sock --herdr-session native-drive --parent-workspace @parent --shuvcode-command ["/usr/bin/node","$TMP/shuvcode.mjs","$TMP"] --model test/m
+exit=0
+stdout: {"version":1,"homeID":"native-home-id","home":"$TMP/native","herdr":{"socket":"$TMP/herdr.sock","session":"native-drive","parentWorkspaceID":"@parent"},"entries":[]}
+herdr calls: ping | workspace.get
+native calls: ["init"]
+
+### up: start supervisor + reconcile lead and two workers
+$ fm-native.mjs up --home $TMP/native
+exit=0
+stdout: {"version":1,"homeID":"native-home-id","home":"$TMP/native","herdr":{"socket":"$TMP/herdr.sock","session":"native-drive","parentWorkspaceID":"@parent"},"entries":[{"id":"entry-0","role":"lead","sessionID":"ses_0","attachment":{"provider":"shuvcode","home_id":"native-home-id","session_id":"ses_0","location":"$TMP/project","host_id":"shuvdev","attach_argv":["/private/shuvcode","supervisor","attach","--home","$TMP/native","--home-id","native-home-id","--session","ses_0","--location","$TMP/project"]},"bindingID":"shuvbro:native-home-id:012382a6-effc-42c6-9b47-f214260f7a99","phase":"ready","seq":1,"paneID":"@native-1:1:1","workspaceID":"@native-1","tabID":"@native-1:1","state":"idle"},{"id":"entry-1","role":"ship","taskID":"task-1","sessionID":"ses_1","attachment":{"provider":"shuvcode","home_id":"native-home-id","session_id":"ses_1","location":"$TMP/project","host_id":"shuvdev","attach_argv":["/private/shuvcode","supervisor","attach","--home","$TMP/native","--home-id","native-home-id","--session","ses_1","--location","$TMP/project"]},"bindingID":"shuvbro:native-home-id:7b430712-6c44-48d6-ab77-f007e535f094","phase":"ready","seq":1,"paneID":"@native-2:1:1","workspaceID":"@native-2","tabID":"@native-2:1","state":"working"},{"id":"entry-2","role":"ship","taskID":"task-2","sessionID":"ses_2","attachment":{"provider":"shuvcode","home_id":"native-home-id","session_id":"ses_2","location":"$TMP/project","host_id":"shuvdev","attach_argv":["/private/shuvcode","supervisor","attach","--home",
+herdr calls: ping | workspace.get | workspace.create focus=false source=@parent label="firstmate" | pane.bind_runtime | pane.get | pane.get_runtime | pane.get | pane.get_runtime | pane.process_info | pane.send_input | pane.get | pane.get_runtime | pane.report_runtime state=idle seq=1 ttl=5000 | workspace.get | workspace.create focus=false source=@parent label="Ship A" | pane.bind_runtime | pane.get | pane.get_runtime | pane.get | pane.get_runtime | pane.process_info | pane.send_input | pane.get | pane.get_runtime | pane.report_runtime state=working seq=1 ttl=5000 | workspace.get | workspace.create focus=false source=@parent label="Ship B" | pane.bind_runtime | pane.get | pane.get_runtime | pane.get | pane.get_runtime | pane.process_info | pane.send_input | pane.get | pane.get_runtime | pane.report_runtime state=working seq=1 ttl=5000
+journal phases: {"entry-0":"ready pane=@native-1:1:1 seq=1 binding=260f7a99","entry-1":"ready pane=@native-2:1:1 seq=1 binding=e535f094","entry-2":"ready pane=@native-3:1:1 seq=1 binding=251929d6"}
+creates/launches: [3,3]
+neighbor pane untouched: true
+
+### control: typed native task op is passed through
+$ fm-native.mjs control --home $TMP/native -- task steer --id task-1 --message hi
+exit=0
+stdout: typed task result ["supervisor","task","steer","--id","task-1","--message","hi","--home","$TMP/native"]
+
+### control: attach refused (attach-only has dedicated path)
+$ fm-native.mjs control --home $TMP/native -- attach
+exit=1
+stderr: Native ShuvBro: Use typed native subcommands; home/lead initialization and attachment have dedicated entrypoints
+
+### sync again: idempotent, increasing seq, no duplicates
+$ fm-native.mjs sync --home $TMP/native
+exit=0
+stdout: {"version":1,"homeID":"native-home-id","home":"$TMP/native","herdr":{"socket":"$TMP/herdr.sock","session":"native-drive","parentWorkspaceID":"@parent"},"entries":[{"id":"entry-0","role":"lead","sessionID":"ses_0","attachment":{"provider":"shuvcode","home_id":"native-home-id","session_id":"ses_0","location":"$TMP/project","host_id":"shuvdev","attach_argv":["/private/shuvcode","supervisor","attach","--home","$TMP/native","--home-id","native-home-id","--session","ses_0","--location","$TMP/project"]},"bindingID":"shuvbro:native-home-id:012382a6-effc-42c6-9b47-f214260f7a99","phase":"ready","seq":2,"paneID":"@native-1:1:1","workspaceID":"@native-1","tabID":"@native-1:1","state":"idle"},{"id":"entry-1","role":"ship","taskID":"task-1","sessionID":"ses_1","attachment":{"provider":"shuvcode","home_id":"native-home-id","session_id":"ses_1","location":"$TMP/project","host_id":"shuvdev","attach_argv":["/private/shuvcode","supervisor","attach","--home","$TMP/native","--home-id","native-home-id","--session","ses_1","--location","$TMP/project"]},"bindingID":"shuvbro:native-home-id:7b430712-6c44-48d6-ab77-f007e535f094","phase":"ready","seq":2,"paneID":"@native-2:1:1","workspaceID":"@native-2","tabID":"@native-2:1","state":"working"},{"id":"entry-2","role":"ship","taskID":"task-2","sessionID":"ses_2","attachment":{"provider":"shuvcode","home_id":"native-home-id","session_id":"ses_2","location":"$TMP/project","host_id":"shuvdev","attach_argv":["/private/shuvcode","supervisor","attach","--home",
+herdr calls: ping | pane.get | pane.get_runtime | pane.report_runtime state=idle seq=2 ttl=5000 | pane.get | pane.get_runtime | pane.report_runtime state=working seq=2 ttl=5000 | pane.get | pane.get_runtime | pane.report_runtime state=working seq=2 ttl=5000
+journal phases: {"entry-0":"ready pane=@native-1:1:1 seq=2 binding=260f7a99","entry-1":"ready pane=@native-2:1:1 seq=2 binding=e535f094","entry-2":"ready pane=@native-3:1:1 seq=2 binding=251929d6"}
+creates/launches: [3,3]
+
+### authority conflict: foreign binding on worker pane
+$ fm-native.mjs sync --home $TMP/native
+exit=1
+stderr: Native ShuvBro: entry-1: Recorded presentation runtime binding changed
+herdr calls: ping | pane.get | pane.get_runtime | pane.report_runtime state=idle seq=3 ttl=5000 | pane.get | pane.get_runtime | pane.get | pane.get_runtime | pane.report_runtime state=working seq=3 ttl=5000
+
+### cleanup refused under foreign binding even when settled
+$ fm-native.mjs cleanup --home $TMP/native --entry entry-1
+exit=1
+stderr: Native ShuvBro: Recorded presentation runtime binding changed
+herdr calls: ping | pane.get | pane.get_runtime
+pane still present: true
+
+### cleanup refused: state=done but not settled
+$ fm-native.mjs cleanup --home $TMP/native --entry entry-1
+exit=1
+stderr: Native ShuvBro: Native execution is not positively settled at the exact recorded attachment
+herdr calls: ping
+
+### cleanup with lost pane.close reply
+$ fm-native.mjs cleanup --home $TMP/native --entry entry-1
+exit=1
+stderr: Native ShuvBro: Herdr pane.close disconnected; retain pending outcome
+herdr calls: ping | pane.get | pane.get_runtime | pane.close
+entry-1: close_pending pane=@native-2:1:1 seq=2 binding=e535f094
+
+### cleanup retried: exact readback confirms close
+$ fm-native.mjs cleanup --home $TMP/native --entry entry-1
+exit=0
+stdout: {"version":1,"homeID":"native-home-id","home":"$TMP/native","herdr":{"socket":"$TMP/herdr.sock","session":"native-drive","parentWorkspaceID":"@parent"},"entries":[{"id":"entry-0","role":"lead","sessionID":"ses_0","attachment":{"provider":"shuvcode","home_id":"native-home-id","session_id":"ses_0","location":"$TMP/project","host_id":"shuvdev","attach_argv":["/private/shuvcode","supervisor","attach","--home","$TMP/native","--home-id","native-home-id","--session","ses_0","--location","$TMP/project"]},"bindingID":"shuvbro:native-home-id:012382a6-effc-42c6-9b47-f214260f7a99","phase":"ready","seq":3,"paneID":"@native-1:1:1","workspaceID":"@native-1","tabID":"@native-1:1","state":"idle"},{"id":"entry-1","role":"ship","taskID":"task-1","sessionID":"ses_1","attachment":{"provider":"shuvcode","home_id":"native-home-id","session_id":"ses_1","location":"$TMP/project","host_id":"shuvdev","attach_argv":["/private/shuvcode","supervisor","attach","--home","$TMP/native","--home-id","native-home-id","--session","ses_1","--location","$TMP/project"]},"bindingID":"shuvbro:native-home-id:7b430712-6c44-48d6-ab77-f007e535f094","phase":"closed","seq":2,"paneID":"@native-2:1:1","workspaceID":"@native-2","tabID":"@native-2:1","state":"working"},{"id":"entry-2","role":"ship","taskID":"task-2","sessionID":"ses_2","attachment":{"provider":"shuvcode","home_id":"native-home-id","session_id":"ses_2","location":"$TMP/project","host_id":"shuvdev","attach_argv":["/private/shuvcode","supervisor","attach","--home"
+herdr calls: ping | pane.get
+remaining panes: ["@neighbor:1:1","@native-1:1:1","@native-3:1:1"]
+
+### user closes worker B view while it keeps working
+$ fm-native.mjs sync --home $TMP/native
+exit=0
+stdout: {"version":1,"homeID":"native-home-id","home":"$TMP/native","herdr":{"socket":"$TMP/herdr.sock","session":"native-drive","parentWorkspaceID":"@parent"},"entries":[{"id":"entry-0","role":"lead","sessionID":"ses_0","attachment":{"provider":"shuvcode","home_id":"native-home-id","session_id":"ses_0","location":"$TMP/project","host_id":"shuvdev","attach_argv":["/private/shuvcode","supervisor","attach","--home","$TMP/native","--home-id","native-home-id","--session","ses_0","--location","$TMP/project"]},"bindingID":"shuvbro:native-home-id:012382a6-effc-42c6-9b47-f214260f7a99","phase":"ready","seq":4,"paneID":"@native-1:1:1","workspaceID":"@native-1","tabID":"@native-1:1","state":"idle"},{"id":"entry-1","role":"ship","taskID":"task-1","sessionID":"ses_1","attachment":{"provider":"shuvcode","home_id":"native-home-id","session_id":"ses_1","location":"$TMP/project","host_id":"shuvdev","attach_argv":["/private/shuvcode","supervisor","attach","--home","$TMP/native","--home-id","native-home-id","--session","ses_1","--location","$TMP/project"]},"bindingID":"shuvbro:native-home-id:7b430712-6c44-48d6-ab77-f007e535f094","phase":"closed","seq":2,"paneID":"@native-2:1:1","workspaceID":"@native-2","tabID":"@native-2:1","state":"working"},{"id":"entry-2","role":"ship","taskID":"task-2","sessionID":"ses_2","attachment":{"provider":"shuvcode","home_id":"native-home-id","session_id":"ses_2","location":"$TMP/project","host_id":"shuvdev","attach_argv":["/private/shuvcode","supervisor","attach","--home"
+herdr calls: ping | pane.get | pane.get_runtime | pane.report_runtime state=idle seq=4 ttl=5000 | pane.get
+entry-2: closed pane=@native-3:1:1 seq=3 binding=251929d6
+native calls during sync: ["presentation"]
+creates (no recreation): 3
+
+### explicit reopen of closed worker B view
+$ fm-native.mjs reopen --home $TMP/native --entry entry-2
+exit=0
+stdout: {"version":1,"homeID":"native-home-id","home":"$TMP/native","herdr":{"socket":"$TMP/herdr.sock","session":"native-drive","parentWorkspaceID":"@parent"},"entries":[{"id":"entry-0","role":"lead","sessionID":"ses_0","attachment":{"provider":"shuvcode","home_id":"native-home-id","session_id":"ses_0","location":"$TMP/project","host_id":"shuvdev","attach_argv":["/private/shuvcode","supervisor","attach","--home","$TMP/native","--home-id","native-home-id","--session","ses_0","--location","$TMP/project"]},"bindingID":"shuvbro:native-home-id:012382a6-effc-42c6-9b47-f214260f7a99","phase":"ready","seq":4,"paneID":"@native-1:1:1","workspaceID":"@native-1","tabID":"@native-1:1","state":"idle"},{"id":"entry-1","role":"ship","taskID":"task-1","sessionID":"ses_1","attachment":{"provider":"shuvcode","home_id":"native-home-id","session_id":"ses_1","location":"$TMP/project","host_id":"shuvdev","attach_argv":["/private/shuvcode","supervisor","attach","--home","$TMP/native","--home-id","native-home-id","--session","ses_1","--location","$TMP/project"]},"bindingID":"shuvbro:native-home-id:7b430712-6c44-48d6-ab77-f007e535f094","phase":"closed","seq":2,"paneID":"@native-2:1:1","workspaceID":"@native-2","tabID":"@native-2:1","state":"working"},{"id":"entry-2","role":"ship","taskID":"task-2","sessionID":"ses_2","attachment":{"provider":"shuvcode","home_id":"native-home-id","session_id":"ses_2","location":"$TMP/project","host_id":"shuvdev","attach_argv":["/private/shuvcode","supervisor","attach","--home"
+herdr calls: ping | workspace.get | workspace.create focus=false source=@parent label="Ship B" | pane.bind_runtime | pane.get | pane.get_runtime | pane.get | pane.get_runtime | pane.process_info | pane.send_input | pane.get | pane.get_runtime | pane.report_runtime state=working seq=1 ttl=5000
+entry-2: ready pane=@native-4:1:1 seq=1 binding=6f1e6831
+creates/launches: [4,4]
+
+### reopen of retired worker A refused
+$ fm-native.mjs reopen --home $TMP/native --entry entry-1
+exit=1
+stderr: Native ShuvBro: Reopen requires a closed display and an available exact native Session
+herdr calls: ping
+all native CLI subcommands invoked: ["init","up","presentation","task"]
