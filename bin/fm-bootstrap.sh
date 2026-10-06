@@ -812,11 +812,19 @@ secondmate_liveness_one() {  # <meta> <id>
   if [ "$harness" = opencode-v2 ]; then
     case "$agent_state" in
       dead|missing)
-        worktree=$(fm_meta_get "$meta" worktree)
-        [ -n "$worktree" ] || worktree=$(fm_meta_get "$meta" home)
-        execution=$(fm_control_v2_execution "$STATE" "$id" "$worktree" 2>/dev/null)
+        # Spawn resolves home with pwd -P; native placement proof must receive
+        # those same bytes, not a logical path or an unrelated worktree field.
+        worktree=$(fm_meta_get "$meta" home)
+        if [ -z "$worktree" ] || ! worktree=$(cd "$worktree" 2>/dev/null && pwd -P); then
+          echo "SECONDMATE_LIVENESS: secondmate $id: skipped: native execution unreadable: secondmate home cannot be resolved (backend=$backend)"
+          return 0
+        fi
+        out=$(fm_control_v2_execution "$STATE" "$id" "$worktree" 2>&1)
+        execution=$(printf '%s\n' "$out" | tail -n 1)
         if [ "$execution" != idle ]; then
-          echo "SECONDMATE_LIVENESS: secondmate $id: skipped: native execution $execution (backend=$backend)"
+          cause="native execution $execution"
+          [ "$out" = "$execution" ] || cause="$cause: $(first_line "$out")"
+          echo "SECONDMATE_LIVENESS: secondmate $id: skipped: $cause (backend=$backend)"
           return 0
         fi
         ;;

@@ -439,10 +439,16 @@ test_sweep_opencode_v2_recovery_requires_idle_native_session() {
   local w fb tmuxfb log out pane execution native_log row
   # The durable replacement pin stays codex in this fixture: recovery uses the
   # recorded V2 session for safety, then the normal spawn/profile resolution.
-  for row in 'zsh idle' 'missing idle' 'zsh executing' 'missing executing' 'missing unproven' 'missing unreadable' 'node idle' 'unreadable idle' 'shuvcode executing'; do
+  for row in 'zsh idle' 'missing idle' 'missing symlink-idle' 'zsh executing' 'missing executing' 'missing unproven' 'missing unreadable' 'node idle' 'unreadable idle' 'shuvcode executing'; do
     pane=${row%% *}; execution=${row#* }
     w=$(new_world "sweep-v2-$pane-$execution")
     add_sm_home "$w" sm1 firstmate:fm-sm1 opencode-v2
+    if [ "$execution" = symlink-idle ]; then
+      ln -s "$w/sm1" "$w/logical-home"
+      sed "s#^home=.*#home=$w/logical-home#" "$w/home/state/sm1.meta" > "$w/meta.tmp"
+      mv "$w/meta.tmp" "$w/home/state/sm1.meta"
+      printf 'worktree=/not-the-secondmate-home\n' >> "$w/home/state/sm1.meta"
+    fi
     fb=$(make_toolchain "$w"); tmuxfb=$(make_liveness_tmux "$w")
     log="$w/calls.log"; : > "$log"
     native_log="$w/native.log"
@@ -451,20 +457,21 @@ test_sweep_opencode_v2_recovery_requires_idle_native_session() {
 case "${1:-} ${2:-}" in
   *fm-opencode-v2-session.mjs\ status)
     printf '%s\n' "$*" >> "$FM_TEST_NATIVE_LOG"
+    [ "${4:-}" = "$FM_TEST_CANONICAL_HOME" ] || { printf '%s\n' 'native directory mismatch' >&2; exit 1; }
     case "$FM_TEST_EXECUTION" in
-      idle) printf '%s\n' '{"executing":false}' ;;
+      idle|symlink-idle) printf '%s\n' '{"executing":false}' ;;
       executing) printf '%s\n' '{"executing":true}' ;;
       unproven) printf '%s\n' '{"executing":null}' ;;
-      unreadable) exit 1 ;;
+      unreadable) printf '%s\n' 'native service refused exact session' 'second diagnostic line' >&2; exit 1 ;;
     esac
     ;;
 esac
 SH
     chmod +x "$fb/node"
     out=$(run_bootstrap "$tmuxfb:$fb" "$w/home" "$pane" "$log" \
-      FM_TEST_NATIVE_LOG="$native_log" FM_TEST_EXECUTION="$execution")
+      FM_TEST_NATIVE_LOG="$native_log" FM_TEST_EXECUTION="$execution" FM_TEST_CANONICAL_HOME="$w/sm1")
     case "$pane:$execution" in
-      zsh:idle|missing:idle)
+      zsh:idle|missing:idle|missing:symlink-idle)
         assert_contains "$(cat "$log")" new-window "idle native V2 session permits recovery of $pane endpoint"
         assert_not_contains "$out" 'unverified for recovery' "V2 is verified for recovery"
         [ "$pane" != missing ] || assert_not_contains "$(cat "$log")" kill-window "missing V2 endpoint needs no kill"
@@ -476,6 +483,10 @@ SH
           node) assert_contains "$out" 'ambiguous agent process' "ambiguous V2 endpoint is preserved" ;;
           unreadable) assert_contains "$out" 'endpoint probe unreadable' "unreadable V2 endpoint is preserved" ;;
         esac
+        if [ "$execution" = unreadable ]; then
+          assert_contains "$out" 'native execution unreadable: native service refused exact session' "native failure retains its first diagnostic"
+          assert_not_contains "$out" 'second diagnostic line' "native skip diagnosis stays one line"
+        fi
         ;;
     esac
     case "$pane" in
@@ -517,7 +528,9 @@ SH
 
   assert_contains "$out" "SECONDMATE_LIVENESS: secondmate sm1: skipped: endpoint probe unreadable" \
     "a non-V2 Herdr registration reporting unknown status stays unreadable"
-  assert_not_contains "$(cat "$herdr_log")" "process-info" \
+  # Later config-sync doorbells legitimately use the harness-aware classifier.
+  # Bound this assertion to the first pane/registration read (the liveness read).
+  assert_not_contains "$(awk '/^pane get / { reads++; if (reads > 1) exit } { print }' "$herdr_log")" "process-info" \
     "non-V2 Herdr classification must not consult the foreground-process classifier"
   assert_not_contains "$(cat "$herdr_log")" "close" "an unreadable non-V2 Herdr endpoint is never closed"
   pass "sweep: non-V2 Herdr secondmates keep the registry classifier"
