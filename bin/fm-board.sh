@@ -234,7 +234,7 @@ project_model() {  # <snapshot-file> <notes-json> <errors-json>
     def worker_note($t):
       (($t.paths.status_log.last_event.note // $t.hints.last_event_text) | text_or_null)
       | if . == null then null
-        else (sub("[[:space:]]*\\((?:[^()[:space:]]+[[:space:]]+)?via-helper\\)[[:space:]]*$"; "") | text_or_null) end;
+        else (sub("[[:space:]]*\\((?:[^()]*[[:space:]]+)?via-helper\\)[[:space:]]*$"; "") | text_or_null) end;
     def friendly($t):
       ($t.current_state.state // "unknown") as $s
       | ($t.current_state.source // "") as $src

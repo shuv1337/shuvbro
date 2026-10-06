@@ -227,8 +227,8 @@ write_fixture_snapshot() {  # <path>
        {id: "mate-idle", kind: "secondmate", project: "/homes/mate-idle",
         current_state: {state: "done", source: "status-log", detail: "Merged https://github.com/sample/repo/pull/442 task cleaned up"},
         pr: {url: null, source: "absent"},
-        hints: {open_decisions: [], last_event_text: "done [corr=0123456789abcdef]: Merged https://github.com/sample/repo/pull/442 task cleaned up (/homes/mate-idle/data/x/report.md via-helper)"},
-        paths: {status_log: {last_event: {note: "Merged https://github.com/sample/repo/pull/442 task cleaned up (/homes/mate-idle/data/x/report.md via-helper)"}}}},
+        hints: {open_decisions: [], last_event_text: "done [corr=0123456789abcdef]: Merged https://github.com/sample/repo/pull/442 task cleaned up (/homes/mate idle/data/x/report.md via-helper)"},
+        paths: {status_log: {last_event: {note: "Merged https://github.com/sample/repo/pull/442 task cleaned up (/homes/mate idle/data/x/report.md via-helper)"}}}},
        {id: "mate-ready", kind: "secondmate", project: "/homes/mate-ready",
         current_state: {state: "done", source: "status-log", detail: "PR https://github.com/sample/repo/pull/443 checks green"},
         pr: {url: "https://github.com/sample/repo/pull/443", source: "status_event"}, hints: {open_decisions: []}}

@@ -869,12 +869,14 @@ test_secondmate_open_decision_survives_live_endpoint() {
 }
 
 # A secondmate's status log spans many child tasks, so its PR is never the first
-# URL ever written there: only the newest event, and only when it is the
-# documented `done: PR <url>` ready signal, names the PR being handed back.
+# URL ever written there: the newest `done` event names the PR being handed back
+# only when it is a ready publication (the worker's own `done: PR <url>` or the
+# parent-channel `child <id> PR ready:` / `child <id> done: PR <url>` lines),
+# routine notes after it keep it, and a later merge or cleanup `done` clears it.
 test_secondmate_pr_is_newest_ready_signal_only() {
   local home fakebin out id
   home=$(make_home secondmate-pr)
-  for id in merged-mate ready-mate noted-mate; do
+  for id in merged-mate ready-mate noted-mate channel-ready-mate channel-outcome-mate channel-merged-mate; do
     mkdir -p "$home/$id-home"
     fm_write_meta "$home/state/$id.meta" \
       "window=firstmate:fm-$id" \
@@ -896,9 +898,26 @@ done: PR https://github.com/sample/repo/pull/435 checks green
 working: picking up issue 407
 done corr=0123456789abcdef [key=issue-407]: PR https://github.com/sample/repo/pull/437 checks green (via-helper)
 EOF
+  # Routine lines after a ready publication do not hide a PR that is still open,
+  # and a URL merely mentioned in a note is never promoted.
   cat > "$home/state/noted-mate.status" <<'EOF'
 done: PR https://github.com/sample/repo/pull/435 checks green
-note: rebasing https://github.com/sample/repo/pull/437 on main
+note: also opened https://github.com/sample/repo/pull/436 as a follow-up
+working: picking up issue 407
+EOF
+  cat > "$home/state/channel-ready-mate.status" <<'EOF'
+done: PR https://github.com/sample/repo/pull/435 checks green
+done [key=merged-old]: merged old https://github.com/sample/repo/pull/435
+done [key=child-pr-issue-407]: child issue-407 PR ready: https://github.com/sample/repo/pull/437
+EOF
+  cat > "$home/state/channel-outcome-mate.status" <<'EOF'
+done [key=child-outcome-issue-407-1]: child issue-407 done: PR https://github.com/sample/repo/pull/437 checks green pr=https://github.com/sample/repo/pull/437 mode=no-mistakes
+note [corr=0123456789abcdef]: waiting for the merge (via-helper)
+EOF
+  cat > "$home/state/channel-merged-mate.status" <<'EOF'
+done [key=child-pr-issue-407]: child issue-407 PR ready: https://github.com/sample/repo/pull/437
+done [key=merged-issue-407]: merged issue-407 https://github.com/sample/repo/pull/437
+working: picking up issue 408
 EOF
   # The single-owner fallback is unchanged: a ship task keeps the first PR URL in its log.
   mkdir -p "$home/projects/ship-worktree"
@@ -917,10 +936,13 @@ EOF
     (.tasks | map({key: .id, value: .pr}) | from_entries) as $pr
     | $pr["merged-mate"] == {url: null, source: "absent"}
       and $pr["ready-mate"] == {url: "https://github.com/sample/repo/pull/437", source: "status_event"}
-      and $pr["noted-mate"] == {url: null, source: "absent"}
+      and $pr["noted-mate"] == {url: "https://github.com/sample/repo/pull/435", source: "status_event"}
+      and $pr["channel-ready-mate"] == {url: "https://github.com/sample/repo/pull/437", source: "status_event"}
+      and $pr["channel-outcome-mate"] == {url: "https://github.com/sample/repo/pull/437", source: "status_event"}
+      and $pr["channel-merged-mate"] == {url: null, source: "absent"}
       and $pr["ship-first"] == {url: "https://github.com/sample/repo/pull/7", source: "status_event"}
-  ' >/dev/null || fail "secondmate PR must come only from the newest ready signal: $out"
-  pass "a secondmate's PR is the newest ready signal only, never the first URL in its log"
+  ' >/dev/null || fail "secondmate PR must come only from the newest done event when it is a ready publication: $out"
+  pass "a secondmate's PR is its newest ready publication, kept past routine notes and cleared by a later merge"
 }
 
 # An open decision clears ONLY on an explicit resolution referencing its key, never

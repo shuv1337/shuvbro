@@ -68,8 +68,10 @@
 #     current state.
 #     pr.url is the recorded pr= metadata (source "meta"); without one, a
 #     single-owner task falls back to the first PR URL in its status log and a
-#     secondmate only to the PR named by its newest `done: PR <url>` ready
-#     signal (source "status_event"), else null (source "absent").
+#     secondmate only to the PR named by its newest `done` event when that
+#     event is a ready publication (ready_signal_pr_url owns the shapes; any
+#     other newest `done`, such as a merge, clears it) (source
+#     "status_event"), else null (source "absent").
 #     hints.open_decisions is the keyed open-decision set returned by
 #     fm-classify-lib.sh's authoritative status_open_decisions fold and reconciled
 #     against current_state; hints.pending_decision and hints.blocked_event are
@@ -369,22 +371,36 @@ first_pr_url_in_file() {  # <file>
   grep -Eo 'https?://[^[:space:])"]+/pull/[0-9]+' "$1" 2>/dev/null | head -1
 }
 
-# The PR a persistent secondmate is currently handing back, if any: only the URL
-# named by its NEWEST status event when that event is the documented ready
-# signal (`done: PR <url> ...`, AGENTS.md section 7). A secondmate's log spans
-# many child tasks, so the first PR ever written there is almost never current,
-# and a later `done:` that reports a merge or cleanup names a PR that is
-# finished, not ready; both yield no PR rather than a stale one.
+# The PR a persistent secondmate is currently handing back, if any. A
+# secondmate's log spans many child tasks, so the first PR ever written there
+# is almost never current. The newest `done` event decides: when it is a ready
+# publication its URL is current, and any other `done` (a merge from
+# bin/fm-merge-outcome-lib.sh, a cleanup, a report) means that PR is finished,
+# so no PR is shown rather than a stale one. Routine `note:` and `working:`
+# lines written after a ready publication do not hide it. The ready shapes are
+# the ones this fleet's own writers produce:
+#   done: PR <url> ...                                  (the worker's own ready line, AGENTS.md section 7)
+#   done [key=child-pr-<id>]: child <id> PR ready: <url> (bin/fm-pr-check.sh parent channel)
+#   done [key=child-outcome-...]: child <id> done: PR <url> ... (bin/fm-inactive-reconcile.sh parent channel)
 ready_signal_pr_url() {  # <status-file>
-  local raw verb note
+  local raw verb note newest=''
   [ -f "$1" ] || return 1
-  raw=$(last_nonempty_line "$1" || true)
-  [ -n "$raw" ] || return 1
-  verb=$(status_line_verb "$raw")
-  [ "$verb" = "done" ] || return 1
-  note=$(status_line_note "$raw")
-  printf '%s\n' "$note" | grep -Eo '^PR[[:space:]]+https?://[^[:space:])"]+/pull/[0-9]+' 2>/dev/null \
-    | sed -E 's/^PR[[:space:]]+//' | head -1 | grep .
+  # Candidates are the lines that can parse to verb done (status_line_verb
+  # keeps the leading word), newest last; the verb parse then confirms each.
+  while IFS= read -r raw || [ -n "$raw" ]; do
+    [ -n "$raw" ] || continue
+    verb=$(status_line_verb "$raw")
+    [ "$verb" = "done" ] || continue
+    newest=$raw
+  done <<EOF
+$(grep -E '^[[:space:]]*done([[:space:]]|\[|:)' "$1" 2>/dev/null)
+EOF
+  [ -n "$newest" ] || return 1
+  note=$(status_line_note "$newest")
+  printf '%s\n' "$note" | grep -Eq \
+    '^(PR|child[[:space:]]+[^[:space:]]+[[:space:]]+(PR ready:|done:[[:space:]]*PR))[[:space:]]+https?://[^[:space:])"]+/pull/[0-9]+' \
+    || return 1
+  printf '%s\n' "$note" | grep -Eo 'https?://[^[:space:])"]+/pull/[0-9]+' | head -1 | grep .
 }
 
 backlog_json() {  # [<backlog-path>] - defaults to this home's $BACKLOG
