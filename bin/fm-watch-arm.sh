@@ -64,7 +64,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=bin/fm-wake-lib.sh
 . "$SCRIPT_DIR/fm-wake-lib.sh"
 
-WATCH="$SCRIPT_DIR/fm-watch.sh"
+# Tests inject a stand-in with FM_WATCH_OVERRIDE. Production leaves it unset.
+WATCH="${FM_WATCH_OVERRIDE:-$SCRIPT_DIR/fm-watch.sh}"
 WATCH_LOCK="$STATE/.watch.lock"
 BEAT="$STATE/.last-watcher-beat"
 # "Fresh" reuses the guard's threshold so there is one definition of liveness.
@@ -407,6 +408,77 @@ if [ "$mode" = handling-delivered ]; then
   exit $?
 fi
 
+# A zombie still passes kill -0. Gone means the pid has been reaped.
+# shellcheck disable=SC2329 # Invoked indirectly by the signal traps below.
+pid_fully_gone() {  # <pid>
+  local pid=$1
+  case "$pid" in ''|*[!0-9]*) return 0 ;; esac
+  fm_pid_alive "$pid" && return 1
+  return 0
+}
+
+# shellcheck disable=SC2329 # Invoked indirectly by the signal traps below.
+pid_is_zombie() {  # <pid>
+  local pid=$1 stat
+  case "$pid" in ''|*[!0-9]*) return 1 ;; esac
+  fm_pid_alive "$pid" || return 1
+  if [ -r "/proc/$pid/stat" ]; then
+    stat=$(cat "/proc/$pid/stat" 2>/dev/null || true)
+    stat=${stat##*)}
+    stat=${stat# }
+    stat=${stat%% *}
+    [ "$stat" = Z ]
+    return
+  fi
+  stat=$(ps -p "$pid" -o stat= 2>/dev/null || true)
+  case "$stat" in
+    Z*) return 0 ;;
+  esac
+  return 1
+}
+
+# Bash 5.2 can drop a signal trap that fires while a command substitution is
+# being parsed, printing "trap: line 2: unexpected EOF while looking for
+# matching ')'" and leaving the process alive. An unbounded wait on that
+# process hangs this arm. TERM gets a grace strictly longer than the watcher's
+# bounded cleanup: fm_active_check_stop (about 1.2s) plus one recovery-marker
+# lock wait, which reclaims a dead mid-acquire holder once the lock is
+# max(FM_LOCK_STALE_AFTER, 2) whole seconds old. Only then KILL. A signal is
+# sent only while fm_pid_identity still names the process recorded at entry, so
+# a reused pid is not killed. Does not reap; a caller that owns the pid waits
+# after this returns.
+stop_pid_bounded() {  # <pid>
+  local pid=$1 i stale grace identity now
+  [ -n "$pid" ] && fm_pid_alive "$pid" || return 0
+  identity=$(fm_pid_identity "$pid" 2>/dev/null || true)
+  if [ -z "$identity" ]; then
+    echo "watcher: refusing to signal pid $pid without a process identity" >&2
+    return 1
+  fi
+  stale=$FM_LOCK_STALE_AFTER
+  case "$stale" in ''|*[!0-9]*) stale=2 ;; esac
+  [ "$stale" -lt 2 ] && stale=2
+  grace=$((stale + 5))
+  now=$(fm_pid_identity "$pid" 2>/dev/null || true)
+  [ "$now" = "$identity" ] || return 0
+  kill -TERM "$pid" 2>/dev/null || true
+  i=0
+  while [ "$i" -lt $((grace * 10)) ] && fm_pid_alive "$pid"; do
+    sleep 0.1
+    i=$((i + 1))
+  done
+  now=$(fm_pid_identity "$pid" 2>/dev/null || true)
+  if [ "$now" = "$identity" ] && fm_pid_alive "$pid"; then
+    echo "watcher: pid $pid survived TERM for ${grace}s; sent KILL, so its cleanup was skipped and recovery will use the stale-lock path" >&2
+    kill -KILL "$pid" 2>/dev/null || true
+    i=0
+    while [ "$i" -lt 20 ] && fm_pid_alive "$pid"; do
+      sleep 0.05
+      i=$((i + 1))
+    done
+  fi
+}
+
 if [ "$mode" = restart ]; then
   # Home-scoped stop: only the watcher pid recorded in THIS home's lock.
   lock_pid=$(cat "$WATCH_LOCK/pid" 2>/dev/null || true)
@@ -450,7 +522,7 @@ child=
 child_out=
 cleanup_child() {
   if [ -n "$child" ] && fm_pid_alive "$child"; then
-    kill -TERM "$child" 2>/dev/null || true
+    stop_pid_bounded "$child"
   fi
   if [ -n "$child_out" ]; then
     rm -f "$child_out" 2>/dev/null || true
@@ -461,12 +533,22 @@ cleanup_child() {
 handle_arm_signal() {
   local signal=$1 rc=$2
   trap - HUP TERM INT
-  if [ -n "$child" ] && fm_pid_alive "$child"; then
-    kill -TERM "$child" 2>/dev/null || true
-    wait "$child" 2>/dev/null || true
+  if [ -n "$child" ]; then
+    stop_pid_bounded "$child"
+    # Skip wait while a live non-zombie remains: that wait is the hang a
+    # dropped trap used to cause. A dead child, including a zombie we own, is
+    # reaped here. kill -0 is true for a zombie, so that case is explicit.
+    if pid_fully_gone "$child" || pid_is_zombie "$child"; then
+      wait "$child" 2>/dev/null || true
+    fi
   fi
   cycle_log_append "$rc" "$signal" arm-interrupted none
-  cleanup_child
+  # Do not signal again. A second stop would record the replaced pid as the
+  # process to kill.
+  if [ -n "$child_out" ]; then
+    rm -f "$child_out" 2>/dev/null || true
+    child_out=
+  fi
   exit "$rc"
 }
 
