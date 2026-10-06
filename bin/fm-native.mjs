@@ -18,7 +18,7 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
-import { access, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { access, link, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { constants } from "node:fs";
 import { createConnection } from "node:net";
 import { hostname } from "node:os";
@@ -161,22 +161,40 @@ async function save(file, value) {
 }
 
 async function lock(home) {
-  const directory = join(home, ".native-display-lock"), deadline = Date.now() + 10000;
+  const path = join(home, ".native-display-lock"), guard = `${path}.reclaim`, deadline = Date.now() + 10000;
   for (;;) {
-    const staging = `${directory}.${randomUUID()}.tmp`;
-    await mkdir(staging, { mode: 0o700 });
-    await writeFile(join(staging, "pid"), String(process.pid), { mode: 0o600 });
-    try { await rename(staging, directory); return () => rm(directory, { recursive: true }); }
-    catch (error) { await rm(staging, { recursive: true }); if (!["EEXIST", "ENOTEMPTY"].includes(error.code)) throw error; }
-    let pid;
-    try { pid = Number(await readFile(join(directory, "pid"), "utf8")); }
-    catch (error) { if (error.code === "ENOENT") continue; throw error; }
-    if (!Number.isSafeInteger(pid) || pid < 2) throw new Error("Ambiguous native display lock; retain it for inspection");
-    try { process.kill(pid, 0); }
-    catch (alive) { if (alive.code !== "ESRCH") throw alive; await rm(directory, { recursive: true, force: true }); continue; }
+    if (await claim(path)) return () => unlink(path);
+    const current = await holder(path);
+    if (!current) continue;
+    if (!current.alive) {
+      if (await claim(guard)) {
+        try { if ((await holder(path))?.content === current.content) await unlink(path); }
+        finally { await unlink(guard); }
+        continue;
+      }
+      if ((await holder(guard))?.alive === false) throw new Error("Ambiguous native display lock recovery; retain it for inspection");
+    }
     if (Date.now() > deadline) throw new Error("Native display adapter is busy");
     await new Promise(done => setTimeout(done, 100));
   }
+}
+
+async function claim(path) {
+  const temporary = `${path}.${randomUUID()}.tmp`;
+  await writeFile(temporary, `${process.pid} ${randomUUID()}\n`, { mode: 0o600 });
+  try { await link(temporary, path); return true; }
+  catch (error) { if (error.code !== "EEXIST") throw error; return false; }
+  finally { await unlink(temporary); }
+}
+
+async function holder(path) {
+  let content;
+  try { content = await readFile(path, "utf8"); }
+  catch (error) { if (error.code === "ENOENT") return undefined; throw error; }
+  const pid = Number(content.split(" ")[0]);
+  if (!/^\d+ [0-9a-f-]{36}\n$/.test(content) || !Number.isSafeInteger(pid) || pid < 2) throw new Error("Ambiguous native display lock; retain it for inspection");
+  try { process.kill(pid, 0); return { content, alive: true }; }
+  catch (error) { if (error.code !== "ESRCH") return { content, alive: true }; return { content, alive: false }; }
 }
 
 async function native(journal, args, json) {

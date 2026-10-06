@@ -15,6 +15,7 @@ async function fixture(t) {
   await mkdir(project);
   await writeFile(fake, `import { readFile, writeFile, appendFile } from 'node:fs/promises';\nimport { join } from 'node:path';\nconst base=process.argv[2], args=process.argv.slice(3);\nawait appendFile(join(base,'native-calls.jsonl'),JSON.stringify(args)+'\\n');\nconst home=args[args.indexOf('--home')+1];\nif(args[1]==='init'){const profile=JSON.parse(await readFile(args[args.indexOf('--profile')+1],'utf8'));if(profile.version!==1||profile.id!=='shuvbro'||typeof profile.leadInstructions!=='string'||!profile.leadInstructions.trim())process.exit(2);await writeFile(join(home,'settings.json'),JSON.stringify({pilotID:'native-home-id'}));}\nif(args[1]==='presentation')process.stdout.write(await readFile(join(base,'projection.json'),'utf8'));\n`);
   await writeFile(fake, await readFile(fake, "utf8") + "if(args[1]==='status')process.stdout.write('typed native output\\n');\n");
+  await writeFile(fake, await readFile(fake, "utf8") + "if(args[1]==='presentation'){const marker=join(base,'presentation-inflight');try{await writeFile(marker,'',{flag:'wx'});}catch{await appendFile(join(base,'overlaps'),'x');}await new Promise(r=>setTimeout(r,30));await import('node:fs/promises').then(fs=>fs.rm(marker,{force:true}));}\n");
   const facts = ["lead", "ship", "scout"].map((role, index) => ({ id: `entry-${index}`, role, taskID: index ? `task-${index}` : undefined, title: `View ${index}`, sessionID: `ses_${index}`, location: project, state: index === 2 ? "blocked" : index === 1 ? "working" : "idle", available: true, settled: false, retired: false, attachment: { provider: "shuvcode", home_id: "native-home-id", session_id: `ses_${index}`, location: project, host_id: "local", attach_argv: ["/private/shuvcode", "supervisor", "attach", "--home", home, "--home-id", "native-home-id", "--session", `ses_${index}`, "--location", project] } }));
   const projection = { version: 1, homeID: "native-home-id", home, entries: facts, observedAt: 0, endpoint: "http://127.0.0.1:1" };
   const state = { calls: [], panes: new Map(), bindings: new Map(), processes: new Map(), workspaces: new Set(["@parent", "@neighbor"]), creates: 0, launches: 0, focus: "@neighbor", capabilities: true, lose: undefined };
@@ -86,7 +87,8 @@ async function fixture(t) {
   async function init(extra = []) { return run("init", "--home", home, "--project", project, "--herdr-socket", socket, "--herdr-session", "native-test", "--parent-workspace", "@parent", "--shuvcode-command", JSON.stringify([process.execPath, fake, directory]), ...extra); }
   async function journal() { return JSON.parse(await readFile(join(home, "native-display.json"), "utf8")); }
   async function nativeCalls() { return (await readFile(join(directory, "native-calls.jsonl"), "utf8")).trim().split("\n").map(line => JSON.parse(line)); }
-  return { directory, home, projection, facts, state, publish, run, start, until, init, journal, nativeCalls };
+  async function overlaps() { try { return (await readFile(join(directory, "overlaps"), "utf8")).length; } catch (error) { if (error.code === "ENOENT") return 0; throw error; } }
+  return { directory, home, projection, facts, state, publish, run, start, until, init, journal, nativeCalls, overlaps };
 }
 
 test("native init/profile and explicit up converge on exact no-focus views; cleanup needs settlement", async t => {
@@ -189,6 +191,35 @@ test("explicit cleanup proceeds while watch runs and watch keeps the cleanup res
   strictEqual(after.entries["entry-1"].phase, "closed");
   strictEqual(f.state.creates, 3); strictEqual(f.state.launches, 3);
   strictEqual(watch.child.exitCode, null);
+  watch.child.kill(); await watch.closed;
+});
+
+test("concurrent passes hand off the home lock without overlapping", async t => {
+  const f = await fixture(t); strictEqual((await f.init()).code, 0);
+  const results = await Promise.all(Array.from({ length: 8 }, () => f.run("sync", "--home", f.home)));
+  deepStrictEqual(results.map(result => result.code), Array(8).fill(0), results.map(result => result.stderr).join(""));
+  strictEqual(await f.overlaps(), 0);
+  strictEqual(f.state.creates, 3); strictEqual(f.state.launches, 3);
+  await rm(join(f.home, ".native-display-lock"), { force: false }).then(() => ok(false, "lock was not released"), error => strictEqual(error.code, "ENOENT"));
+});
+
+test("a stale lock from a stopped adapter is reclaimed by exactly one concurrent pass at a time", async t => {
+  const f = await fixture(t); strictEqual((await f.init()).code, 0);
+  const dead = await new Promise(resolve => { const child = spawn(process.execPath, ["-e", ""]); child.on("close", () => resolve(child.pid)); });
+  await writeFile(join(f.home, ".native-display-lock"), `${dead} ${"0".repeat(8)}-0000-0000-0000-${"0".repeat(12)}\n`);
+  const results = await Promise.all(Array.from({ length: 8 }, () => f.run("sync", "--home", f.home)));
+  deepStrictEqual(results.map(result => result.code), Array(8).fill(0), results.map(result => result.stderr).join(""));
+  strictEqual(await f.overlaps(), 0);
+  strictEqual(f.state.creates, 3); strictEqual(f.state.launches, 3);
+});
+
+test("an ambiguous lock is retained rather than taken over", async t => {
+  const f = await fixture(t); strictEqual((await f.init()).code, 0);
+  await writeFile(join(f.home, ".native-display-lock"), "garbage\n");
+  const result = await f.run("sync", "--home", f.home);
+  strictEqual(result.code, 1); match(result.stderr, /Ambiguous native display lock/);
+  strictEqual(await readFile(join(f.home, ".native-display-lock"), "utf8"), "garbage\n");
+  strictEqual(f.state.creates, 0);
 });
 
 test("lost launch and Herdr restore of bound view never submit attach input twice", async t => {
