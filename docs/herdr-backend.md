@@ -289,7 +289,7 @@ A caller that names any other harness while the pane still carries a shuvcode re
 The same foreground proof handles a matching adapter registration whose status is `unknown` during startup; an unrelated process stays ambiguous, and failed API reads are not treated as positive liveness.
 Watch, doorbell, crew-state, legacy teardown, and the restart-husk check pass the task's recorded harness so an exited opencode-v2 pane reads as agent-free there too.
 
-The session-start sweep uses this probe.
+The session-start sweep uses this probe and passes the recorded harness only for opencode-v2, so every other harness keeps the registration classification there.
 Mid-session secondmate agent-process liveness is not implemented because idle secondmates are deliberately exempt from stale-pane escalation and need a separate periodic identity signal.
 
 ## Push events and polling fallback

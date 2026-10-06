@@ -1720,6 +1720,17 @@ The current `bin/fm-opencode-v2-launch.sh` creates an exact model-bound session 
 
 ### Home-local secondmate lifecycle
 
+Portable startup recovery was verified on 2026-10-06 with Bash 5.3.20 using `bin/fm-test-run.sh --exclude-family live-harness-optin --exclude-family real-herdr-gated tests/fm-secondmate-liveness.test.sh` and fixture homes, fake tmux endpoints and a stubbed node CLI returning native-session status JSON, without launching a live harness or Herdr.
+The tmux sweep regression checks idle-only recovery, canonical home arguments and first-line probe diagnostics; it does not execute `fm-opencode-v2-session.mjs` or establish live native-service proof.
+It reports:
+
+```text
+ok - sweep: V2 dead/missing recovery requires idle native proof; executing and uncertain endpoints are preserved
+```
+
+This verifies startup recovery decisions, not a new live shared-service/Herdr qualification.
+Separate fixture cases exercise the Herdr adapter-specific dispatcher with stubbed presence/process classifiers and the non-V2 sweep with a fake Herdr CLI; neither proves live Herdr recovery.
+
 Verified on 2026-10-04 at 22:31 PDT on Linux with shuvcode v2.0.22-shuv.2, Node v26.10.0, Herdr client/server 0.9.1-shuv.6+9059819d8043 and Treehouse 2.0.0, using `opencode/space-bunny-free#low`:
 
 ```sh

@@ -181,7 +181,7 @@ test_herdr_agent_state_preserves_husk_classifier() {
 # --- unit level: the generic dispatchers ------------------------------------
 
 test_agent_state_dispatcher_and_compatibility() {
-  local fb out
+  local fb out row
 
   fb=$(make_probe_tmux "$TMP_ROOT/dispatch-tmux" claude)
   out=$(PATH="$fb:$BASE_PATH" bash -c '. "$0/bin/fm-backend.sh"; fm_backend_agent_state tmux sess:win' "$ROOT")
@@ -189,6 +189,17 @@ test_agent_state_dispatcher_and_compatibility() {
 
   out=$(bash -c '. "$0/bin/fm-backend.sh"; fm_backend_source herdr; fm_backend_herdr_pane_agent_state() { printf "live"; }; fm_backend_agent_state herdr sess:p1' "$ROOT")
   [ "$out" = alive ] || fail "detailed dispatcher should route Herdr, got '$out'"
+
+  # A stale hook says live, but V2 must use foreground/presence evidence.
+  for row in 'dead missing' 'present dead' 'unknown unreadable'; do
+    out=$(FM_TEST_PANE_STATE="${row%% *}" bash -c '
+      . "$0/bin/fm-backend.sh"; fm_backend_source herdr
+      fm_backend_herdr_pane_agent_state() { printf live; }
+      fm_backend_herdr_pane_presence_state() { printf "%s" "$FM_TEST_PANE_STATE"; }
+      fm_backend_herdr_pane_process_agent_state() { printf dead; }
+      fm_backend_agent_state herdr sess:p1 opencode-v2' "$ROOT")
+    [ "$out" = "${row#* }" ] || fail "V2 Herdr ${row%% *} must use adapter-specific evidence, got '$out'"
+  done
 
   out=$(bash -c '. "$0/bin/fm-backend.sh"; fm_backend_agent_state zellij sess:7' "$ROOT")
   [ "$out" = unverified ] || fail "Zellij should remain unverified, got '$out'"
@@ -424,6 +435,107 @@ test_sweep_respawns_authoritatively_missing_pi_signed_secondmate() {
   pass "sweep: an authoritatively missing pi-signed secondmate window is relaunched"
 }
 
+test_sweep_opencode_v2_recovery_requires_idle_native_session() {
+  local w fb tmuxfb log out pane execution native_log row
+  # The durable replacement pin stays codex in this fixture: recovery uses the
+  # recorded V2 session for safety, then the normal spawn/profile resolution.
+  for row in 'zsh idle' 'missing idle' 'missing symlink-idle' 'zsh executing' 'missing executing' 'missing unproven' 'missing unreadable' 'node idle' 'unreadable idle' 'shuvcode executing'; do
+    pane=${row%% *}; execution=${row#* }
+    w=$(new_world "sweep-v2-$pane-$execution")
+    add_sm_home "$w" sm1 firstmate:fm-sm1 opencode-v2
+    if [ "$execution" = symlink-idle ]; then
+      ln -s "$w/sm1" "$w/logical-home"
+      sed "s#^home=.*#home=$w/logical-home#" "$w/home/state/sm1.meta" > "$w/meta.tmp"
+      mv "$w/meta.tmp" "$w/home/state/sm1.meta"
+      printf 'worktree=/not-the-secondmate-home\n' >> "$w/home/state/sm1.meta"
+    fi
+    fb=$(make_toolchain "$w"); tmuxfb=$(make_liveness_tmux "$w")
+    log="$w/calls.log"; : > "$log"
+    native_log="$w/native.log"
+    cat > "$fb/node" <<'SH'
+#!/usr/bin/env bash
+case "${1:-} ${2:-}" in
+  *fm-opencode-v2-session.mjs\ status)
+    printf '%s\n' "$*" >> "$FM_TEST_NATIVE_LOG"
+    [ "${4:-}" = "$FM_TEST_CANONICAL_HOME" ] || { printf '%s\n' 'native directory mismatch' >&2; exit 1; }
+    case "$FM_TEST_EXECUTION" in
+      idle|symlink-idle) printf '%s\n' '{"executing":false}' ;;
+      executing) printf '%s\n' '{"executing":true}' ;;
+      unproven) printf '%s\n' '{"executing":null}' ;;
+      unreadable) printf '%s\n' 'native service refused exact session' 'second diagnostic line' >&2; exit 1 ;;
+    esac
+    ;;
+esac
+SH
+    chmod +x "$fb/node"
+    out=$(run_bootstrap "$tmuxfb:$fb" "$w/home" "$pane" "$log" \
+      FM_TEST_NATIVE_LOG="$native_log" FM_TEST_EXECUTION="$execution" FM_TEST_CANONICAL_HOME="$w/sm1")
+    case "$pane:$execution" in
+      zsh:idle|missing:idle|missing:symlink-idle)
+        assert_contains "$(cat "$log")" new-window "idle native V2 session permits recovery of $pane endpoint"
+        assert_not_contains "$out" 'unverified for recovery' "V2 is verified for recovery"
+        [ "$pane" != missing ] || assert_not_contains "$(cat "$log")" kill-window "missing V2 endpoint needs no kill"
+        ;;
+      *)
+        [ ! -s "$log" ] || fail "V2 $pane/$execution must not kill or respawn"
+        case "$pane" in
+          zsh|missing) assert_contains "$out" "native execution $execution" "unsafe native proof must be reported" ;;
+          node) assert_contains "$out" 'ambiguous agent process' "ambiguous V2 endpoint is preserved" ;;
+          unreadable) assert_contains "$out" 'endpoint probe unreadable' "unreadable V2 endpoint is preserved" ;;
+        esac
+        if [ "$execution" = unreadable ]; then
+          assert_contains "$out" 'native execution unreadable: native service refused exact session' "native failure retains its first diagnostic"
+          assert_not_contains "$out" 'second diagnostic line' "native skip diagnosis stays one line"
+        fi
+        ;;
+    esac
+    case "$pane" in
+      zsh|missing)
+        assert_contains "$(cat "$native_log")" "status $w/home/state/sm1.opencode-v2-session.json $w/sm1" "recovery probes exact V2 session and home"
+        ;;
+      *) [ ! -e "$native_log" ] || fail "live/ambiguous/unreadable endpoints must not need a native recovery probe" ;;
+    esac
+  done
+  pass "sweep: V2 dead/missing recovery requires idle native proof; executing and uncertain endpoints are preserved"
+}
+
+test_sweep_herdr_non_v2_keeps_registry_classifier() {
+  local w fb tmuxfb herdrfb log herdr_log out
+  if ! command -v jq >/dev/null 2>&1; then
+    pass "sweep: Herdr non-V2 classifier skipped without jq"
+    return 0
+  fi
+  w=$(new_world sweep-herdr-claude)
+  add_sm_home "$w" sm1 fm-test:p1 claude
+  printf 'backend=herdr\n' >> "$w/home/state/sm1.meta"
+  fb=$(make_toolchain "$w"); tmuxfb=$(make_liveness_tmux "$w")
+  herdrfb=$(fm_fakebin "$w/herdr")
+  log="$w/calls.log"; : > "$log"
+  herdr_log="$w/herdr.log"; : > "$herdr_log"
+  cat > "$herdrfb/herdr" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$FM_TEST_HERDR_LOG"
+case "${1:-} ${2:-}" in
+  "pane get") printf '%s\n' '{"result":{"pane":{"pane_id":"p1"}}}' ;;
+  "agent get") printf '%s\n' '{"result":{"agent":{"agent":"claude","agent_status":"unknown"}}}' ;;
+  "pane process-info") printf '%s\n' '{"result":{"type":"pane_process_info","process_info":{"pane_id":"p1","foreground_processes":[{"name":"zsh"}]}}}' ;;
+esac
+exit 0
+SH
+  chmod +x "$herdrfb/herdr"
+
+  out=$(run_bootstrap "$herdrfb:$tmuxfb:$fb" "$w/home" zsh "$log" FM_TEST_HERDR_LOG="$herdr_log")
+
+  assert_contains "$out" "SECONDMATE_LIVENESS: secondmate sm1: skipped: endpoint probe unreadable" \
+    "a non-V2 Herdr registration reporting unknown status stays unreadable"
+  # Later config-sync doorbells legitimately use the harness-aware classifier.
+  # Bound this assertion to the first pane/registration read (the liveness read).
+  assert_not_contains "$(awk '/^pane get / { reads++; if (reads > 1) exit } { print }' "$herdr_log")" "process-info" \
+    "non-V2 Herdr classification must not consult the foreground-process classifier"
+  assert_not_contains "$(cat "$herdr_log")" "close" "an unreadable non-V2 Herdr endpoint is never closed"
+  pass "sweep: non-V2 Herdr secondmates keep the registry classifier"
+}
+
 test_sweep_never_acts_on_ambiguous_existing_process() {
   local w fb tmuxfb log out
   w=$(new_world sweep-ambiguous)
@@ -548,6 +660,8 @@ test_sweep_respawns_confirmed_dead_secondmate
 test_sweep_leaves_alive_secondmate_untouched
 test_sweep_respawns_authoritatively_missing_pi_secondmate
 test_sweep_respawns_authoritatively_missing_pi_signed_secondmate
+test_sweep_opencode_v2_recovery_requires_idle_native_session
+test_sweep_herdr_non_v2_keeps_registry_classifier
 test_sweep_never_acts_on_ambiguous_existing_process
 test_sweep_never_acts_on_transient_unreadability
 test_sweep_reports_missing_endpoint_relaunch_failure
