@@ -868,6 +868,61 @@ test_secondmate_open_decision_survives_live_endpoint() {
   pass "a live secondmate endpoint preserves unrelated open decisions"
 }
 
+# A secondmate's status log spans many child tasks, so its PR is never the first
+# URL ever written there: only the newest event, and only when it is the
+# documented `done: PR <url>` ready signal, names the PR being handed back.
+test_secondmate_pr_is_newest_ready_signal_only() {
+  local home fakebin out id
+  home=$(make_home secondmate-pr)
+  for id in merged-mate ready-mate noted-mate; do
+    mkdir -p "$home/$id-home"
+    fm_write_meta "$home/state/$id.meta" \
+      "window=firstmate:fm-$id" \
+      "worktree=$home/$id-home" \
+      "project=$home/$id-home" \
+      "harness=codex" \
+      "kind=secondmate" \
+      "mode=secondmate" \
+      "home=$home/$id-home" \
+      "projects=alpha"
+  done
+  cat > "$home/state/merged-mate.status" <<'EOF'
+done [corr=0123456789abcdef]: PR https://github.com/sample/repo/pull/435 checks green (via-helper)
+working: picking up issue 407
+done [corr=fedcba9876543210]: Merged https://github.com/sample/repo/pull/442 task cleaned up (via-helper)
+EOF
+  cat > "$home/state/ready-mate.status" <<'EOF'
+done: PR https://github.com/sample/repo/pull/435 checks green
+working: picking up issue 407
+done corr=0123456789abcdef [key=issue-407]: PR https://github.com/sample/repo/pull/437 checks green (via-helper)
+EOF
+  cat > "$home/state/noted-mate.status" <<'EOF'
+done: PR https://github.com/sample/repo/pull/435 checks green
+note: rebasing https://github.com/sample/repo/pull/437 on main
+EOF
+  # The single-owner fallback is unchanged: a ship task keeps the first PR URL in its log.
+  mkdir -p "$home/projects/ship-worktree"
+  fm_write_meta "$home/state/ship-first.meta" \
+    "window=firstmate:fm-ship-first" \
+    "worktree=$home/projects/ship-worktree" \
+    "project=alpha" \
+    "harness=codex" \
+    "kind=ship" \
+    "mode=ship"
+  printf 'done: PR https://github.com/sample/repo/pull/7 checks green\nnote: follow-up filed as https://github.com/sample/repo/pull/8\n' \
+    > "$home/state/ship-first.status"
+  fakebin=$(make_fakebin "$home")
+  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --json)
+  printf '%s' "$out" | jq -e '
+    (.tasks | map({key: .id, value: .pr}) | from_entries) as $pr
+    | $pr["merged-mate"] == {url: null, source: "absent"}
+      and $pr["ready-mate"] == {url: "https://github.com/sample/repo/pull/437", source: "status_event"}
+      and $pr["noted-mate"] == {url: null, source: "absent"}
+      and $pr["ship-first"] == {url: "https://github.com/sample/repo/pull/7", source: "status_event"}
+  ' >/dev/null || fail "secondmate PR must come only from the newest ready signal: $out"
+  pass "a secondmate's PR is the newest ready signal only, never the first URL in its log"
+}
+
 # An open decision clears ONLY on an explicit resolution referencing its key, never
 # on an unrelated terminal line.
 test_open_decision_transfers_to_captain_hold() {
@@ -1093,6 +1148,7 @@ test_normalized_roles_and_plural_blocker_readiness
 test_event_hints_follow_reconciled_current_state
 test_open_decision_survives_later_unrelated_event
 test_secondmate_open_decision_survives_live_endpoint
+test_secondmate_pr_is_newest_ready_signal_only
 test_open_decision_transfers_to_captain_hold
 test_open_decision_clears_on_keyed_resolution
 test_completed_scout_report_is_pointer_not_pending

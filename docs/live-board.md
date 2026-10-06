@@ -59,7 +59,8 @@ If confirmation is still unavailable, it says the answer may have been recorded 
 Confirmations survive a board restart; retrying an old click reports its original result and does not answer a newly asked question.
 An old confirmation appears separately as a previous question's result; it never disables a re-asked question's buttons or discards its new reply draft.
 
-Items the lead noted for you, and questions held in a second mate's home, appear without buttons; answer those in chat.
+Items the lead noted for you, questions held in a second mate's home, and decisions or blockers a second mate's own workers have raised and its lead has not yet settled, appear without buttons; answer those in chat.
+A second mate's card links a PR only while its newest report hands one back, and reads Idle once that work merged or was cleaned up.
 Questions you have left unanswered for two weeks move into a collapsed "Older questions still open" list, where they can still be answered.
 
 ## Threat model

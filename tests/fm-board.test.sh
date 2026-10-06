@@ -203,7 +203,12 @@ write_fixture_snapshot() {  # <path>
      tasks: [
        {id: "running-task", kind: "ship", project: "/tmp/projects/sample",
         current_state: {state: "working", source: "run-step", detail: "review running", observed_at: "2026-07-25T00:00:00Z"},
-        pr: {url: null}, hints: {open_decisions: [], pending_decision: false, last_event_text: "working: raw needs-decision jargon"}},
+        pr: {url: null}, hints: {open_decisions: [], pending_decision: false, last_event_text: "working: raw needs-decision jargon"},
+        paths: {status_log: {last_event: {note: "raw needs-decision jargon"}}}},
+       {id: "chatty-task", kind: "ship", project: "sample",
+        current_state: {state: "working", source: "pane", detail: "Product validation and review resolution remain mandatory before landing; checks pending"},
+        pr: {url: null}, hints: {open_decisions: [], pending_decision: false, last_event_text: "working [corr=0123456789abcdef]: Product validation and review resolution remain mandatory before landing (via-helper)"},
+        paths: {status_log: {last_event: {note: "Product validation and review resolution remain mandatory before landing (via-helper)"}}}},
        {id: "stuck-task", kind: "ship", project: "sample",
         current_state: {state: "blocked", source: "status-log", detail: ""}, pr: {url: null},
         hints: {open_decisions: [], pending_decision: false, last_event_text: ""}},
@@ -218,12 +223,22 @@ write_fixture_snapshot() {  # <path>
        {id: "parked-task", kind: "ship", project: "sample",
         current_state: {state: "parked", source: "run-step", detail: ""}, pr: {url: null}, hints: {}},
        {id: "mate", kind: "secondmate", project: "/homes/mate",
-        current_state: {state: "unknown", source: "none", detail: ""}, pr: {url: null}, hints: {}}
+        current_state: {state: "unknown", source: "none", detail: ""}, pr: {url: null}, hints: {}},
+       {id: "mate-idle", kind: "secondmate", project: "/homes/mate-idle",
+        current_state: {state: "done", source: "status-log", detail: "Merged https://github.com/sample/repo/pull/442 task cleaned up"},
+        pr: {url: null, source: "absent"},
+        hints: {open_decisions: [], last_event_text: "done [corr=0123456789abcdef]: Merged https://github.com/sample/repo/pull/442 task cleaned up (/homes/mate-idle/data/x/report.md via-helper)"},
+        paths: {status_log: {last_event: {note: "Merged https://github.com/sample/repo/pull/442 task cleaned up (/homes/mate-idle/data/x/report.md via-helper)"}}}},
+       {id: "mate-ready", kind: "secondmate", project: "/homes/mate-ready",
+        current_state: {state: "done", source: "status-log", detail: "PR https://github.com/sample/repo/pull/443 checks green"},
+        pr: {url: "https://github.com/sample/repo/pull/443", source: "status_event"}, hints: {open_decisions: []}}
      ],
      secondmate_current: {records: [
        {id: "mate", decisions_open: [
          {id: "mate-call", key: "mate-call", verb: "captain-hold", summary: "Mate question", reason: "Pick one", hold_age_days: 2},
-         {id: "mate-worker", key: "k", verb: "needs-decision", summary: "worker decision", reason: null}]}]}}
+         {id: "mate-worker", key: "k", verb: "needs-decision", summary: "worker decision", reason: null},
+         {id: "mate-stuck", key: "default", verb: "blocked", summary: "worker blocker", reason: null},
+         {id: "mate-settled", key: "r", verb: "resolved", summary: "already answered", reason: null}]}]}}
   ' > "$1"
 }
 
@@ -241,8 +256,8 @@ EOF
   model=$(in_home "$home" "$BOARD" model --snapshot-file "$snap") || fail "model failed on a fixture snapshot"
   printf '%s' "$model" | jq -e '
     .schema == "fm-board.v1" and .lead == "Bro" and .product == "shuvbro"
-    and ([.waiting_on_you[] | .id // .title] == ["call-live", "work-gated", "Renew the certificate", "mate-call", "call-aged"])
-  ' >/dev/null || fail "waiting on you is not the live holds, notes, second mate holds, then older holds: $model"
+    and ([.waiting_on_you[] | .id // .title] == ["call-live", "work-gated", "Renew the certificate", "mate-call", "mate-worker", "mate-stuck", "call-aged"])
+  ' >/dev/null || fail "waiting on you is not the live holds, notes, second mate holds and worker questions, then older holds: $model"
   printf '%s' "$model" | jq -e '
     (.waiting_on_you | map({key: (.id // .title), value: .}) | from_entries) as $w
     | $w["call-live"].choices == [{id: "yes", label: "Yes"}, {id: "no", label: "No"}]
@@ -254,12 +269,22 @@ EOF
       and $w["call-aged"].aged == true and $w["call-aged"].answerable == true
       and $w["Renew the certificate"].answerable == false and $w["Renew the certificate"].links == []
       and ($w["Renew the certificate"] | has("card") | not)
-      and $w["mate-call"].answerable == false and $w["mate-call"].from == "mate"
+      and $w["mate-call"].answerable == false and $w["mate-call"].from == "mate" and $w["mate-call"].from_worker == false
+      and $w["mate-call"].reason == "Pick one"
+      and $w["mate-worker"].answerable == false and $w["mate-worker"].from == "mate" and $w["mate-worker"].from_worker == true
+      and $w["mate-worker"].title == "worker decision" and $w["mate-worker"].reason == "A worker asked for a decision"
+      and ($w["mate-worker"] | has("card") | not)
+      and $w["mate-stuck"].from_worker == true and $w["mate-stuck"].reason == "A worker is stuck on this"
   ' >/dev/null || fail "waiting cards carry the wrong choices, close mode, links, or answerability: $model"
   printf '%s' "$model" | jq -e '
     (.in_flight | map({key: .id, value: .}) | from_entries) as $f
     | $f["running-task"].label == "In automated review" and $f["running-task"].project == "sample"
-      and $f["running-task"].note == "working: raw needs-decision jargon"
+      and $f["running-task"].note == "raw needs-decision jargon"
+      and $f["chatty-task"].label == "Working"
+      and $f["chatty-task"].note == "Product validation and review resolution remain mandatory before landing"
+      and $f["mate-idle"].label == "Idle" and $f["mate-idle"].kind == "second mate" and $f["mate-idle"].pr == null
+      and $f["mate-idle"].note == "Merged https://github.com/sample/repo/pull/442 task cleaned up"
+      and $f["mate-ready"].label == "PR ready, checks passing" and $f["mate-ready"].pr == "https://github.com/sample/repo/pull/443"
       and $f["stuck-task"].label == "Stuck, Bro is on it"
       and $f["deciding-task"].label == "Decision pending, Bro is on it" and $f["deciding-task"].kind == "scout"
       and $f["green-task"].label == "PR ready, checks passing" and $f["green-task"].pr == "https://github.com/sample/repo/pull/9"
