@@ -154,7 +154,9 @@ function choicesHtml(w) {
 function waitingCard(w, lead) {
   if (!w.answerable) {
     const from = w.source === "secondmate"
-      ? `From second mate ${esc(w.from)} - answer it in chat with ${esc(lead)}`
+      ? (w.from_worker
+        ? `Raised by a worker in second mate ${esc(w.from)} - may need you; ask ${esc(lead)} in chat`
+        : `From second mate ${esc(w.from)} - answer it in chat with ${esc(lead)}`)
       : `Noted by ${esc(lead)}`;
     return `<div class="card readonly"><div class="title">${esc(w.title)}</div>
       ${w.reason ? `<div class="reason">${esc(w.reason)}</div>` : ""}

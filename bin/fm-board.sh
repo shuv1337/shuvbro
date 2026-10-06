@@ -228,6 +228,13 @@ project_model() {  # <snapshot-file> <notes-json> <errors-json>
     def text_or_null: if type == "string" and length > 0 then . else null end;
     def web_link: type == "string" and test("^https?://[^[:space:]\"<>]+$");
     def base: if type == "string" then (split("/") | map(select(. != "")) | last) else null end;
+    # The worker note the captain reads: the status event with its verb, key,
+    # and correlation prefix already removed by the snapshot (fm-classify-lib.sh
+    # owns that parse), minus the helper suffix bin/fm-secondmate-report.sh appends.
+    def worker_note($t):
+      (($t.paths.status_log.last_event.note // $t.hints.last_event_text) | text_or_null)
+      | if . == null then null
+        else (sub("[[:space:]]*\\((?:[^()]*[[:space:]]+)?via-helper\\)[[:space:]]*$"; "") | text_or_null) end;
     def friendly($t):
       ($t.current_state.state // "unknown") as $s
       | ($t.current_state.source // "") as $src
@@ -237,13 +244,18 @@ project_model() {  # <snapshot-file> <notes-json> <errors-json>
         elif $s == "dead" or $s == "missing" or $s == "gone" then {label: "Stopped responding", tone: "blocked"}
         elif $deciding then {label: "Decision pending, \($lead) is on it", tone: "decision"}
         elif $s == "working" then
-          (if $src == "run-step" or ($d | test("validat|checks")) then {label: "In automated review", tone: "review"}
+          # Only the structured run-step source says a validation run owns the
+          # worker; words in a free-text note never do.
+          (if $src == "run-step" then {label: "In automated review", tone: "review"}
            else {label: "Working", tone: "working"} end)
         elif $s == "parked" then {label: "Review step needs a call, \($lead) is on it", tone: "decision"}
         elif $s == "done" then
           (if ($t.pr.url | web_link) then
              (if ($d | test("checks green|checks passed|checks-passed")) then {label: "PR ready, checks passing", tone: "ready"}
               else {label: "PR ready", tone: "ready"} end)
+           # For a persistent second mate, done means a child task finished (often
+           # by merging); with no PR being handed back it is simply idle again.
+           elif $t.kind == "secondmate" then {label: "Idle", tone: "paused"}
            else {label: "Finished, wrapping up", tone: "ready"} end)
         elif $s == "blocked" then {label: "Stuck, \($lead) is on it", tone: "blocked"}
         elif $s == "paused" then {label: "Waiting on an outside event", tone: "paused"}
@@ -274,12 +286,18 @@ project_model() {  # <snapshot-file> <notes-json> <errors-json>
     | [ $notes[] | select(.kind == "you")
         | {id: null, source: "note", answerable: false, aged: false, title: .text, reason: .detail,
            repo: null, age_days: null, links: [ .link | select(. != null) ]} ] as $you_notes
+    # Questions open inside a second mate home: the holds its lead recorded for
+    # the captain, and the decisions or blockers its own workers raised that its
+    # lead has not yet settled, which may still need the captain.
     | [ ($snap.secondmate_current.records // [])[]
         | .id as $mate
         | (.decisions_open // [])[]
-        | select(.verb == "captain-hold")
-        | {id, source: "secondmate", from: $mate, answerable: false, aged: false,
-           title: ((.summary // .id) | trunc(300)), reason: (.reason | text_or_null),
+        | select(.verb == "captain-hold" or .verb == "needs-decision" or .verb == "blocked")
+        | (.verb != "captain-hold") as $from_worker
+        | {id, source: "secondmate", from: $mate, from_worker: $from_worker, answerable: false, aged: false,
+           title: ((.summary // .id) | trunc(300)),
+           reason: (if $from_worker then (if .verb == "blocked" then "A worker is stuck on this" else "A worker asked for a decision" end)
+                    else (.reason | text_or_null) end),
            repo: null, age_days: (.hold_age_days // null), links: []} ] as $mate_holds
     | {
         schema: $schema,
@@ -310,7 +328,7 @@ project_model() {  # <snapshot-file> <notes-json> <errors-json>
              tone: $f.tone,
              observed_at: (.current_state.observed_at // null),
              pr: (if (.pr.url | web_link) then .pr.url else null end),
-             note: (.hints.last_event_text | text_or_null | trunc(600))} ],
+             note: (worker_note($t) | trunc(600))} ],
         queued: [ $records[]
           | select(.state == "queued")
           | select((.hold_kind == "captain" and (.hold_bucket == "live" or .hold_bucket == "aged")) | not)
