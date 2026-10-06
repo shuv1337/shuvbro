@@ -44,12 +44,15 @@
 # Classifier-only sources (never written into a record):
 #   endpoint-gone, herdr-native, grok-regex, rovo-regex, muse-session-log,
 #   cursor-transcript, missing, malformed, gen-mismatch, source-mismatch,
-#   kimi-unverified, codex-unverified, capture-failed, no-target
+#   kimi-unverified, codex-unverified, codex-working-timer, capture-failed,
+#   no-target
 #
 # Classification (fm_busy_classify): busy | idle | unknown | dead, always
 # with the producing source as the second token. Precedence:
 #   1. dead endpoint (fm_busy_classify_live only) -> dead endpoint-gone
 #   2. standalone Kimi before verification       -> unknown kimi-unverified
+#      Codex before a semantic source            -> Working-timer observation,
+#      else unknown codex-unverified
 #   3. a valid, gen-matching, source-trusted record -> its state and source
 #   4. no record at all: herdr's native busy verdict is trusted as busy
 #      (generation state is sufficient for busy, not for idle), then the
@@ -57,14 +60,16 @@
 #      temporary regex fallbacks classify a grok or rovo task from its
 #      rendered tail, then unknown missing
 #   5. malformed, stale, or untrusted records -> unknown, never a fallback
-# Grok and Rovo are the ONLY rendered-text classifications that survive the
-# redesign, because neither's structured lifecycle was credited-live-verified
-# in the approved audit (Rovo's clean ACP stopReason lives outside the TUI
-# path firstmate drives, see references/harness/rovo.md); each is scoped to
-# its own harness= and can never classify another adapter. The delivery
-# guards in bin/fm-composer-lib.sh match rendered footers for submit
-# acknowledgement and away-mode supervisor injection only; neither is a
-# recorded worker state source.
+# Grok and Rovo keep rendered-text classifications from the redesign, because
+# neither's structured lifecycle was credited-live-verified in the approved
+# audit (Rovo's clean ACP stopReason lives outside the TUI path firstmate
+# drives, see references/harness/rovo.md); each is scoped to its own harness=
+# and can never classify another adapter. Codex's Working-timer observation is
+# the other rendered reading, and it is busy only when the timer advances or
+# is still inside its display resolution. The delivery guards in
+# bin/fm-composer-lib.sh match rendered footers for submit acknowledgement
+# and away-mode supervisor injection only; neither is a recorded worker state
+# source.
 #
 # The muse pull source is semantic, not rendered: it folds muse's own durable
 # session event log. It has no writer, no arm, and no gen, because
@@ -88,6 +93,13 @@
 # installed binary, so Codex classifies unknown codex-unverified rather than
 # falling back to idle, and fm-spawn installs no Codex busy wiring.
 # docs/verification/supervision.md owns the evidence for both probes.
+# The one exception is an observation of Codex's visible Working timer, parsed
+# by fm_composer_codex_working_elapsed in bin/fm-composer-lib.sh. An elapsed
+# value that has increased since the last observation is busy
+# codex-working-timer. The same value still inside its display resolution is
+# also busy, because a minute-only row cannot tick inside that window. A value
+# that does not advance once that resolution has passed stays unknown, so a
+# frozen timer still escalates. A single snapshot is never busy.
 #
 # Sourcing: set -u and set -e safe; no subshell-unfriendly globals.
 
@@ -146,9 +158,113 @@ fm_busy_codex_hooks_verified() {
 
 # fm_busy_codex_semantic_source: 0 when ANY verified Codex semantic source
 # exists. fm-spawn arms and wires Codex only behind this gate, and the
-# classifier reports unknown codex-unverified until it opens.
+# classifier reports unknown codex-unverified until it opens, except for the
+# Working-timer observation below.
 fm_busy_codex_semantic_source() {
   fm_busy_codex_appserver_observable || fm_busy_codex_hooks_verified
+}
+
+# Observation sidecar for the Working-timer comparison. Not a semantic record:
+# no gen, no writer in fm-busy-event.sh, and never trusted as a stored source.
+# One line: elapsed=<seconds> grain=<seconds> seen=<epoch of this elapsed value>.
+fm_busy_codex_working_path() {  # <state-dir> <id>
+  printf '%s/%s.codex-working' "$1" "$2"
+}
+
+fm_busy_now() {
+  if [ -n "${FM_BUSY_NOW:-}" ]; then
+    printf '%s' "$FM_BUSY_NOW"
+  else
+    date +%s
+  fi
+}
+
+fm_busy_codex_working_read() {  # <state-dir> <id> -> "elapsed grain seen"
+  local path line
+  path=$(fm_busy_codex_working_path "$1" "$2")
+  [ -f "$path" ] || return 1
+  IFS= read -r line < "$path" || return 1
+  [[ "$line" =~ ^elapsed=([0-9]+)[[:space:]]grain=([0-9]+)[[:space:]]seen=([0-9]+)$ ]] || return 1
+  printf '%s %s %s' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}"
+}
+
+fm_busy_codex_working_write() {  # <state-dir> <id> <elapsed> <grain> <seen>
+  local path tmp
+  path=$(fm_busy_codex_working_path "$1" "$2")
+  tmp="$path.tmp.$$"
+  printf 'elapsed=%s grain=%s seen=%s\n' "$3" "$4" "$5" > "$tmp" || {
+    rm -f "$tmp"
+    return 1
+  }
+  mv -f "$tmp" "$path"
+}
+
+fm_busy_codex_working_parser() {
+  if ! declare -F fm_composer_codex_working_elapsed >/dev/null 2>&1; then
+    # shellcheck source=bin/fm-composer-lib.sh
+    . "$(dirname -- "${BASH_SOURCE[0]}")/fm-composer-lib.sh"
+  fi
+}
+
+# fm_busy_codex_working_classify: the unverified-Codex observation. Prints a
+# full "<verdict> <source>" line. Never idle. See the header for the advance
+# versus frozen split.
+fm_busy_codex_working_classify() {  # <id> <state-dir> <tail> <backend> <target>
+  local id=$1 state=$2 tail=$3 backend=$4 target=$5
+  local parsed seconds grain prev prev_elapsed prev_seen now delta path
+  fm_busy_codex_working_parser
+  if [ -z "$tail" ]; then
+    if command -v fm_backend_capture >/dev/null 2>&1; then
+      tail=$(fm_backend_capture "$backend" "$target" 40 2>/dev/null) || {
+        printf 'unknown codex-unverified'
+        return 0
+      }
+    else
+      printf 'unknown codex-unverified'
+      return 0
+    fi
+  fi
+  path=$(fm_busy_codex_working_path "$state" "$id")
+  if ! parsed=$(printf '%s\n' "$tail" | fm_composer_codex_working_elapsed); then
+    rm -f "$path"
+    printf 'unknown codex-unverified'
+    return 0
+  fi
+  seconds=${parsed%% *}
+  grain=${parsed#* }
+  grain=${grain%%$'\n'*}
+  now=$(fm_busy_now)
+  case "$now" in
+    ''|*[!0-9]*) now=0 ;;
+  esac
+  if prev=$(fm_busy_codex_working_read "$state" "$id"); then
+    prev_elapsed=${prev%% *}
+    prev_seen=${prev##* }
+    if [ "$seconds" -gt "$prev_elapsed" ]; then
+      fm_busy_codex_working_write "$state" "$id" "$seconds" "$grain" "$now"
+      printf 'busy codex-working-timer'
+      return 0
+    fi
+    if [ "$seconds" -eq "$prev_elapsed" ]; then
+      delta=$((now - prev_seen))
+      # Same painted value inside its resolution is still the live row: a
+      # minute-only "Working (Nm)" cannot tick for up to a minute. Past that
+      # resolution an unchanged value is frozen and must stay unknown.
+      if [ "$delta" -ge 0 ] && [ "$delta" -le "$grain" ]; then
+        printf 'busy codex-working-timer'
+        return 0
+      fi
+      printf 'unknown codex-unverified'
+      return 0
+    fi
+    # Timer went backwards: a new turn, or Codex rebuilt the status widget.
+    # The new value has not been seen to advance yet.
+    fm_busy_codex_working_write "$state" "$id" "$seconds" "$grain" "$now"
+    printf 'unknown codex-unverified'
+    return 0
+  fi
+  fm_busy_codex_working_write "$state" "$id" "$seconds" "$grain" "$now"
+  printf 'unknown codex-unverified'
 }
 
 fm_busy_record_path() {  # <state-dir> <id>
@@ -869,7 +985,7 @@ fm_busy_classify() {  # <backend> <target> <harness> <id> <state-dir> [tail40]
       ;;
     codex*)
       if ! fm_busy_codex_semantic_source; then
-        printf 'unknown codex-unverified'
+        fm_busy_codex_working_classify "$id" "$state" "$tail40" "$backend" "$target"
         return 0
       fi
       ;;

@@ -1475,3 +1475,95 @@ _fm_composer_pi_verdict() {  # <screen> <styled> <has_identity> <identity>
     *) printf 'unknown' ;;
   esac
 }
+
+# fm_composer_codex_working_elapsed: the ONE reader of Codex's visible Working
+# status row. Plain pane text on stdin (the same capture the watcher hashes).
+# Prints "<seconds> <grain>" for the LAST matching row, or returns 1.
+# Grain is the row's display resolution in seconds: 1 when seconds are shown,
+# 60 for a minute-only row. Any other shape, and a row cut off before its
+# closing paren, does not match.
+# The row is the live status indicator above the composer, rendered as
+# "Working (<elapsed> • esc to interrupt)" with elapsed "Ns", "Nm Ns", or
+# "Nh Nm Ns" (codex-cli 0.160.0; a minute-only "Working (Nm)" is accepted too).
+# A completed "Worked for" separator, text after the closing paren, and a
+# transcript sentence that merely mentions the row do not match.
+# When any row carries the interrupt hint, that last hinted row wins: a later
+# bare "Working (Nm)" line must not override the live status row.
+# A bare duration row counts only when the capture has no hinted row.
+# ANSI is stripped once for the whole capture. This function does not decide
+# busy; the observation contract is owned by bin/fm-busy-lib.sh.
+fm_composer_codex_working_elapsed() {
+  local capture plain line trimmed prefix inner suffix rest seconds grain hours
+  local unit_seconds hinted=1
+  local hint_seconds='' hint_grain='' bare_seconds='' bare_grain=''
+  capture=$(cat)
+  plain=$(printf '%s\n' "$capture" | fm_composer_strip_ansi)
+  while IFS= read -r line || [ -n "$line" ]; do
+    trimmed=${line#"${line%%[![:space:]]*}"}
+    trimmed=${trimmed%"${trimmed##*[![:space:]]}"}
+    [ -n "$trimmed" ] || continue
+    case "$trimmed" in
+      *'Working ('*) ;;
+      *) continue ;;
+    esac
+    prefix=${trimmed%%Working (*}
+    if [ -n "$prefix" ] && ! [[ "$prefix" =~ ^[^[:space:][:alnum:]]{1,8}[[:space:]]+$ ]]; then
+      continue
+    fi
+    inner=${trimmed#*Working (}
+    case "$inner" in
+      *')'*) ;;
+      *) continue ;;
+    esac
+    suffix=${inner#*)}
+    suffix=${suffix#"${suffix%%[![:space:]]*}"}
+    suffix=${suffix%"${suffix##*[![:space:]]}"}
+    [ -z "$suffix" ] || continue
+    inner=${inner%%)*}
+    rest=$inner
+    seconds=0
+    grain=0
+    hours=0
+    if [[ "$rest" =~ ^([0-9]{1,6})h(.*)$ ]]; then
+      unit_seconds=${BASH_REMATCH[1]}
+      seconds=$((seconds + 10#$unit_seconds * 3600))
+      hours=1
+      rest=${BASH_REMATCH[2]}
+      rest=${rest#"${rest%%[![:space:]]*}"}
+    fi
+    if [[ "$rest" =~ ^([0-9]{1,6})m(.*)$ ]]; then
+      unit_seconds=${BASH_REMATCH[1]}
+      seconds=$((seconds + 10#$unit_seconds * 60))
+      grain=60
+      rest=${BASH_REMATCH[2]}
+      rest=${rest#"${rest%%[![:space:]]*}"}
+    fi
+    if [[ "$rest" =~ ^([0-9]{1,6})s(.*)$ ]]; then
+      unit_seconds=${BASH_REMATCH[1]}
+      seconds=$((seconds + 10#$unit_seconds))
+      grain=1
+      rest=${BASH_REMATCH[2]}
+      rest=${rest#"${rest%%[![:space:]]*}"}
+    fi
+    [ "$grain" -gt 0 ] || continue
+    [ "$hours" -eq 0 ] || [ "$grain" -eq 1 ] || continue
+    # Status furniture may follow the duration, still inside the paren.
+    if [[ "$rest" =~ ^[A-Za-z0-9] ]]; then
+      continue
+    fi
+    if [[ "$inner" =~ [Ee]sc[[:space:]]+to[[:space:]]+interrupt ]]; then
+      hint_seconds=$seconds
+      hint_grain=$grain
+      hinted=0
+    else
+      bare_seconds=$seconds
+      bare_grain=$grain
+    fi
+  done < <(printf '%s\n' "$plain")
+  if [ "$hinted" -eq 0 ]; then
+    printf '%s %s\n' "$hint_seconds" "$hint_grain"
+    return 0
+  fi
+  [ -n "$bare_seconds" ] || return 1
+  printf '%s %s\n' "$bare_seconds" "$bare_grain"
+}
