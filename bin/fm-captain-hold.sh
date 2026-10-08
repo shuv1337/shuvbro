@@ -262,6 +262,7 @@ CAPTAIN_META_LOCK=
 CAPTAIN_META_LOCK_HELD=0
 CAPTAIN_CONTROL_LOCK=
 CAPTAIN_CONTROL_LOCK_HELD=0
+SHARKBOARD_HOLD_COMMAND=${1:-}
 captain_hold_cleanup() {
   if [ "$CAPTAIN_META_LOCK_HELD" = 1 ]; then
     fm_lock_release "$CAPTAIN_META_LOCK" || true
@@ -271,6 +272,14 @@ captain_hold_cleanup() {
     fm_lock_release "$CAPTAIN_CONTROL_LOCK" || true
     CAPTAIN_CONTROL_LOCK_HELD=0
   fi
+  # Opt-in bridge wake only; no network while the captain intake owns locks.
+  case "$SHARKBOARD_HOLD_COMMAND" in
+    hold|answers)
+      if [ -n "${FM_SHARKBOARD_CONFIG:-}" ] && [ -d "$FM_HOME/state/sharkboard" ]; then
+        touch "$FM_HOME/state/sharkboard/pending" || true
+      fi
+      ;;
+  esac
 }
 trap captain_hold_cleanup EXIT
 

@@ -359,7 +359,7 @@ family_for_basename() {
     fm-afk-contract.test.sh|fm-afk-inject-e2e.test.sh|fm-afk-return.test.sh)
       printf '%s\n' afk
       ;;
-    fm-bearings-board-render.test.sh|fm-bearings-snapshot.test.sh|fm-board.test.sh|\
+    fm-bearings-board-render.test.sh|fm-bearings-snapshot.test.sh|fm-board.test.sh|fm-sharkboard.test.sh|\
     fm-fleet-snapshot-view.test.sh|fm-home-summary-refresh.test.sh)
       printf '%s\n' snapshot-bearings
       ;;
@@ -1503,6 +1503,9 @@ families_for_changed_path() {
     bin/fm-bearings-snapshot.sh|bin/fm-fleet-snapshot.sh|bin/fm-fleet-view.sh|\
     bin/fm-home-summary-refresh.sh)
       printf '%s\n' snapshot-bearings
+      ;;
+    bin/fm-sharkboard.sh|bin/fm-sharkboard.mjs)
+      printf '%s\n' "__script__:fm-sharkboard.test.sh"
       ;;
     bin/fm-board.sh|bin/fm-board.mjs|bin/fm-board-page.html)
       printf '%s\n' "__script__:fm-board.test.sh"

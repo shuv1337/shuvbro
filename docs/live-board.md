@@ -80,3 +80,15 @@ A raw TCP forward can omit the proxy headers and look like a direct local reques
 ## Verification
 
 `tests/fm-board.test.sh` covers the rendered view, every request guard above, each answer kind landing through the intake with its wake, a declared choice keeping held work held, a re-ask racing an answer, failed Later recovery including notification failure, the stale and offline indicators against a skewed phone clock, the page handling a lost committed response while a new question is asked, restart-safe retries, an unchanged fleet not rebuilding on the page's check, a request after the full-rebuild bound still rebuilding, a check one interval later rebuilding when that bound matches the check interval, and a home that never starts the board staying untouched.
+
+## SHark transport
+
+`bin/fm-sharkboard.sh` is an opt-in bridge from the same exported model to SHark.
+Its header owns the command, credential, polling and receipt mechanics.
+Use a dedicated per-home board-scoped credential approved through SHark device login; the bridge never falls back to ordinary notification credentials.
+Publication is board-only, with no push alerts, and excludes raw worker progress notes.
+The bridge consumes captain answers through the live board's locked keyed intake, so No keeps held work held and an old question cannot release a newly held task.
+SHark deferrals are rounded up to the next UTC date when needed because the local hold intake accepts dates rather than times.
+An interrupted answer application fails closed for operator reconciliation instead of assuming it is safe to replay.
+Start with a single authorized ask and observe the phone answer, intake and acknowledgement before retiring the existing board service or its Tailscale route.
+The bridge does not perform that retirement.
