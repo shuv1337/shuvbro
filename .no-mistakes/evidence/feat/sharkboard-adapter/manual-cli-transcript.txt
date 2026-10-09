@@ -1,0 +1,55 @@
+$ fm-captain-hold.sh hold demo-task --reason "Ship the demo?"
+exit=0
+$ fm-sharkboard.sh publish
+exit=0
+--- fake SHark server: published ask (push mode, options) ---
+{"title":"Demo captain decision","body":"Ship the demo?","kind":"decision","push":"none","options":[{"id":"yes","label":"Yes"},{"id":"no","label":"No"}],"allowLater":true,"taskId":"demo-task","status":"open","id":"ask-1","revision":1}
+--- fake SHark server: published work rows ---
+{"shuvbro:53682a6875c0cdc5:work:7126ca672567583c692fd5dd5f767c948cf41754":{"key":"shuvbro:53682a6875c0cdc5:work:7126ca672567583c692fd5dd5f767c948cf41754","title":"Unrelated queued work","links":[],"state":"queued"}}
+$ fm-sharkboard.sh publish   (unchanged)
+exit=0
+ask PUTs so far: 1
+--- captain answers "Yes" with free text on the phone (fake event) ---
+$ fm-sharkboard.sh sync
+exit=0
+receipt: {"phone-1":"acked"}
+acked=1
+$ fm-captain-hold.sh open demo-task  (free text must keep work held)
+still held: yes
+--- lead inbox notes ---
+id=1791510808-HyjkBT
+at=2026-10-09T01:53:28Z
+source=text
+--
+Live board answer for demo-task: typed reply
+Question: Demo captain decision - Ship the demo?
+Reply: Yes but check the logs first
+Recorded through the live board, signed in as sharkboard:ios_app: the held work stays held until you act on this answer.
+--- pending wake flag after hold command ---
+last.json
+pending
+--- adversarial: task worker ---
+sharkboard: task workers cannot publish or consume captain board answers
+exit=1
+--- adversarial: worker via sharkctl guard ---
+error: task worker FM_TASK_ID=w1 must not contact the captain with sharkctl board; send the question to firstmate as a keyed status line
+exit=1
+--- adversarial: world-readable config ---
+sharkboard: board config must be private (mode 600)
+exit=1
+--- adversarial: relative/missing config ---
+sharkboard: FM_HOME and FM_SHARKBOARD_CONFIG must be explicit absolute paths
+exit=1
+--- adversarial: state bound to different config ---
+sharkboard: sharkboard state/config binding changed
+exit=1
+--- unrelated backlog lines preserved ---
+3a4,11
+>   Captain hold set: 2026-10-09T01:53:26Z
+> 
+>   Captain answer recorded: 2026-10-09T01:53:28Z
+>   Recorded answer digest: 85d8703472800c6dc6d035a3aac8e82e3e8ab66553dda6337c92c761a9a6328e
+>   Captain answered this call through live board, signed in as sharkboard:ios_app.
+>   Answer: Yes but check the logs first
+>   Answer as shown to the captain: Typed reply - in reply to: Ship the demo?
+> 
