@@ -59,6 +59,12 @@ if (verb === 'get') {
   out = {ask: s.asks[key]};
   code = ['expired', 'cancelled'].includes(s.asks[key].status) ? 4 : 0;
 }
+if (verb === 'cancel' && fail === 'cancel-race') {
+  const ask = s.asks[key];
+  ask.status = 'answered';
+  s.events = [{eventId:'snooze-race',askKey:key,askId:ask.id,revision:ask.revision,status:'answered',waitingTaskId:'bridge-test',optionId:'no',answeredVia:'ios_app'}];
+  refuse('No open ask with that key');
+}
 if (verb === 'cancel') {
   if (s.asks[key]?.status !== 'open') refuse('No open ask with that key');
   s.asks[key].status = 'cancelled';
@@ -303,6 +309,84 @@ sed -i '/secret-work/d' "$FM_HOME/data/backlog.md"
 "$ROOT/bin/fm-sharkboard.sh" publish || fail 'never-created work could not be retired'
 [ "$(jq '[.rows[]|select(.payload.title|test("hark_"))]|length' "$STATE_FILE")" = 0 ] || fail 'never-created work kept in state'
 pass 'never-created work retires once SHark confirms it has no such item'
+# A captain dismissal is forwarded and acknowledged, then an unchanged local hold returns.
+"$ROOT/bin/fm-captain-hold.sh" hold bridge-test --reason 'Dismissal recovery' >/dev/null
+"$ROOT/bin/fm-sharkboard.sh" sync
+key=$(ask_key)
+old_id=$(jq -r --arg key "$key" '.asks[$key].id' "$FAKE_SHARK_STATE")
+set_events "$key" '{"eventId":"dismissed","status":"cancelled","answeredVia":"ios_app"}'
+# shellcheck disable=SC2016
+update_json "$FAKE_SHARK_STATE" --arg key "$key" '.asks[$key].status="cancelled"'
+printf 'ack-lost\n' > "$FAKE_SHARK_FAIL"
+if "$ROOT/bin/fm-sharkboard.sh" sync 2>/dev/null; then fail 'lost dismissal ack reported success'; fi
+[ "$(receipt dismissed)" = applied ] || fail 'dismissal receipt lost after ack response loss'
+rm "$FAKE_SHARK_FAIL"
+"$ROOT/bin/fm-sharkboard.sh" sync
+[ "$(receipt dismissed)" = acked ] || fail 'captain dismissal was not acknowledged'
+[ "$(jq -r --arg key "$key" '.asks[$key].status' "$FAKE_SHARK_STATE")" = open ] || fail 'dismissed local hold did not return'
+[ "$(jq -r --arg key "$key" '.asks[$key].id' "$FAKE_SHARK_STATE")" != "$old_id" ] || fail 'dismissal reused terminal ask'
+"$ROOT/bin/fm-captain-hold.sh" open bridge-test >/dev/null || fail 'dismissal released local hold'
+pass 'captain dismissals are acknowledged and still-local holds are reasserted'
+# A refused far-future snooze must not hide a still-open local question.
+key=$(ask_key)
+far=$(node -e 'console.log(new Date(Date.now()+400*86400000).toISOString())')
+# shellcheck disable=SC2016
+update_json "$FAKE_SHARK_STATE" --arg key "$key" --arg until "$far" '.asks[$key].snoozeUntil=$until | .events=[]'
+old_id=$(jq -r --arg key "$key" '.asks[$key].id' "$FAKE_SHARK_STATE")
+"$ROOT/bin/fm-sharkboard.sh" sync
+[ "$(receipt "$old_id:snooze:$far")" = rejected ] || fail 'far-future snooze not refused'
+[ "$(jq -r --arg key "$key" '.asks[$key].snoozeUntil' "$FAKE_SHARK_STATE")" = null ] || fail 'rejected snooze remained hidden'
+[ "$(jq -r --arg key "$key" '.asks[$key].status' "$FAKE_SHARK_STATE")" = open ] || fail 'rejected snooze lost the question'
+"$ROOT/bin/fm-captain-hold.sh" open bridge-test >/dev/null || fail 'refused snooze released local hold'
+pass 'rejected snoozes restore visibility without applying Later'
+# Cancellation may land with a lost response; confirmed terminal state permits repair.
+key=$(ask_key)
+# shellcheck disable=SC2016
+update_json "$FAKE_SHARK_STATE" --arg key "$key" --arg until "$far" '.asks[$key].snoozeUntil=$until | .events=[]'
+printf 'cancel-lost\n' > "$FAKE_SHARK_FAIL"
+"$ROOT/bin/fm-sharkboard.sh" sync
+rm "$FAKE_SHARK_FAIL"
+[ "$(jq -r --arg key "$key" '.asks[$key].status' "$FAKE_SHARK_STATE")" = open ] || fail 'lost cancel response wedged snooze repair'
+[ "$(jq -r --arg key "$key" '.asks[$key].snoozeUntil' "$FAKE_SHARK_STATE")" = null ] || fail 'lost cancel response left question hidden'
+pass 'snooze repair confirms cancellation despite response loss'
+# An answer racing snooze recovery must be consumed before any new question opens.
+key=$(ask_key)
+# shellcheck disable=SC2016
+update_json "$FAKE_SHARK_STATE" --arg key "$key" --arg until "$far" '.asks[$key].snoozeUntil=$until | .events=[]'
+printf 'cancel-race\n' > "$FAKE_SHARK_FAIL"
+"$ROOT/bin/fm-sharkboard.sh" sync
+rm "$FAKE_SHARK_FAIL"
+[ "$(jq -r --arg key "$key" '.asks[$key].status' "$FAKE_SHARK_STATE")" = answered ] || fail 'snooze repair overwrote a racing answer'
+"$ROOT/bin/fm-sharkboard.sh" sync
+[ "$(receipt snooze-race)" = acked ] || fail 'racing answer was not consumed'
+"$ROOT/bin/fm-captain-hold.sh" open bridge-test >/dev/null || fail 'racing No released local hold'
+pass 'an answer racing rejected-snooze recovery remains available for intake'
+"$ROOT/bin/fm-captain-hold.sh" hold bridge-test --reason 'Before stale snooze' >/dev/null
+"$ROOT/bin/fm-sharkboard.sh" sync
+# A stale-card snooze retires its old question and keeps the replacement visible.
+key=$(ask_key)
+# shellcheck disable=SC2016
+update_json "$FAKE_SHARK_STATE" --arg key "$key" --arg until "$far" '.asks[$key].snoozeUntil=$until'
+"$ROOT/bin/fm-captain-hold.sh" hold bridge-test --reason 'Replacement after stale snooze' >/dev/null
+"$ROOT/bin/fm-sharkboard.sh" sync
+[ "$(jq -r --arg key "$key" '.asks[$key].status' "$FAKE_SHARK_STATE")" = cancelled ] || fail 'stale snoozed ask remained open'
+key=$(ask_key)
+[ "$(jq -r --arg key "$key" '.asks[$key].status' "$FAKE_SHARK_STATE")" = open ] || fail 'replacement question not visible'
+pass 'stale snoozes retire without hiding the replacement question'
+# Recovery locks carry owners too: a dead reaper is recoverable, a live one is kept.
+sh -c 'exit 0' & dead=$!
+wait "$dead"
+mkdir "$FM_HOME/state/sharkboard/lock" "$FM_HOME/state/sharkboard/lock.reap"
+printf '{"pid":%s,"start":"1"}' "$dead" > "$FM_HOME/state/sharkboard/lock/owner"
+printf '{"pid":%s,"start":"1"}' "$$" > "$FM_HOME/state/sharkboard/lock.reap/owner"
+# A real live identity must be used: start mismatch represents a reused PID.
+printf '{"pid":%s,"start":"%s"}' "$$" "$(sed 's/.*) //' "/proc/$$/stat" | cut -d' ' -f20)" > "$FM_HOME/state/sharkboard/lock.reap/owner"
+if "$ROOT/bin/fm-sharkboard.sh" publish 2>/dev/null; then fail 'live reaper displaced'; fi
+[ -f "$FM_HOME/state/sharkboard/lock.reap/owner" ] || fail 'live reaper removed'
+printf '{"pid":%s,"start":"1"}' "$dead" > "$FM_HOME/state/sharkboard/lock.reap/owner"
+"$ROOT/bin/fm-sharkboard.sh" publish || fail 'dead reaper wedged publication'
+[ ! -e "$FM_HOME/state/sharkboard/lock.reap" ] || fail 'reaper lock leaked'
+pass 'abandoned reaper locks recover while live reapers retain ownership'
 # serve logs a failed tick and keeps polling.
 answer_calls() { jq '[.calls[]|select(.verb=="answers")]|length' "$FAKE_SHARK_STATE" 2>/dev/null || echo 0; }
 wait_calls() {  # <count>

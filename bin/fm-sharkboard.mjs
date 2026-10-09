@@ -66,7 +66,8 @@ function ownerIsGone(owner) {
   return Boolean(owner.start && start && start !== owner.start);
 }
 // The lock is renamed into place with its owner, so it never exists without one.
-function acquire(lock) {
+function acquire(lock, depth = 0) {
+  if (depth > 8) die('too many abandoned recovery locks; reconcile lock owners');
   const temp = `${lock}.${process.pid}.tmp`;
   fs.rmSync(temp, { recursive: true, force: true });
   fs.mkdirSync(temp);
@@ -78,10 +79,12 @@ function acquire(lock) {
       const owner = read(path.join(lock, 'owner'), null);
       if (attempt || !ownerIsGone(owner)) die('sharkboard lock is held by a live or unknown owner; verify it before removing it');
       const reap = `${lock}.reap`;
-      try { fs.mkdirSync(reap); } catch { die('another sharkboard run is clearing a stale lock'); }
+      // The recovery mutex has the same atomic owner record and dead-owner
+      // recovery as the main lock. Bound nesting if repeated crashes left a chain.
+      acquire(reap, depth + 1);
       try {
         if (JSON.stringify(read(path.join(lock, 'owner'), null)) === JSON.stringify(owner)) fs.rmSync(lock, { recursive: true });
-      } finally { fs.rmdirSync(reap); }
+      } finally { fs.rmSync(reap, { recursive: true }); }
     }
   } finally { fs.rmSync(temp, { recursive: true, force: true }); }
 }
@@ -99,7 +102,7 @@ async function tick(mode) {
     const persist = () => save(file, state);
     const publish = (key, row) => {
       // Save intent before transport. A retry uses the same content-addressed key.
-      state.rows[key] = { ...state.rows[key], ...row, published: false, retired: false }; persist();
+      state.rows[key] = { ...state.rows[key], ...row, published: false, retired: false, refresh: false }; persist();
       const result = shark(row.type, ['--key', key], row.payload);
       if (row.type === 'ask') {
         if (!result.ask?.id || !Number.isInteger(result.ask.revision)) die('invalid published ask');
@@ -135,7 +138,9 @@ async function tick(mode) {
     const reject = (row, event, why) => {
       delete state.events[event.eventId]; persist();
       note(row, event, `not applied (${why})`);
-      state.events[event.eventId] = 'rejected'; persist();
+      state.events[event.eventId] = 'rejected';
+      if (event.until) row.resetSnooze = event.askId;
+      persist();
     };
     if (mode !== 'publish') {
       const page = shark('answers', state.cursor ? ['--since', state.cursor] : []);
@@ -164,7 +169,7 @@ async function tick(mode) {
             if (event.status === 'answered') reject(row, event, 'answer to an earlier version of this question');
           } else if (event.status !== 'answered' || !row.card) {
             note(row, event, event.status);
-            state.events[event.eventId] = event.status === 'answered' ? 'applied' : 'noted'; persist();
+            state.events[event.eventId] = event.status === 'answered' || (event.status === 'cancelled' && ['web', 'ios_app', 'ios_webview'].includes(event.answeredVia)) ? 'applied' : 'noted'; persist();
           } else if (event.waitingTaskId !== row.task || !(event.until ? ['snooze'] : ['web', 'ios_app', 'ios_webview']).includes(event.answeredVia)) {
             reject(row, event, 'unexpected answer provenance');
           } else {
@@ -191,12 +196,30 @@ async function tick(mode) {
           // Keys include the local question digest, so ack cannot target a new question.
           const result = exec('sharkctl', sharkArgs('ack', ['--key', event.askKey]));
           if (result.status !== 0 && !absent(result, 'No unacknowledged resolved ask with that key')) die('sharkctl ack failed; no cursor advanced');
-          state.events[event.eventId] = 'acked'; persist();
+          state.events[event.eventId] = 'acked';
+          if (event.status === 'cancelled') row.refresh = true;
+          persist();
         }
         if (state.events[event.eventId] && event.status === 'answered' && !event.until) { row.seen = event.askId; persist(); }
       }
       // A retryable intake failure keeps the page for the next tick; settled receipts dedupe it.
       if (!retry) { state.cursor = page.cursor; persist(); }
+    }
+    // A rejected Later must not keep its source question hidden. Persist the
+    // repair until cancel is confirmed; a racing answer remains for next intake.
+    for (const [key, row] of Object.entries(state.rows)) {
+      if (!row.resetSnooze) continue;
+      attempt(key, () => {
+        let remote = remoteAsk(key);
+        if (remote?.id === row.resetSnooze && remote.status === 'open') {
+          exec('sharkctl', sharkArgs('cancel', ['--key', key, '--reason', 'Later was not applied by the source board']));
+          remote = remoteAsk(key);
+          if (remote?.id === row.resetSnooze && remote.status === 'open') die('rejected snooze cancellation not confirmed');
+        }
+        if (!remote || (remote.id === row.resetSnooze && remote.status !== 'answered')) row.refresh = true;
+        delete row.resetSnooze;
+        persist();
+      });
     }
     if (mode === 'answers') { if (failed) die('some board rows could not be published'); return; }
     const view = model();
@@ -224,7 +247,7 @@ async function tick(mode) {
     for (const [key, row] of Object.entries(desired)) {
       const previous = state.rows[key];
       // Active work heartbeats every tick so SHark never marks it stale.
-      if (previous?.published && !previous.retired && hash(previous.payload) === hash(row.payload) && row.type !== 'work') continue;
+      if (previous?.published && !previous.retired && !previous.refresh && hash(previous.payload) === hash(row.payload) && row.type !== 'work') continue;
       attempt(key, () => publish(key, row));
     }
     for (const [key, row] of Object.entries(state.rows)) {
