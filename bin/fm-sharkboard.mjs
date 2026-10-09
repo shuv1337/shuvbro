@@ -12,6 +12,7 @@ const config = process.env.FM_SHARKBOARD_CONFIG;
 const command = process.argv[2];
 const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const die = message => { throw new Error(message); };
+const fatal = message => { throw Object.assign(new Error(message), { fatal: true }); };
 const read = (file, fallback) => {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); }
   catch (error) { if (error.code === 'ENOENT') return fallback; throw error; }
@@ -21,39 +22,103 @@ function save(file, value) {
   fs.writeFileSync(temp, `${JSON.stringify(value)}\n`, { mode: 0o600 });
   fs.renameSync(temp, file);
 }
-function run(executable, args, input = '', allowed = [0], json = true) {
+function exec(executable, args, input = '') {
   const result = spawnSync(executable, args, {
     input, encoding: 'utf8', timeout: 90000, maxBuffer: 8 * 1024 * 1024,
     env: { ...process.env, HARK_CONFIG: config },
   });
-  if (result.error || !allowed.includes(result.status)) die(`${path.basename(executable)} ${args[0]} failed; no cursor advanced`);
-  if (!json) return result.stdout;
-  try { return JSON.parse(result.stdout); }
-  catch { die(`${path.basename(executable)} returned invalid JSON`); }
+  if (result.error) die(`${path.basename(executable)} ${args[0]} failed; no cursor advanced`);
+  let body = null;
+  try { body = JSON.parse(result.stdout.trim().split('\n').pop()); } catch { /* Callers decide. */ }
+  return { status: result.status, stdout: result.stdout, body };
 }
-const shark = (verb, args = [], payload) => run('sharkctl', ['board', verb, '--json', ...args, ...(payload ? ['--stdin'] : [])], payload ? JSON.stringify(payload) : '', verb === 'get' ? [0, 4] : [0]);
+function run(executable, args, input = '', json = true) {
+  const result = exec(executable, args, input);
+  if (result.status !== 0) die(`${path.basename(executable)} ${args[0]} failed; no cursor advanced`);
+  if (!json) return result.stdout;
+  if (result.body === null) die(`${path.basename(executable)} returned invalid JSON`);
+  return result.body;
+}
+const sharkArgs = (verb, args, payload) => ['board', verb, '--json', ...args, ...(payload ? ['--stdin'] : [])];
+const shark = (verb, args = [], payload) => run('sharkctl', sharkArgs(verb, args, payload), payload ? JSON.stringify(payload) : '');
 const model = () => run(path.join(bin, 'fm-board.sh'), ['model']);
 const links = row => [...(row.links ?? []), ...(row.pr ? [row.pr] : [])].filter(url => url.startsWith('https://')).slice(0, 10).map(url => ({ kind: 'other', url }));
+
+const startOf = pid => {
+  try { return fs.readFileSync(`/proc/${pid}/stat`, 'utf8').split(') ').pop().split(' ')[19] ?? null; }
+  catch { return null; }
+};
+function ownerIsGone(owner) {
+  if (!Number.isInteger(owner?.pid) || owner.pid <= 0) return false;
+  try { process.kill(owner.pid, 0); }
+  catch (error) { return error.code === 'ESRCH'; }
+  const start = startOf(owner.pid);
+  return Boolean(owner.start && start && start !== owner.start);
+}
+// The lock is renamed into place with its owner, so it never exists without one.
+function acquire(lock) {
+  const temp = `${lock}.${process.pid}.tmp`;
+  fs.rmSync(temp, { recursive: true, force: true });
+  fs.mkdirSync(temp);
+  fs.writeFileSync(path.join(temp, 'owner'), JSON.stringify({ pid: process.pid, start: startOf(process.pid) }));
+  try {
+    for (let attempt = 0; ; attempt++) {
+      try { fs.renameSync(temp, lock); return; }
+      catch (error) { if (!['EEXIST', 'ENOTEMPTY', 'EISDIR'].includes(error.code)) throw error; }
+      const owner = read(path.join(lock, 'owner'), null);
+      if (attempt || !ownerIsGone(owner)) die('sharkboard lock is held by a live or unknown owner; verify it before removing it');
+      const reap = `${lock}.reap`;
+      try { fs.mkdirSync(reap); } catch { die('another sharkboard run is clearing a stale lock'); }
+      try {
+        if (JSON.stringify(read(path.join(lock, 'owner'), null)) === JSON.stringify(owner)) fs.rmSync(lock, { recursive: true });
+      } finally { fs.rmdirSync(reap); }
+    }
+  } finally { fs.rmSync(temp, { recursive: true, force: true }); }
+}
 
 async function tick(mode) {
   const dir = path.join(home, 'state/sharkboard');
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   const lock = path.join(dir, 'lock');
-  try { fs.mkdirSync(lock); } catch (error) { if (error.code === 'EEXIST') die('sharkboard lock exists; verify its owner before removing it'); throw error; }
-  fs.writeFileSync(path.join(lock, 'pid'), String(process.pid));
+  acquire(lock);
   try {
     const file = path.join(dir, 'last.json');
-    const state = read(file, { version: 1, binding: hash([fs.realpathSync(home), fs.realpathSync(config)]), rows: {}, events: {}, cursor: '' });
-    if (state.version !== 1 || state.binding !== hash([fs.realpathSync(home), fs.realpathSync(config)])) die('sharkboard state/config binding changed');
+    const binding = hash([fs.realpathSync(home), fs.realpathSync(config)]);
+    const state = read(file, { version: 1, binding, rows: {}, events: {}, cursor: '' });
+    if (state.version !== 1 || state.binding !== binding) fatal('sharkboard state/config binding changed');
     const persist = () => save(file, state);
+    const publish = (key, row) => {
+      // Save intent before transport. A retry uses the same content-addressed key.
+      state.rows[key] = { ...state.rows[key], ...row, published: false }; persist();
+      const result = shark(row.type, ['--key', key], row.payload);
+      if (row.type === 'ask') {
+        if (!result.ask?.id || !Number.isInteger(result.ask.revision)) die('invalid published ask');
+        state.rows[key].askId = result.ask.id;
+        state.rows[key].revision = result.ask.revision;
+      }
+      state.rows[key].published = true; persist();
+    };
+    // Untrusted text goes to the lead under normal authority. A repeated note is harmless.
+    const note = (row, event, why) => run(path.join(bin, 'fm-inbox.sh'), ['note', '-'],
+      `SHark board event for ${row.payload.title}: ${why}.\nUntrusted captain text: ${event.text ?? event.optionLabel ?? event.until ?? ''}\nNo task was released by this transport; apply the normal authority rules.`, false);
+    const reject = (row, event, why) => {
+      delete state.events[event.eventId]; persist();
+      note(row, event, `not applied (${why})`);
+      state.events[event.eventId] = 'rejected'; persist();
+    };
     if (mode !== 'publish') {
+      // A lost publish response must not let its answers pass the cursor unmatched.
+      for (const [key, row] of Object.entries(state.rows)) if (!row.published) publish(key, row);
       const page = shark('answers', state.cursor ? ['--since', state.cursor] : []);
       if (!Array.isArray(page.events) || typeof page.cursor !== 'string') die('invalid answer page');
       // Snoozes are not terminal events in SHark's cursor feed.
       for (const [key, row] of Object.entries(state.rows)) {
-        if (row.type !== 'ask' || !row.card || !row.published) continue;
-        const remote = shark('get', ['--key', key]).ask;
-        if (remote?.id !== row.askId || remote.revision !== row.revision) die('published ask changed outside adapter');
+        if (row.type !== 'ask' || !row.card) continue;
+        // 4 is an expired or cancelled ask; 1 includes an ask the server no longer has.
+        const { status, body } = exec('sharkctl', sharkArgs('get', ['--key', key]));
+        if (![0, 1, 4].includes(status)) die('sharkctl get failed; no cursor advanced');
+        const remote = status === 1 ? null : body?.ask;
+        if (remote?.id !== row.askId || remote.revision !== row.revision) { publish(key, row); continue; }
         if (remote.status === 'open' && remote.snoozeUntil) {
           page.events.unshift({ askKey: key, askId: row.askId, revision: row.revision,
             waitingTaskId: row.task, answeredVia: 'web', status: 'answered',
@@ -67,24 +132,27 @@ async function tick(mode) {
         if (state.events[event.eventId] === 'applying') die('answer application was interrupted; reconcile its receipt before retrying');
         if (!state.events[event.eventId]) {
           if (event.status !== 'answered' || !row.card) {
-            state.events[event.eventId] = 'applying'; persist();
-            run(path.join(bin, 'fm-inbox.sh'), ['note', '-'],
-              `SHark board event for ${row.payload.title}: ${event.status}.\nUntrusted captain text: ${event.text ?? event.optionLabel ?? ''}\nNo task was released by this transport; apply the normal authority rules.`, [0], false);
-            state.events[event.eventId] = 'applied'; persist();
+            note(row, event, event.status);
+            state.events[event.eventId] = event.status === 'answered' ? 'applied' : 'noted'; persist();
+          } else if (event.waitingTaskId !== row.task || !['web', 'ios_app', 'ios_webview'].includes(event.answeredVia)) {
+            reject(row, event, 'unexpected answer provenance');
           } else {
-          if (event.waitingTaskId !== row.task || !['web', 'ios_app', 'ios_webview'].includes(event.answeredVia)) die('unexpected answer provenance');
-          const current = model().waiting_on_you.find(item => item.answerable && item.id === row.task && item.card === row.card);
-          if (!current) { state.events[event.eventId] = 'stale'; persist(); continue; }
-          if (event.until && event.until <= new Date().toISOString().slice(0, 10)) event.until = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
-          const choice = event.until ? 'later' : event.optionId ?? 'reply';
-          if (event.optionId && !current.choices.some(option => option.id === choice)) die('answer option no longer offered');
-          state.events[event.eventId] = 'applying'; persist();
-          const args = ['answer', row.task, '--card', row.card, '--choice', choice, '--login', `sharkboard:${event.answeredVia}`];
-          if (event.until) args.push('--until', event.until);
-          else if (!event.optionId) args.push('--text-file', '-');
-          const applied = run(path.join(bin, 'fm-board.sh'), args, event.text ?? '');
-          if (!applied.ok) die('answer not applied; reconcile receipt');
-          state.events[event.eventId] = 'applied'; persist();
+            const current = model().waiting_on_you.find(item => item.answerable && item.id === row.task && item.card === row.card);
+            if (!current) { state.events[event.eventId] = 'stale'; persist(); continue; }
+            if (event.until && event.until <= new Date().toISOString().slice(0, 10)) event.until = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+            const choice = event.until ? 'later' : event.optionId ?? 'reply';
+            if (event.optionId && !current.choices.some(option => option.id === choice)) reject(row, event, 'answer option no longer offered');
+            else {
+              state.events[event.eventId] = 'applying'; persist();
+              const args = ['answer', row.task, '--card', row.card, '--choice', choice, '--login', `sharkboard:${event.answeredVia}`];
+              if (event.until) args.push('--until', event.until);
+              else if (!event.optionId) args.push('--text-file', '-');
+              const { status, body } = exec(path.join(bin, 'fm-board.sh'), args, event.text ?? '');
+              if (status === 0 && body?.ok === true) { state.events[event.eventId] = 'applied'; persist(); }
+              // fm-board.sh reports these refusals only when nothing was recorded.
+              else if ([1, 2, 3].includes(status) && body?.ok === false && typeof body.code === 'string' && body.code !== 'repair_failed') reject(row, event, body.code);
+              else die('answer outcome unknown; reconcile receipt');
+            }
           }
         }
         if (state.events[event.eventId] === 'applied' && !event.until) {
@@ -121,15 +189,7 @@ async function tick(mode) {
     for (const [key, row] of Object.entries(desired)) {
       const previous = state.rows[key];
       if (previous?.published && hash(previous.payload) === hash(row.payload) && row.payload.state !== 'in_flight') continue;
-      // Save intent before transport. A retry uses the same content-addressed key.
-      state.rows[key] = { ...previous, ...row, published: false }; persist();
-      const result = shark(row.type === 'ask' ? 'ask' : row.type, ['--key', key], row.payload);
-      if (row.type === 'ask') {
-        if (!result.ask?.id || !Number.isInteger(result.ask.revision)) die('invalid published ask');
-        state.rows[key].askId = result.ask.id;
-        state.rows[key].revision = result.ask.revision;
-      }
-      state.rows[key].published = true; persist();
+      publish(key, row);
     }
     for (const [key, row] of Object.entries(state.rows)) {
       if (desired[key]) continue;
@@ -147,7 +207,8 @@ try {
   if (!home || !path.isAbsolute(home) || !config || !path.isAbsolute(config)) die('FM_HOME and FM_SHARKBOARD_CONFIG must be explicit absolute paths');
   if ((fs.statSync(config).mode & 0o077) !== 0) die('board config must be private (mode 600)');
   do {
-    await tick(command === 'serve' ? 'sync' : command);
+    try { await tick(command === 'serve' ? 'sync' : command); }
+    catch (error) { if (command !== 'serve' || error.fatal) throw error; console.error(`sharkboard: ${error.message}; retrying`); }
     if (command === 'serve') {
       const pending = path.join(home, 'state/sharkboard/pending');
       for (let elapsed = 0; elapsed < 120; elapsed++) {

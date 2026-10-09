@@ -5,7 +5,12 @@
 # with board:read and board:write. No default notification credential is used.
 # serve polls every 120 seconds; sync ingests answers before publishing.
 # Publication is board-only (no push). State and receipts live in
-# state/sharkboard; a lock serializes all publishers and answer consumers.
+# state/sharkboard; a lock serializes all publishers and answer consumers, and
+# a lock whose owner process is gone is cleared on the next run.
+# serve logs a failed tick and keeps polling. Pending publications are resent
+# before answers are read, so a lost response cannot skip their answers.
+# An answer fm-board.sh refuses, or one with unexpected provenance, becomes a
+# rejected receipt plus an inbox note and is never acknowledged.
 # A receipt left at applying after interruption requires operator reconciliation;
 # it is never automatically replayed or acknowledged as successfully applied.
 # No service installation, old-board retirement, or login is performed here.
