@@ -4,7 +4,8 @@
 # Ship and scout panes prepend bin/worker-guards (a symlink to this file, named
 # sharkctl) to PATH on the same pre-launch channel as FM_TASK_ID. fm-spawn.sh
 # owns that injection. While FM_TASK_ID is set, the first positional verb
-# `notify` or `ask` refuses, including `sharkctl notify ask`. Every other verb,
+# `notify` or `ask` refuses, including `sharkctl notify ask`, as does any `board`
+# argument. Every other verb,
 # and every invocation with FM_TASK_ID unset, execs the next sharkctl on PATH.
 # The lead and a secondmate pane are unmarked, so they are not redirected here.
 # An absolute path to some other sharkctl bypasses a PATH shim; the worker
@@ -24,6 +25,9 @@ if [ -n "${FM_TASK_ID:-}" ]; then
       -*) continue ;;
       *) verb=$arg; break ;;
     esac
+  done
+  for arg in "$@"; do
+    [ "$arg" != board ] || refuse board
   done
   case "$verb" in
     notify|ask) refuse "$verb" ;;

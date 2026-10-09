@@ -86,6 +86,17 @@ test_ask_refuses_and_other_verbs_delegate() {
   pass "FM_TASK_ID set: ask refuses, other verbs delegate, flags do not hide notify"
 }
 
+test_worker_board_refuses() {
+  local verb rc
+  for verb in ask note 'done' cancel ack work answers; do
+    reset_decoy
+    FM_TASK_ID=worker run_guard board "$verb" >/dev/null 2>&1 && rc=0 || rc=$?
+    expect_code 1 "$rc" "worker board $verb must refuse"
+    decoy_was_called && fail "worker board $verb reached sharkctl"
+  done
+  pass "workers cannot write or consume captain board rows"
+}
+
 test_unmarked_shell_delegates_notify_ask() {
   local out rc
   reset_decoy
@@ -332,3 +343,5 @@ test_two_guard_aliases_delegate_once
 test_two_guard_copies_delegate_once
 test_spawned_ship_and_scout_refuse_notify_ask
 test_filtered_launch_keeps_the_guard
+
+test_worker_board_refuses
