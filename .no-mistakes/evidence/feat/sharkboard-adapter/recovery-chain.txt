@@ -1,0 +1,7 @@
+chain of 11 dead-owner locks: 11
+sharkboard: too many abandoned recovery locks; reconcile lock owners
+exit=1
+locks left: 11
+-- chain of 3 dead-owner locks
+exit=0
+locks left: 0

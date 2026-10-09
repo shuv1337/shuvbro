@@ -1,0 +1,27 @@
+== 1. dead main-lock owner + legacy OWNERLESS lock.reap (pre-2d9f63b mkdir) ==
+$ fm-sharkboard.sh publish   # ownerless lock.reap must be refused, nothing removed
+sharkboard: sharkboard lock is held by a live or unknown owner; verify it before removing it
+exit=1
+state/sharkboard: lock lock.reap 
+lock/owner={"pid":1856725,"start":"1"}
+
+== 2. operator reconciles manually (removes ownerless reap) and retries ==
+$ fm-sharkboard.sh publish   # dead main owner now reaped; publish proceeds
+exit=0
+state/sharkboard: 
+
+sharkctl verbs sent: work
+
+== 3. legacy OWNERLESS main lock (empty dir) ==
+$ fm-sharkboard.sh publish   # ownerless main lock must be refused, not overwritten
+sharkboard: sharkboard lock is held by a live or unknown owner; verify it before removing it
+exit=1
+state/sharkboard: lock 
+
+== 4. live owner on main lock ==
+$ fm-sharkboard.sh publish   # live owner retained
+sharkboard: sharkboard lock is held by a live or unknown owner; verify it before removing it
+exit=1
+state/sharkboard: lock 
+lock/owner={"pid":1856930,"start":"35339317"}
+

@@ -1,0 +1,60 @@
+== 1. publish a held question with ambient HARK_* set (must be ignored), then republish unchanged
+$ /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M4F8D8WQKZ3J564B5DSMTN39/bin/fm-captain-hold.sh hold demo --reason Ship demo?
+demo
+[exit 0]
+$ /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M4F8D8WQKZ3J564B5DSMTN39/bin/fm-sharkboard.sh publish
+[exit 0]
+$ /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M4F8D8WQKZ3J564B5DSMTN39/bin/fm-sharkboard.sh publish
+[exit 0]
+ask puts: 1  push flags: ["none"]
+remote ask: {"id":"ask-1","revision":1,"status":"open","snoozeUntil":null,"acked":null}
+
+== 2. captain dismisses on phone; ack response is lost once; next sync acks and reasserts the still-local hold
+$ /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M4F8D8WQKZ3J564B5DSMTN39/bin/fm-sharkboard.sh sync
+sharkboard: sharkctl ack failed; no cursor advanced
+[exit 1]
+receipt after lost ack: applied
+$ /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M4F8D8WQKZ3J564B5DSMTN39/bin/fm-sharkboard.sh sync
+[exit 0]
+receipt: acked; old ask ask-1 -> remote now {"id":"ask-2","revision":1,"status":"open","snoozeUntil":null,"acked":null}
+$ /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M4F8D8WQKZ3J564B5DSMTN39/bin/fm-captain-hold.sh open demo
+[exit 0]
+lead inbox note:
+
+== 3. captain picks Later 400 days out (bad_date > 366d): rejected, card unsnoozed, hold kept
+before: {"id":"ask-2","revision":1,"status":"open","snoozeUntil":"2027-11-13T02:46:25.608Z","acked":null}
+$ /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M4F8D8WQKZ3J564B5DSMTN39/bin/fm-sharkboard.sh sync
+[exit 0]
+after:  {"id":"ask-3","revision":1,"status":"open","snoozeUntil":null,"acked":null}
+snooze receipts: {"ask-2:snooze:2027-11-13T02:46:25.608Z":"rejected"}
+$ /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M4F8D8WQKZ3J564B5DSMTN39/bin/fm-captain-hold.sh open demo
+[exit 0]
+
+== 4. Later 3 days out is applied as a dated hold, not acked, ask cancelled
+$ /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M4F8D8WQKZ3J564B5DSMTN39/bin/fm-sharkboard.sh sync
+[exit 0]
+acks unchanged: 1 -> 1; remote {"status":"cancelled"}
+Recorded through the live board, signed in as sharkboard:snooze: deferred until 2026-10-12; it returns to the captain then.
+
+== 5. abandoned recovery mutex with dead owner record is recovered; live owner kept; ownerless legacy refused
+-- live reaper owner
+$ /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M4F8D8WQKZ3J564B5DSMTN39/bin/fm-sharkboard.sh publish
+sharkboard: sharkboard lock is held by a live or unknown owner; verify it before removing it
+[exit 1]
+owner
+-- dead reaper owner
+$ /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M4F8D8WQKZ3J564B5DSMTN39/bin/fm-sharkboard.sh publish
+[exit 0]
+ls: cannot access '/home/shuv/.cache/agent-ws/sbdrive.z1oS/home/state/sharkboard/lock': No such file or directory
+ls: cannot access '/home/shuv/.cache/agent-ws/sbdrive.z1oS/home/state/sharkboard/lock.reap': No such file or directory
+-- ownerless legacy lock.reap
+$ /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M4F8D8WQKZ3J564B5DSMTN39/bin/fm-sharkboard.sh publish
+[exit 0]
+ls: cannot access '/home/shuv/.cache/agent-ws/sbdrive.z1oS/home/state/sharkboard/lock.reap': No such file or directory
+rm: cannot remove '/home/shuv/.cache/agent-ws/sbdrive.z1oS/home/state/sharkboard/lock': No such file or directory
+rm: cannot remove '/home/shuv/.cache/agent-ws/sbdrive.z1oS/home/state/sharkboard/lock.reap': No such file or directory
+
+== 6. task worker cannot drive the board
+$ /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M4F8D8WQKZ3J564B5DSMTN39/bin/fm-sharkboard.sh sync
+sharkboard: task workers cannot publish or consume captain board answers
+[exit 1]
