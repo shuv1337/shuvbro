@@ -125,9 +125,10 @@ mv "$TMP_ROOT/update" "$FM_HOME/state/sharkboard/last.json"
 # Bind event to the remaining current ask to test the recovery boundary.
 jq '.events=[(.asks|to_entries|map(select(.value.status=="open"))[0]|{eventId:"interrupted",askKey:.key,askId:.value.id,revision:1,status:"answered",waitingTaskId:"bridge-test",optionId:"yes",answeredVia:"web"})]' "$FAKE_SHARK_STATE" > "$TMP_ROOT/update"
 mv "$TMP_ROOT/update" "$FAKE_SHARK_STATE"
-if "$ROOT/bin/fm-sharkboard.sh" answers > /dev/null 2>&1; then fail 'uncertain answer replayed'; fi
+"$ROOT/bin/fm-sharkboard.sh" answers || fail 'uncertain answer blocked unrelated intake'
+[ "$(jq -r '[.rows[]|select(.quarantine.eventId=="interrupted")]|length' "$FM_HOME/state/sharkboard/last.json")" = 1 ] || fail 'interrupted receipt was not quarantined'
 [ "$(jq '.acked' "$FAKE_SHARK_STATE")" = 1 ] || fail 'uncertain answer acknowledged'
-pass 'new lifecycle forwards a stale approval without applying it and interrupted receipt fails closed'
+pass 'new lifecycle forwards a stale approval and interrupted receipt quarantines its ask'
 
 STATE_FILE="$FM_HOME/state/sharkboard/last.json"
 update_json() {  # <file> <jq-args>...
@@ -145,8 +146,10 @@ set_events() {  # <key> <event-json-with-eventId>...
   update_json "$FAKE_SHARK_STATE" --arg key "$key" --argjson events "$events" '.events=$events | .asks[$key].status="answered"'
 }
 receipt() { jq -r --arg id "$1" '.events[$id]' "$STATE_FILE"; }
-# The operator reconciles the interrupted receipt before intake resumes.
-update_json "$STATE_FILE" '.events.interrupted="rejected"'
+# Explicit operator reconciliation settles the receipt without replaying its answer.
+key=$(ask_key)
+"$ROOT/bin/fm-sharkboard.sh" reconcile --key "$key" --receipt interrupted --outcome not-recorded
+"$ROOT/bin/fm-sharkboard.sh" sync
 key=$(ask_key)
 long=$(head -c 600 /dev/zero | tr '\0' x)
 set_events "$key" "{\"eventId\":\"too-long\",\"text\":\"$long\"}"
@@ -413,6 +416,113 @@ if "$ROOT/bin/fm-sharkboard.sh" publish 2>/dev/null; then fail 'ownerless legacy
 [ -d "$FM_HOME/state/sharkboard/lock.reap" ] && [ -f "$FM_HOME/state/sharkboard/lock/owner" ] || fail 'ownerless legacy reaper or its lock was removed'
 rm -r "$FM_HOME/state/sharkboard/lock" "$FM_HOME/state/sharkboard/lock.reap"
 pass 'ownerless legacy reaper locks require manual reconciliation'
+# An uncertain intake is isolated durably, even when the local lead alert fails.
+qbin="$TMP_ROOT/quarantine-bin"
+mkdir "$qbin"
+cp "$ROOT/bin/fm-sharkboard.sh" "$ROOT/bin/fm-sharkboard.mjs" "$qbin/"
+export FM_TEST_REAL_BIN="$ROOT/bin" FM_TEST_ANSWER_CALLS="$TMP_ROOT/intake-calls" FM_TEST_ALERT_FAIL="$TMP_ROOT/alert-fail" FM_TEST_CRASH_FILE="$TMP_ROOT/crash-intake"
+cat > "$qbin/fm-board.sh" <<'SH'
+#!/usr/bin/env bash
+if [ "$1" = answer ]; then
+  printf 'answer\n' >> "$FM_TEST_ANSWER_CALLS"
+  # The local operation may have committed before its repair/report failed.
+  "$FM_TEST_REAL_BIN/fm-board.sh" "$@" >/dev/null
+  if [ -e "$FM_TEST_CRASH_FILE" ]; then kill -KILL "$PPID"; exit 1; fi
+  printf '{"ok":false,"code":"repair_failed"}\n'
+  exit 1
+fi
+exec "$FM_TEST_REAL_BIN/fm-board.sh" "$@"
+SH
+cat > "$qbin/fm-inbox.sh" <<'SH'
+#!/usr/bin/env bash
+[ ! -e "$FM_TEST_ALERT_FAIL" ] || exit 1
+exec "$FM_TEST_REAL_BIN/fm-inbox.sh" "$@"
+SH
+chmod +x "$qbin/"*.sh
+"$ROOT/bin/fm-captain-hold.sh" hold bridge-test --reason 'Uncertain intake question' >/dev/null
+fm_write_meta "$FM_HOME/state/quarantine-other.meta" "window=firstmate:fm-quarantine-other" "endpoint_task_id=quarantine-other" "kind=ship" "harness=codex"
+printf '[{"text":"Retire this unrelated note","kind":"fyi"}]\n' > "$FM_HOME/data/board-notes.json"
+"$qbin/fm-sharkboard.sh" sync
+key=$(ask_key)
+set_events "$key" '{"eventId":"repair-uncertain","optionId":"no"}'
+touch "$FM_TEST_ALERT_FAIL"
+printf '[{"text":"Publish unrelated during quarantine","kind":"fyi"}]\n' > "$FM_HOME/data/board-notes.json"
+if "$qbin/fm-sharkboard.sh" sync 2>/dev/null; then fail 'failed quarantine alert reported success'; fi
+[ "$(receipt repair-uncertain)" = quarantined ] || fail 'repair_failed did not quarantine'
+[ "$(wc -l < "$FM_TEST_ANSWER_CALLS" | tr -d ' ')" = 1 ] || fail 'uncertain intake was retried'
+[ "$(work_puts quarantine-other)" = 2 ] || fail 'quarantine blocked unrelated heartbeat'
+[ "$(jq '[.notes[]|select(.text=="Retire this unrelated note")]|length' "$FAKE_SHARK_STATE")" = 0 ] || fail 'quarantine blocked unrelated retirement'
+[ "$(jq '[.notes[]|select(.text=="Publish unrelated during quarantine")]|length' "$FAKE_SHARK_STATE")" = 1 ] || fail 'quarantine blocked unrelated publication'
+[ "$(jq -r --arg key "$key" '.rows[$key].quarantine.alerted' "$STATE_FILE")" = false ] || fail 'failed alert marked delivered'
+"$qbin/fm-sharkboard.sh" quarantines > "$TMP_ROOT/quarantines"
+[ "$(jq '.quarantines|length' "$TMP_ROOT/quarantines")" = 1 ] || fail 'quarantine inspection missing ask'
+# The source question changes while quarantined; neither old nor replacement is published.
+"$ROOT/bin/fm-captain-hold.sh" hold bridge-test --reason 'Changed while quarantined' >/dev/null
+before_asks=$(jq '[.calls[]|select(.verb=="ask")]|length' "$FAKE_SHARK_STATE")
+acked=$(jq '.acked' "$FAKE_SHARK_STATE")
+rm "$FM_TEST_ALERT_FAIL"
+"$qbin/fm-sharkboard.sh" sync
+"$qbin/fm-sharkboard.sh" publish
+"$qbin/fm-sharkboard.sh" sync
+[ "$(jq '[.calls[]|select(.verb=="ask")]|length' "$FAKE_SHARK_STATE")" = "$before_asks" ] || fail 'quarantined task was republished after model change'
+[ "$(wc -l < "$FM_TEST_ANSWER_CALLS" | tr -d ' ')" = 1 ] || fail 'quarantined event replayed after restart'
+[ "$(jq '.acked' "$FAKE_SHARK_STATE")" = "$acked" ] || fail 'quarantined event was acknowledged'
+[ "$(jq -r --arg key "$key" '.rows[$key].quarantine.alerted' "$STATE_FILE")" = true ] || fail 'quarantine alert was not retried'
+[ "$(grep -l 'QUARANTINED:' "$FM_HOME"/state/inbox/*.note | wc -l | tr -d ' ')" = 2 ] || fail 'quarantine alert repeated after successful delivery'
+# Wrong identities refuse; explicit reconciliation never invokes answer intake.
+if "$qbin/fm-sharkboard.sh" reconcile --key "$key" --receipt wrong --outcome recorded 2>/dev/null; then fail 'wrong reconciliation receipt accepted'; fi
+"$qbin/fm-sharkboard.sh" reconcile --key "$key" --receipt repair-uncertain --outcome recorded
+"$qbin/fm-sharkboard.sh" reconcile --key "$key" --receipt repair-uncertain --outcome recorded > "$TMP_ROOT/reconcile-repeat"
+jq -e '.alreadyReconciled and (.replayed|not)' "$TMP_ROOT/reconcile-repeat" >/dev/null || fail 'reconciliation was not idempotent'
+"$qbin/fm-sharkboard.sh" sync
+[ "$(receipt repair-uncertain)" = reconciled ] || fail 'explicit outcome not retained'
+[ "$(wc -l < "$FM_TEST_ANSWER_CALLS" | tr -d ' ')" = 1 ] || fail 'reconciliation replayed intake'
+[ "$(jq '[.calls[]|select(.verb=="ask")]|length' "$FAKE_SHARK_STATE")" -gt "$before_asks" ] || fail 'explicit reconciliation did not unblock the replacement question'
+"$ROOT/bin/fm-captain-hold.sh" open bridge-test >/dev/null || fail 'reconciliation released changed hold'
+pass 'repair_failed quarantines one ask, retries its alert, preserves changed questions and permits unrelated updates'
+# Recover a crash after journaling applying even when the event feed has moved on.
+key=$(ask_key)
+# shellcheck disable=SC2016
+update_json "$STATE_FILE" --arg key "$key" '.rows[$key] as $r | .events["crashed-journal"]="applying" | .intakes["crashed-journal"]={key:$key,event:{eventId:"crashed-journal",askKey:$key,askId:$r.askId,revision:$r.revision,status:"answered",optionId:"yes",answeredVia:"web",waitingTaskId:"bridge-test"}}'
+update_json "$FAKE_SHARK_STATE" '.events=[]'
+"$qbin/fm-sharkboard.sh" publish
+[ "$(receipt crashed-journal)" = quarantined ] || fail 'publish-only did not recover the applying journal'
+"$qbin/fm-sharkboard.sh" sync
+[ "$(wc -l < "$FM_TEST_ANSWER_CALLS" | tr -d ' ')" = 1 ] || fail 'crashed intake replayed without a feed event'
+"$qbin/fm-sharkboard.sh" reconcile --key "$key" --receipt crashed-journal --outcome not-recorded
+"$qbin/fm-sharkboard.sh" sync
+pass 'publish-only recovers a crashed intake without requiring its event on the feed'
+# A process killed after the local action commits leaves applying and recovers only that ask.
+key=$(ask_key)
+set_events "$key" '{"eventId":"killed-after-record","optionId":"no"}'
+touch "$FM_TEST_CRASH_FILE"
+if "$qbin/fm-sharkboard.sh" sync 2>/dev/null; then fail 'killed intake reported success'; fi
+rm "$FM_TEST_CRASH_FILE"
+[ "$(receipt killed-after-record)" = applying ] || fail 'crash did not leave the applying journal'
+"$qbin/fm-sharkboard.sh" publish
+"$qbin/fm-sharkboard.sh" sync
+[ "$(receipt killed-after-record)" = quarantined ] || fail 'killed intake was not quarantined'
+[ "$(wc -l < "$FM_TEST_ANSWER_CALLS" | tr -d ' ')" = 2 ] || fail 'killed intake was replayed'
+"$qbin/fm-sharkboard.sh" reconcile --key "$key" --receipt killed-after-record --outcome recorded
+pass 'an actual post-record process crash recovers into quarantine without replay'
+# Later can commit locally before reporting repair_failed; quarantine prevents retirement and reset.
+"$ROOT/bin/fm-captain-hold.sh" hold bridge-test --reason 'Uncertain Later repair' >/dev/null
+"$qbin/fm-sharkboard.sh" sync
+key=$(ask_key)
+near=$(node -e 'console.log(new Date(Date.now()+3*86400000).toISOString())')
+# shellcheck disable=SC2016
+update_json "$FAKE_SHARK_STATE" --arg key "$key" --arg until "$near" '.asks[$key].snoozeUntil=$until | .events=[]'
+later_event="$(jq -r --arg key "$key" '.asks[$key].id' "$FAKE_SHARK_STATE"):snooze:$near"
+"$qbin/fm-sharkboard.sh" sync
+"$qbin/fm-sharkboard.sh" sync
+[ "$(receipt "$later_event")" = quarantined ] || fail 'uncertain Later not quarantined'
+[ "$(jq -r --arg key "$key" '.asks[$key].snoozeUntil' "$FAKE_SHARK_STATE")" = "$near" ] || fail 'uncertain Later was reset automatically'
+[ "$(jq -r --arg key "$key" '.asks[$key].status' "$FAKE_SHARK_STATE")" = open ] || fail 'uncertain Later was retired'
+[ "$(wc -l < "$FM_TEST_ANSWER_CALLS" | tr -d ' ')" = 3 ] || fail 'uncertain Later replayed'
+"$qbin/fm-sharkboard.sh" reconcile --key "$key" --receipt "$later_event" --outcome recorded
+"$qbin/fm-sharkboard.sh" sync
+pass 'uncertain Later keeps its remote ask frozen until explicit reconciliation'
+rm "$FM_HOME/state/quarantine-other.meta" "$FM_HOME/data/board-notes.json"
 # serve logs a failed tick and keeps polling.
 answer_calls() { jq '[.calls[]|select(.verb=="answers")]|length' "$FAKE_SHARK_STATE" 2>/dev/null || echo 0; }
 wait_calls() {  # <count>

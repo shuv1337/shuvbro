@@ -103,6 +103,40 @@ async function tick(mode) {
     const state = read(file, { version: 1, binding, rows: {}, events: {}, cursor: '' });
     if (state.version !== 1 || state.binding !== binding) fatal('sharkboard state/config binding changed');
     const persist = () => save(file, state);
+    state.intakes ??= {};
+    state.settledAsks ??= {};
+    const quarantine = (key, event, reason) => {
+      const row = state.rows[key];
+      if (!row?.quarantine) {
+        row.quarantine = { eventId: event.eventId, askId: event.askId, revision: event.revision,
+          reason, alerted: false, event };
+      }
+      state.events[event.eventId] = 'quarantined';
+      persist();
+    };
+    // Journal the target with the applying receipt, before spawning intake.
+    // Recovery must precede even publish-only commands and remote identity repair.
+    for (const [id, status] of Object.entries(mode === 'quarantines' ? {} : state.events)) {
+      if (status !== 'applying') continue;
+      let intake = state.intakes[id];
+      if (!intake) {
+        // Upgrade old receipts which predate the target journal. Never guess a target.
+        const events = shark('answers').events;
+        const event = events?.find(item => item.eventId === id);
+        if (event && state.rows[event.askKey]) intake = { key: event.askKey, event };
+        else {
+          const match = Object.entries(state.rows).find(([, row]) => row.type === 'ask'
+            && (id.startsWith(`${row.askId}:r${row.revision}:`) || id.startsWith(`${row.askId}:snooze:`)));
+          if (match) intake = { key: match[0], event: { eventId: id, askId: match[1].askId, revision: match[1].revision } };
+        }
+        if (!intake) fatal('legacy applying receipt has no ask identity; recover its original answer page before continuing');
+        state.intakes[id] = intake;
+      }
+      if (!state.rows[intake.key]) fatal('applying receipt has no source row; restore its durable state');
+      quarantine(intake.key, intake.event, 'intake was interrupted; its outcome is unknown');
+    }
+    const blocked = (key, row) => Boolean(state.rows[key]?.quarantine
+      || (row.type === 'ask' && row.task && Object.values(state.rows).some(other => other.quarantine && other.task === row.task)));
     const publish = (key, row) => {
       // Save intent before transport. A retry uses the same content-addressed key.
       state.rows[key] = { ...state.rows[key], ...row, published: false, retired: false, refresh: false }; persist();
@@ -137,7 +171,7 @@ async function tick(mode) {
       ?? (event.until ? `later, until ${event.until}` : '');
     // Untrusted text goes to the lead under normal authority. A repeated note is harmless.
     const note = (row, event, why) => run(path.join(bin, 'fm-inbox.sh'), ['note', '-'],
-      `SHark board event for ${row.payload.title}: ${why}.\nUntrusted captain answer: ${answerOf(row, event)}\nNo task was released by this transport; apply the normal authority rules.`, false);
+      `SHark board event for ${row.payload.title}: ${why}.\nUntrusted captain answer: ${answerOf(row, event)}\nVerify the local task state and apply the normal authority rules; this note does not authorize an action.`, false);
     const reject = (row, event, why) => {
       delete state.events[event.eventId]; persist();
       note(row, event, `not applied (${why})`);
@@ -145,6 +179,71 @@ async function tick(mode) {
       if (event.until) row.resetSnooze = event.askId;
       persist();
     };
+    if (mode === 'quarantines') {
+      console.log(JSON.stringify({ quarantines: Object.entries(state.rows).filter(([, row]) => row.quarantine)
+        .map(([key, row]) => ({ key, task: row.task, ...row.quarantine })),
+      pending: Object.entries(state.intakes).filter(([id]) => state.events[id] === 'applying')
+        .map(([eventId, intake]) => ({ eventId, ...intake })) }));
+      return;
+    }
+    if (mode === 'reconcile') {
+      const args = process.argv.slice(3);
+      if (args.length !== 6 || args[0] !== '--key' || args[2] !== '--receipt'
+        || args[4] !== '--outcome' || !['recorded', 'not-recorded'].includes(args[5])) {
+        die('usage: fm-sharkboard.sh reconcile --key KEY --receipt EVENT --outcome recorded|not-recorded');
+      }
+      const [key, id, outcome] = [args[1], args[3], args[5]];
+      const row = state.rows[key];
+      const q = row?.quarantine;
+      if (!q && Object.values(state.settledAsks).some(item => item.key === key && item.eventId === id && item.outcome === outcome)) {
+        console.log(JSON.stringify({ ok: true, key, receipt: id, outcome, replayed: false, alreadyReconciled: true }));
+        return;
+      }
+      if (!q || q.eventId !== id) die('no matching quarantine; inspect quarantines before reconciling');
+      if (q.reconciliation && q.reconciliation.outcome !== outcome) die('reconciliation outcome already recorded; resume with the same outcome');
+      q.reconciliation ??= { outcome, noted: false };
+      persist();
+      if (!q.reconciliation.noted) {
+        note(row, q.event, `operator reconciled receipt ${id}: ${outcome}; no answer was replayed`);
+        q.reconciliation.noted = true; persist();
+      }
+      let remote = remoteAsk(key);
+      const assertIdentity = () => {
+        if (remote && (remote.id !== q.askId || remote.revision !== q.revision)) die('remote question changed; quarantine retained for inspection');
+      };
+      assertIdentity();
+      if (remote?.status === 'open') {
+        exec('sharkctl', sharkArgs('cancel', ['--key', key, '--reason', 'Operator reconciled quarantined receipt']));
+        remote = remoteAsk(key); assertIdentity();
+        if (remote?.status === 'open') die('reconciliation cancellation not confirmed; retry the same command');
+      }
+      if (remote?.status === 'answered' || (remote?.status === 'cancelled' && remote.answeredVia)) {
+        const result = exec('sharkctl', sharkArgs('ack', ['--key', key]));
+        if (result.status !== 0 && !absent(result, 'No unacknowledged resolved ask with that key')) die('reconciliation ack failed; retry the same command');
+      }
+      state.events[id] = 'reconciled';
+      state.settledAsks[q.askId] = { key, eventId: id, outcome };
+      row.seen = q.askId;
+      row.refresh = true;
+      delete row.resetSnooze;
+      delete row.quarantine;
+      persist();
+      console.log(JSON.stringify({ ok: true, key, receipt: id, outcome, replayed: false }));
+      return;
+    }
+    const alertsAttempted = new Set();
+    const alertQuarantines = () => {
+      for (const [key, row] of Object.entries(state.rows)) {
+        if (!row.quarantine || row.quarantine.alerted || alertsAttempted.has(key)) continue;
+        alertsAttempted.add(key);
+        attempt(key, () => {
+          const q = row.quarantine;
+          note(row, q.event, `QUARANTINED: ${q.reason}. Ask ${key}, receipt ${q.eventId}. Inspect local intake records and remote ask, then explicitly reconcile; do not replay the answer`);
+          q.alerted = true; persist();
+        });
+      }
+    };
+    alertQuarantines();
     if (mode !== 'publish') {
       const page = shark('answers', state.cursor ? ['--since', state.cursor] : []);
       if (!Array.isArray(page.events) || typeof page.cursor !== 'string') die('invalid answer page');
@@ -152,7 +251,7 @@ async function tick(mode) {
       // A lost publish response must not let its answers pass unmatched.
       // Snoozes are not terminal events in SHark's cursor feed.
       for (const [key, row] of Object.entries(state.rows)) {
-        if (row.type !== 'ask' || row.retired) continue;
+        if (row.type !== 'ask' || row.retired || blocked(key, row)) continue;
         const remote = remoteAsk(key);
         if (!row.published || remote?.id !== row.askId || remote.revision !== row.revision) { reconcile(key, row, remote); continue; }
         if (row.card && remote.status === 'open' && remote.snoozeUntil) {
@@ -165,8 +264,7 @@ async function tick(mode) {
       for (const event of page.events) {
         const row = state.rows[event.askKey];
         // Another home/token's rows and retired rows never reach the intake.
-        if (!row || row.type !== 'ask') continue;
-        if (state.events[event.eventId] === 'applying') die('answer application was interrupted; reconcile its receipt before retrying');
+        if (!row || row.type !== 'ask' || blocked(event.askKey, row) || state.settledAsks[event.askId]) continue;
         if (!state.events[event.eventId]) {
           if (row.askId !== event.askId || row.revision !== event.revision) {
             if (event.status === 'answered') reject(row, event, 'answer to an earlier version of this question');
@@ -182,16 +280,24 @@ async function tick(mode) {
             if (!current) reject(row, event, 'question changed or no longer waiting');
             else if (event.optionId && !current.choices.some(option => option.id === choice)) reject(row, event, 'answer option no longer offered');
             else {
-              state.events[event.eventId] = 'applying'; persist();
+              state.events[event.eventId] = 'applying';
+              state.intakes[event.eventId] = { key: event.askKey, event: { ...event } };
+              persist();
               const args = ['answer', row.task, '--card', row.card, '--choice', choice, '--login', `sharkboard:${event.answeredVia}`];
               if (event.until) args.push('--until', event.until);
               else if (!event.optionId) args.push('--text-file', '-');
-              const { status, body } = exec(path.join(bin, 'fm-board.sh'), args, event.text ?? '');
+              let result;
+              try { result = exec(path.join(bin, 'fm-board.sh'), args, event.text ?? ''); }
+              catch {
+                quarantine(event.askKey, event, 'intake process failed; its outcome is unknown');
+                continue;
+              }
+              const { status, body } = result;
               if (status === 0 && body?.ok === true) { state.events[event.eventId] = 'applied'; persist(); }
               // fm-board.sh reports these only when nothing was recorded; its card check makes a retry at most once.
               else if (status === 1 && ['record_failed', 'snapshot_failed'].includes(body?.code)) { delete state.events[event.eventId]; persist(); retry = true; }
               else if ([2, 3].includes(status) && body?.ok === false && typeof body.code === 'string') reject(row, event, body.code);
-              else die('answer outcome unknown; reconcile receipt');
+              else quarantine(event.askKey, event, body?.code === 'repair_failed' ? 'Later repair could not be confirmed' : 'intake returned an unknown outcome');
             }
           }
         }
@@ -208,10 +314,11 @@ async function tick(mode) {
       // A retryable intake failure keeps the page for the next tick; settled receipts dedupe it.
       if (!retry) { state.cursor = page.cursor; persist(); }
     }
+    alertQuarantines();
     // A rejected Later must not keep its source question hidden. Persist the
     // repair until cancel is confirmed; a racing answer remains for next intake.
     for (const [key, row] of Object.entries(state.rows)) {
-      if (!row.resetSnooze) continue;
+      if (!row.resetSnooze || blocked(key, row)) continue;
       attempt(key, () => {
         let remote = remoteAsk(key);
         if (remote?.id === row.resetSnooze && remote.status === 'open') {
@@ -248,13 +355,14 @@ async function tick(mode) {
       desired[key] = { type: 'note', payload: { key, text: line(row.text, 300), ...(block(row.detail, 2000) ? { detail: block(row.detail, 2000) } : {}), ...(https(row.link) ? { link: row.link } : {}) } };
     }
     for (const [key, row] of Object.entries(desired)) {
+      if (blocked(key, row)) continue;
       const previous = state.rows[key];
       // Active work heartbeats every tick so SHark never marks it stale.
       if (previous?.published && !previous.retired && !previous.refresh && hash(previous.payload) === hash(row.payload) && row.type !== 'work') continue;
       attempt(key, () => publish(key, row));
     }
     for (const [key, row] of Object.entries(state.rows)) {
-      if (desired[key]) continue;
+      if (desired[key] || blocked(key, row)) continue;
       attempt(key, () => {
         if (row.type === 'ask') {
           const result = exec('sharkctl', sharkArgs('cancel', ['--key', key, '--reason', 'No longer waiting in source board']));
@@ -279,7 +387,7 @@ async function tick(mode) {
 }
 
 try {
-  if (!['publish', 'answers', 'sync', 'serve'].includes(command)) die('usage: fm-sharkboard.sh publish|answers|sync|serve');
+  if (!['publish', 'answers', 'sync', 'serve', 'quarantines', 'reconcile'].includes(command)) die('usage: fm-sharkboard.sh publish|answers|sync|serve|quarantines|reconcile');
   if (process.env.FM_TASK_ID) die('task workers cannot publish or consume captain board answers');
   if (!home || !path.isAbsolute(home) || !config || !path.isAbsolute(config)) die('FM_HOME and FM_SHARKBOARD_CONFIG must be explicit absolute paths');
   if ((fs.statSync(config).mode & 0o077) !== 0) die('board config must be private (mode 600)');

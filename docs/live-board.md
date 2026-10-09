@@ -89,6 +89,7 @@ Use a dedicated per-home board-scoped credential approved through SHark device l
 Publication is board-only, with no push alerts, and excludes raw worker progress notes.
 The bridge consumes captain answers through the live board's locked keyed intake, so No keeps held work held and an old question cannot release a newly held task.
 SHark deferrals are rounded up to the next UTC date when needed because the local hold intake accepts dates rather than times.
-An interrupted answer application fails closed for operator reconciliation instead of assuming it is safe to replay.
+An uncertain answer application quarantines that ask and alerts the local lead while unrelated updates continue.
+The script header owns inspection and explicit reconciliation; no answer is automatically replayed.
 Start with a single authorized ask and observe the phone answer, intake and acknowledgement before retiring the existing board service or its Tailscale route.
 The bridge does not perform that retirement.

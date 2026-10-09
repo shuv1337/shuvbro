@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # fm-sharkboard.sh - opt-in SHark bridge for this home's exported live-board model.
-# Usage: fm-sharkboard.sh publish|answers|sync|serve
+# Usage: fm-sharkboard.sh publish|answers|sync|serve|quarantines
+#        fm-sharkboard.sh reconcile --key KEY --receipt EVENT --outcome recorded|not-recorded
 # Set FM_HOME explicitly and FM_SHARKBOARD_CONFIG to a private sharkctl config
 # with board:read and board:write. No default notification credential is used,
 # and ambient HARK_TOKEN and HARK_API_URL are dropped so they cannot override that config.
@@ -24,8 +25,24 @@
 # a secret-looking value) is logged by key only and retried without blocking
 # intake or other rows. Active work heartbeats every publish, and a retired ask
 # whose answer has not been read stays until that answer reaches the lead.
-# A receipt left at applying after interruption requires operator reconciliation;
-# it is never automatically replayed or acknowledged as successfully applied.
+# An uncertain intake (including repair_failed or an interrupted applying journal)
+# quarantines that ask and replacement questions for the same local task.
+# Publication, reset, retirement and answer replay stay blocked for that task;
+# unrelated intake, publication and heartbeats continue. A durable local inbox
+# alert retries on failure; successful alerts are not repeated. A crash between
+# inbox delivery and receipt persistence can duplicate the alert, never the action.
+# quarantines prints private JSON with the key, receipt, event and pending journals.
+# The lead must inspect the original local intake records and current remote ask
+# and establish whether the action was recorded before running reconcile with
+# that exact key, receipt and outcome. This explicit command journals the outcome,
+# alerts the local lead, cancels an open remote ask or acknowledges its terminal
+# result, then releases the quarantine for the next ordinary publication. It never
+# invokes answer intake. A failed reconciliation remains quarantined; repeat the
+# same command to finish it. Already completed identical commands are idempotent.
+# A changed remote ask identity refuses reconciliation instead of mutating it.
+# Older applying receipts are scoped from their original answer page or encoded
+# ask identity. Missing legacy identity or corrupt journal state still refuses
+# operation until the original records can be recovered; no target is guessed.
 # No service installation, old-board retirement, or login is performed here.
 set -eu
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
