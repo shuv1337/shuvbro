@@ -195,7 +195,7 @@
 #   behavior suite from the repository primary checkout while that marker is
 #   set (its header owns the refusal). The same channel prepends
 #   bin/worker-guards to PATH. While FM_TASK_ID is set, that directory's
-#   sharkctl shim refuses the notify and ask verbs and otherwise execs the next
+#   sharkctl shim refuses the notify, ask, and board verbs and otherwise execs the next
 #   sharkctl on PATH; bin/fm-sharkctl-guard.sh owns the refusal. A secondmate
 #   runs in its own home, is not marked, and does not receive the prepend.
 #   Only after this isolation check, every fresh ship or scout requires a clean

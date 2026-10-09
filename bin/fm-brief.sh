@@ -73,8 +73,8 @@
 # blocked when firstmate must act.
 # Ship and scout scaffolds, including those passed --herdr-lab, forbid contacting
 # the captain directly. Questions go to firstmate as a keyed status line.
-# bin/fm-sharkctl-guard.sh refuses sharkctl notify and ask in panes fm-spawn
-# marks with FM_TASK_ID.
+# bin/fm-sharkctl-guard.sh refuses sharkctl notify, ask, and board in panes
+# fm-spawn marks with FM_TASK_ID.
 # Every scaffold also carries the steering-inbox receive-and-ack section:
 # process state/<id>.inbox/*.msg in order and acknowledge each by moving it to
 # handled/ (record, doorbell, and ladder owned by bin/fm-task-inbox-lib.sh).
