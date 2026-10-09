@@ -88,7 +88,7 @@ test_ask_refuses_and_other_verbs_delegate() {
 
 test_worker_board_refuses() {
   local verb rc
-  for verb in ask note done cancel ack work answers; do
+  for verb in ask note 'done' cancel ack work answers; do
     reset_decoy
     FM_TASK_ID=worker run_guard board "$verb" >/dev/null 2>&1 && rc=0 || rc=$?
     expect_code 1 "$rc" "worker board $verb must refuse"
