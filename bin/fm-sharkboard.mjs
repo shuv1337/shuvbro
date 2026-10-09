@@ -23,9 +23,12 @@ function save(file, value) {
   fs.renameSync(temp, file);
 }
 function exec(executable, args, input = '') {
+  const env = { ...process.env, HARK_CONFIG: config };
+  delete env.HARK_TOKEN;
+  delete env.HARK_API_URL;
   const result = spawnSync(executable, args, {
     input, encoding: 'utf8', timeout: 90000, maxBuffer: 8 * 1024 * 1024,
-    env: { ...process.env, HARK_CONFIG: config },
+    env,
   });
   if (result.error) die(`${path.basename(executable)} ${args[0]} failed; no cursor advanced`);
   let body = null;

@@ -24,6 +24,9 @@ cat > "$TMP_ROOT/fakebin/sharkctl" <<'JS'
 #!/usr/bin/env node
 // Follows SHark's board contract: an upsert opens a new ask once the old one is
 // terminal, and every API refusal exits 1 with the server's error on stderr.
+if (process.env.HARK_TOKEN || process.env.HARK_API_URL || process.env.HARK_CONFIG !== process.env.FM_SHARKBOARD_CONFIG) {
+  console.error('unexpected ambient SHark auth override'); process.exit(3);
+}
 const fs = require('fs');
 const a = process.argv.slice(2), verb = a[1];
 const file = process.env.FAKE_SHARK_STATE;
@@ -84,7 +87,7 @@ JS
 chmod +x "$TMP_ROOT/fakebin/sharkctl"
 export PATH="$TMP_ROOT/fakebin:$PATH"
 "$ROOT/bin/fm-captain-hold.sh" hold bridge-test --reason 'Proceed with fixture?' >/dev/null
-"$ROOT/bin/fm-sharkboard.sh" publish
+HARK_TOKEN=synthetic-ambient-credential HARK_API_URL=https://wrong.example.invalid "$ROOT/bin/fm-sharkboard.sh" publish
 "$ROOT/bin/fm-sharkboard.sh" publish
 [ "$(jq '[.calls[]|select(.verb=="ask")]|length' "$FAKE_SHARK_STATE")" = 1 ] || fail 'unchanged ask republished'
 jq '.events = [(.asks|to_entries[0]|{eventId:"event-1",askKey:.key,askId:.value.id,revision:1,status:"answered",waitingTaskId:"bridge-test",optionId:"no",text:null,answeredVia:"web"})]' "$FAKE_SHARK_STATE" > "$TMP_ROOT/update"
