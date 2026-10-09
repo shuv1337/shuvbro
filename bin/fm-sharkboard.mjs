@@ -245,7 +245,7 @@ async function tick(mode) {
       for (const held of Object.values(state.held)) if (!held.noted) forward(held);
       if (['answered', 'cancelled'].includes(remote?.status) && q.reconciliation.cancelled !== remote.id) {
         const resolved = `${remote.id}:r${remote.revision}:${remote.status}`;
-        const known = [q.event, ...Object.values(state.held).filter(held => held.key === key).map(held => held.event)]
+        const known = [...(q.event.answeredVia === 'snooze' ? [] : [q.event]), ...Object.values(state.held).filter(held => held.key === key).map(held => held.event)]
           .find(event => event.eventId === resolved || (event.askId === remote.id && event.revision === remote.revision && event.status === remote.status));
         if (!known) die('remote resolution is not on the answer feed yet; quarantine retained, retry the same command');
         if (byCaptain({ ...known, status: remote.status })) {

@@ -575,6 +575,28 @@ grep -l -F 'cancelled while its task was quarantined' "$FM_HOME"/state/inbox/*.n
 [ "$(receipt dismiss-after-later)" = noted ] || fail 'forwarded dismissal did not settle'
 [ "$(wc -l < "$FM_TEST_ANSWER_CALLS" | tr -d ' ')" = "$calls" ] || fail 'dismissal reached intake'
 pass 'a dismissal after an uncertain Later is forwarded and acknowledged by reconciliation'
+# A reply not yet on the answer page must not be vouched for by the synthetic Later event.
+"$ROOT/bin/fm-captain-hold.sh" hold bridge-test --reason 'Later then lagging reply' >/dev/null
+"$qbin/fm-sharkboard.sh" sync
+key=$(ask_key)
+snooze_into_quarantine "$key"
+calls=$(wc -l < "$FM_TEST_ANSWER_CALLS" | tr -d ' ')
+acked=$(jq '.acked' "$FAKE_SHARK_STATE")
+# shellcheck disable=SC2016
+update_json "$FAKE_SHARK_STATE" --arg key "$key" '.asks[$key].status="answered" | .events=[]'
+if "$qbin/fm-sharkboard.sh" reconcile --key "$key" --receipt "$later_event" --outcome recorded 2>/dev/null; then fail 'reconciliation acked a reply missing from the feed'; fi
+[ "$(jq '.acked' "$FAKE_SHARK_STATE")" = "$acked" ] || fail 'unforwarded reply was acknowledged'
+[ "$(receipt "$later_event")" = quarantined ] || fail 'refused reconciliation released the quarantine'
+set_events "$key" '{"eventId":"lagging-reply","text":"Reply that lagged the feed"}'
+"$qbin/fm-sharkboard.sh" sync
+grep -h -A1 -F 'answered while its task was quarantined' "$FM_HOME"/state/inbox/*.note | grep -q -F 'Untrusted captain answer: Reply that lagged the feed' \
+  || fail 'lagging reply did not reach the lead'
+"$qbin/fm-sharkboard.sh" reconcile --key "$key" --receipt "$later_event" --outcome recorded
+[ "$(jq '.acked' "$FAKE_SHARK_STATE")" = $((acked + 1)) ] || fail 'forwarded lagging reply was not acknowledged once'
+"$qbin/fm-sharkboard.sh" sync
+[ "$(receipt lagging-reply)" = noted ] || fail 'lagging reply did not settle after release'
+[ "$(wc -l < "$FM_TEST_ANSWER_CALLS" | tr -d ' ')" = "$calls" ] || fail 'lagging reply reached intake'
+pass 'reconciliation refuses until a lagging reply is held and forwarded'
 # A retired sibling's answer is journaled while its task is frozen, so the tombstone can still clear.
 "$ROOT/bin/fm-captain-hold.sh" hold bridge-test --reason 'Sibling first' >/dev/null
 "$qbin/fm-sharkboard.sh" sync
