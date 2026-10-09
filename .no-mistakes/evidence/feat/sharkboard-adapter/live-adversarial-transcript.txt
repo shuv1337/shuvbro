@@ -1,0 +1,26 @@
+publish exit 0
+== published rows:
+{"path":"/api/agent/board/asks","state":null,"title":"Adversarial decision","push":"none"}
+{"path":"/api/agent/board/work","state":"queued","title":"Plain queued work","push":null}
+== injected: Yes at wrong revision; Yes via unexpected provenance 'api'; Yes scoped to another task; Yes on a foreign key
+answers exit 0
+== hold still open (nothing released)?
+yes, held
+== receipts:
+{"stale-rev":"rejected","bad-prov":"rejected","other-task":"rejected"}
+== ack calls: 0
+== inbox notes:
+SHark board event for Adversarial decision: not applied (unexpected answer provenance).
+Untrusted captain answer: Yes [yes]
+SHark board event for Adversarial decision: not applied (unexpected answer provenance).
+Untrusted captain answer: Yes [yes]
+SHark board event for Adversarial decision: not applied (answer to an earlier version of this question).
+Untrusted captain answer: Yes [yes]
+== worker guard (FM_TASK_ID set, real guard shim in front of real sharkctl):
+error: task worker FM_TASK_ID=worker-1 must not contact the captain with sharkctl board; send the question to firstmate as a keyed status line
+[board answers exit 1]
+error: task worker FM_TASK_ID=worker-1 must not contact the captain with sharkctl board; send the question to firstmate as a keyed status line
+[board ack exit 1]
+error: task worker FM_TASK_ID=worker-1 must not contact the captain with sharkctl board; send the question to firstmate as a keyed status line
+[board ask exit 1]
+[unmarked lead board answers exit 0 ; server requests +1]

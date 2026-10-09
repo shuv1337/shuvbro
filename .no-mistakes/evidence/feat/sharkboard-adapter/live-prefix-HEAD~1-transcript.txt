@@ -1,0 +1,25 @@
+
+$ /home/shuv/.cache/agent-ws/sharkboard-live/prefix-src/bin/fm-captain-hold.sh hold live-hold --reason Ship the live fixture?
+live-hold
+[exit 0]
+
+$ /home/shuv/.cache/agent-ws/sharkboard-live/prefix-src/bin/fm-sharkboard.sh publish
+[exit 0]
+
+$ /home/shuv/.cache/agent-ws/sharkboard-live/prefix-src/bin/fm-sharkboard.sh publish
+[exit 0]
+
+== requests reaching the dedicated config origin (port 47811):
+== requests reaching the ambient HARK_API_URL decoy (port 47812):
+{"port":"47812","method":"PUT","path":"/api/agent/board/asks","auth":"dedicated-config-token","body":{"key":"shuvbro:6d908d2852a8b25a:ask:c6f34574b34c97025e406d1d0b6d55810e1f6107","title":"Live captain decision","body":"Ship the live fixture?","kind":"decision","options":[{"id":"yes","label":"Yes"},{"id":"no","label":"No"}],"allowText":true,"allowLater":true,"priority":"p2","push":"none","taskId":"live-hold","links":[]}}
+== open ask: {"key":null,"id":null,"revision":null}
+== captain free-text reply injected into answer feed
+
+$ /home/shuv/.cache/agent-ws/sharkboard-live/prefix-src/bin/fm-sharkboard.sh sync
+[exit 0]
+
+$ /home/shuv/.cache/agent-ws/sharkboard-live/prefix-src/bin/fm-sharkboard.sh sync
+[exit 0]
+== hold still open after free text?
+yes, held
+== ack calls:

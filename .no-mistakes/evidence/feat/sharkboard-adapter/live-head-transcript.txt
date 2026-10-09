@@ -1,0 +1,33 @@
+
+$ /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M4F717HE4VJCVQ8PHADT6BSQ/bin/fm-captain-hold.sh hold live-hold --reason Ship the live fixture?
+live-hold
+[exit 0]
+
+$ /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M4F717HE4VJCVQ8PHADT6BSQ/bin/fm-sharkboard.sh publish
+[exit 0]
+
+$ /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M4F717HE4VJCVQ8PHADT6BSQ/bin/fm-sharkboard.sh publish
+[exit 0]
+
+== requests reaching the dedicated config origin (port 47811):
+{"method":"PUT","path":"/api/agent/board/asks","auth":"dedicated-config-token","key":"shuvbro:cbe0f56012616fca:ask:c5b0fce3a372ec4cb83e599c415f72099a510de9","title":"Live captain decision","state":null,"push":"none","taskId":"live-hold"}
+== requests reaching the ambient HARK_API_URL decoy (port 47812):
+(none)
+== open ask: {"key":"shuvbro:cbe0f56012616fca:ask:c5b0fce3a372ec4cb83e599c415f72099a510de9","id":"ask-1","revision":1}
+== captain free-text reply injected into answer feed
+
+$ /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M4F717HE4VJCVQ8PHADT6BSQ/bin/fm-sharkboard.sh sync
+[exit 0]
+
+$ /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M4F717HE4VJCVQ8PHADT6BSQ/bin/fm-sharkboard.sh sync
+[exit 0]
+== hold still open after free text?
+yes, held
+== ack calls:
+{"method":"POST","path":"/api/agent/board/asks/shuvbro%3Acbe0f56012616fca%3Aask%3Ac5b0fce3a372ec4cb83e599c415f72099a510de9/ack","auth":"dedicated-config-token"}
+== receipts:
+{"live-ev-1":"acked"}
+== decoy requests total: 0
+== worker refused:
+sharkboard: task workers cannot publish or consume captain board answers
+[exit 1]
