@@ -373,6 +373,10 @@
       "audience": "operator-current"
     },
     {
+      "path": "docs/native-supervisor.md",
+      "audience": "operator-current"
+    },
+    {
       "path": "docs/orca-backend.md",
       "audience": "operator-current"
     },
