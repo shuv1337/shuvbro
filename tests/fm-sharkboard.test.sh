@@ -36,7 +36,7 @@ const save = () => fs.writeFileSync(file, JSON.stringify(s));
 const refuse = error => { save(); console.error(error); process.exit(1); };
 s.calls.push({verb, key, body, title: flag('--title')});
 if (fail === `${verb}-down`) { save(); process.exit(6); }
-if (/hark_[A-Za-z0-9_-]{40,}/.test(JSON.stringify(body))) { save(); console.error('Refusing to send board content that looks like a SHark API token'); process.exit(2); }
+if (/hark_[A-Za-z0-9_-]{40,}/.test(JSON.stringify([body, a]))) { save(); console.error('Refusing to send board content that looks like a SHark API token'); process.exit(2); }
 const single = (v, max) => typeof v === 'string' && v.trim().length > 0 && v.length <= max && !/[\x00-\x1f\x7f\p{Cf}]/u.test(v);
 const multi = (v, max) => v === undefined || (typeof v === 'string' && v.length <= max && !/\p{Cf}/u.test(v));
 const invalid = verb === 'ask' ? !(single(body.title, 120) && multi(body.body, 2000) && (body.options ?? []).every(o => single(o.label, 120)))
@@ -62,7 +62,11 @@ if (verb === 'cancel') {
   out = {ask: s.asks[key]};
 }
 if (verb === 'answers') out = {events: s.events, cursor: s.cursor ?? 'cursor'};
-if (verb === 'ack') s.acked = (s.acked ?? 0) + 1;
+if (verb === 'ack') {
+  if (!s.asks[key] || s.asks[key].acked) refuse('No unacknowledged resolved ask with that key');
+  s.asks[key].acked = true;
+  s.acked = (s.acked ?? 0) + 1;
+}
 if (verb === 'work') s.work[key] = body;
 if (verb === 'done') {
   if (!s.work[key] && !flag('--title') && !body.title) refuse('A new done item needs a title');
@@ -276,6 +280,26 @@ grep -h -F 'Untrusted captain answer: Phone reply racing retirement' "$FM_HOME"/
 "$ROOT/bin/fm-sharkboard.sh" publish
 [ "$(jq --arg key "$key" '.rows[$key]' "$STATE_FILE")" = null ] || fail 'retired ask kept after its answer was forwarded'
 pass 'an answer racing retirement is forwarded before the row is dropped'
+# An ack that lands with its response lost is not retried into a wedge.
+"$ROOT/bin/fm-captain-hold.sh" hold bridge-test --reason 'Ninth question' >/dev/null
+"$ROOT/bin/fm-sharkboard.sh" sync
+key=$(ask_key)
+set_events "$key" '{"eventId":"lost-ack","optionId":"no"}'
+printf 'ack-lost\n' > "$FAKE_SHARK_FAIL"
+if "$ROOT/bin/fm-sharkboard.sh" answers 2>/dev/null; then fail 'lost ack response reported success'; fi
+rm "$FAKE_SHARK_FAIL"
+[ "$(receipt lost-ack)" = applied ] || fail 'applied answer lost its receipt'
+"$ROOT/bin/fm-sharkboard.sh" sync || fail 'an ack that already landed wedged the bridge'
+[ "$(receipt lost-ack)" = acked ] || fail 'landed ack not recorded'
+pass 'an ack whose response was lost settles on the next tick'
+# Work SHark never created retires without resending its refused title.
+printf -- '- [ ] secret-work - Ship %s (repo: sample) (kind: ship) (since 2026-10-01)\n' "$secret" > "$TMP_ROOT/secret-work"
+sed -i "/^## Queued$/r $TMP_ROOT/secret-work" "$FM_HOME/data/backlog.md"
+if "$ROOT/bin/fm-sharkboard.sh" publish 2>/dev/null; then fail 'refused work reported success'; fi
+sed -i '/secret-work/d' "$FM_HOME/data/backlog.md"
+"$ROOT/bin/fm-sharkboard.sh" publish || fail 'never-created work could not be retired'
+[ "$(jq '[.rows[]|select(.payload.title|test("hark_"))]|length' "$STATE_FILE")" = 0 ] || fail 'never-created work kept in state'
+pass 'never-created work retires once SHark confirms it has no such item'
 # serve logs a failed tick and keeps polling.
 answer_calls() { jq '[.calls[]|select(.verb=="answers")]|length' "$FAKE_SHARK_STATE" 2>/dev/null || echo 0; }
 wait_calls() {  # <count>

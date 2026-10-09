@@ -186,7 +186,8 @@ async function tick(mode) {
         }
         if (state.events[event.eventId] === 'applied' && !event.until) {
           // Keys include the local question digest, so ack cannot target a new question.
-          shark('ack', ['--key', event.askKey]);
+          const result = exec('sharkctl', sharkArgs('ack', ['--key', event.askKey]));
+          if (result.status !== 0 && !absent(result, 'No unacknowledged resolved ask with that key')) die('sharkctl ack failed; no cursor advanced');
           state.events[event.eventId] = 'acked'; persist();
         }
         if (state.events[event.eventId] && event.status === 'answered' && !event.until) { row.seen = event.askId; persist(); }
@@ -235,7 +236,11 @@ async function tick(mode) {
         } else if (row.type === 'note') {
           const result = exec('sharkctl', sharkArgs('note', ['--key', key, '--clear']));
           if (result.status !== 0 && !absent(result, 'Note not found')) die('sharkctl note failed');
-        } else if (row.type !== 'done') shark('done', ['--key', key, '--title', row.payload.title, '--verb', 'closed']);
+        } else if (row.type !== 'done') {
+          // Without a title SHark closes only an item it has; it names one it never created.
+          const result = exec('sharkctl', sharkArgs('done', ['--key', key, '--verb', 'closed']));
+          if (result.status !== 0 && !absent(result, 'A new done item needs a title')) die('sharkctl done failed');
+        }
         delete state.rows[key]; persist();
       });
     }
