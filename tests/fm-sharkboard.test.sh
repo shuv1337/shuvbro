@@ -22,30 +22,49 @@ DATA
 export FAKE_SHARK_STATE="$TMP_ROOT/server.json" FAKE_SHARK_FAIL="$TMP_ROOT/fail"
 cat > "$TMP_ROOT/fakebin/sharkctl" <<'JS'
 #!/usr/bin/env node
-// Exit codes follow sharkctl: 1 for a missing ask, 4 for expired or cancelled, 6 offline.
+// Follows SHark's board contract: an upsert opens a new ask once the old one is
+// terminal, and every API refusal exits 1 with the server's error on stderr.
 const fs = require('fs');
 const a = process.argv.slice(2), verb = a[1];
 const file = process.env.FAKE_SHARK_STATE;
-const s = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file)) : { asks: {}, events: [], calls: [] };
+const s = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file)) : { asks: {}, events: [], calls: [], notes: {}, work: {} };
 const fail = fs.existsSync(process.env.FAKE_SHARK_FAIL) ? fs.readFileSync(process.env.FAKE_SHARK_FAIL, 'utf8').trim() : '';
 const key = a[a.indexOf('--key') + 1];
+const flag = name => a.includes(name) ? a[a.indexOf(name) + 1] : undefined;
 const body = a.includes('--stdin') ? JSON.parse(fs.readFileSync(0, 'utf8')) : {};
 const save = () => fs.writeFileSync(file, JSON.stringify(s));
-s.calls.push({verb, key, body});
+const refuse = error => { save(); console.error(error); process.exit(1); };
+s.calls.push({verb, key, body, title: flag('--title')});
 if (fail === `${verb}-down`) { save(); process.exit(6); }
 let out = {}, code = 0;
 if (verb === 'ask') {
-  s.asks[key] ??= { ...body, id: `ask-${s.next = (s.next ?? 0) + 1}`, revision: 1, status: 'open' };
+  const open = s.asks[key]?.status === 'open' ? s.asks[key] : null;
+  const content = ({ id, revision, status, snoozeUntil, ...rest }) => JSON.stringify(rest);
+  if (!open) s.asks[key] = { ...body, id: `ask-${s.next = (s.next ?? 0) + 1}`, revision: 1, status: 'open' };
+  else if (content(open) !== content({ ...body })) s.asks[key] = { ...body, id: open.id, revision: open.revision + 1, status: 'open' };
   out = {ask: s.asks[key]};
 }
 if (verb === 'get') {
-  if (!s.asks[key]) { save(); console.error('Not found'); process.exit(1); }
+  if (!s.asks[key]) refuse('Ask not found');
   out = {ask: s.asks[key]};
   code = ['expired', 'cancelled'].includes(s.asks[key].status) ? 4 : 0;
 }
-if (verb === 'answers') out = {events: s.events, cursor: 'cursor'};
+if (verb === 'cancel') {
+  if (s.asks[key]?.status !== 'open') refuse('No open ask with that key');
+  s.asks[key].status = 'cancelled';
+  out = {ask: s.asks[key]};
+}
+if (verb === 'answers') out = {events: s.events, cursor: s.cursor ?? 'cursor'};
 if (verb === 'ack') s.acked = (s.acked ?? 0) + 1;
-if (verb === 'cancel') s.asks[key].status = 'cancelled';
+if (verb === 'work') s.work[key] = body;
+if (verb === 'done') {
+  if (!s.work[key] && !flag('--title') && !body.title) refuse('A new done item needs a title');
+  s.work[key] = { ...s.work[key], done: flag('--verb') ?? body.verb };
+}
+if (verb === 'note') {
+  if (a.includes('--clear')) { if (!s.notes[key]) refuse('Note not found'); delete s.notes[key]; }
+  else s.notes[key] = body;
+}
 save();
 if (fail === `${verb}-lost`) process.exit(1);
 console.log(JSON.stringify(out));
@@ -73,7 +92,9 @@ jq '.events[0].eventId="old-race" | .events[0].optionId="yes"' "$FAKE_SHARK_STAT
 mv "$TMP_ROOT/update" "$FAKE_SHARK_STATE"
 "$ROOT/bin/fm-sharkboard.sh" answers
 "$ROOT/bin/fm-captain-hold.sh" open bridge-test >/dev/null || fail 'old answer released new hold'
-[ "$(jq '.events["old-race"]' "$FM_HOME/state/sharkboard/last.json")" = '"stale"' ] || fail 'old answer not classified stale'
+[ "$(jq '.events["old-race"]' "$FM_HOME/state/sharkboard/last.json")" = '"rejected"' ] || fail 'old answer not rejected'
+grep -h -A1 -F 'not applied (question changed or no longer waiting)' "$FM_HOME"/state/inbox/*.note | grep -q -F 'Untrusted captain answer: Yes [yes]' \
+  || fail 'stale answer was not forwarded with the chosen option'
 "$ROOT/bin/fm-sharkboard.sh" publish
 [ "$(jq '[.asks[]]|length' "$FAKE_SHARK_STATE")" = 2 ] || fail 'new lifecycle reused old remote ask'
 # Simulate a process lost during intake. Never acknowledge an uncertain outcome.
@@ -86,7 +107,7 @@ jq '.events=[(.asks|to_entries|map(select(.value.status=="open"))[0]|{eventId:"i
 mv "$TMP_ROOT/update" "$FAKE_SHARK_STATE"
 if "$ROOT/bin/fm-sharkboard.sh" answers > /dev/null 2>&1; then fail 'uncertain answer replayed'; fi
 [ "$(jq '.acked' "$FAKE_SHARK_STATE")" = 1 ] || fail 'uncertain answer acknowledged'
-pass 'new lifecycle rejects stale approval and interrupted receipt fails closed'
+pass 'new lifecycle forwards a stale approval without applying it and interrupted receipt fails closed'
 
 STATE_FILE="$FM_HOME/state/sharkboard/last.json"
 update_json() {  # <file> <jq-args>...
@@ -101,7 +122,7 @@ set_events() {  # <key> <event-json-with-eventId>...
       '.asks[$key] as $a | $events + [{askKey:$key,askId:$a.id,revision:$a.revision,status:"answered",waitingTaskId:"bridge-test",answeredVia:"web"} + $extra]' "$FAKE_SHARK_STATE")
   done
   # shellcheck disable=SC2016
-  update_json "$FAKE_SHARK_STATE" --argjson events "$events" '.events=$events'
+  update_json "$FAKE_SHARK_STATE" --arg key "$key" --argjson events "$events" '.events=$events | .asks[$key].status="answered"'
 }
 receipt() { jq -r --arg id "$1" '.events[$id]' "$STATE_FILE"; }
 # The operator reconciles the interrupted receipt before intake resumes.
@@ -155,6 +176,59 @@ if "$ROOT/bin/fm-sharkboard.sh" publish 2>/dev/null; then fail 'live lock owner 
 [ -e "$FM_HOME/state/sharkboard/lock/owner" ] || fail 'live owner lock was removed'
 rm -r "$FM_HOME/state/sharkboard/lock"
 pass 'dead lock owners are reaped and live owners are respected'
+# Later arrives as a snooze on the open ask and defers the hold to a date.
+"$ROOT/bin/fm-captain-hold.sh" hold bridge-test --reason 'Fourth question' >/dev/null
+"$ROOT/bin/fm-sharkboard.sh" sync
+key=$(ask_key)
+today=$(date -u +%Y-%m-%d)
+tomorrow=$(node -e 'console.log(new Date(Date.now() + 86400000).toISOString().slice(0, 10))')
+# shellcheck disable=SC2016
+update_json "$FAKE_SHARK_STATE" --arg key "$key" --arg until "${today}T23:59:00.000Z" '.asks[$key].snoozeUntil=$until | .events=[]'
+acked=$(jq '.acked' "$FAKE_SHARK_STATE")
+"$ROOT/bin/fm-sharkboard.sh" answers
+[ "$(receipt "$(jq -r --arg key "$key" '.asks[$key].id' "$FAKE_SHARK_STATE"):snooze:${today}T23:59:00.000Z")" = applied ] || fail 'snooze not applied as Later'
+grep -h -F "deferred until $tomorrow" "$FM_HOME"/state/inbox/*.note >/dev/null || fail 'a same-day snooze was not rounded to the next date'
+[ "$(jq '.acked' "$FAKE_SHARK_STATE")" = "$acked" ] || fail 'snooze acknowledged as a terminal answer'
+"$ROOT/bin/fm-sharkboard.sh" publish
+[ "$(jq -r --arg key "$key" '.asks[$key].status' "$FAKE_SHARK_STATE")" = cancelled ] || fail 'deferred ask was not cancelled'
+pass 'Later snoozes defer the hold to a date and retire the ask'
+# Active work heartbeats on every publish; disappeared work, notes and asks are retired.
+fm_write_meta "$FM_HOME/state/live-work.meta" "window=firstmate:fm-live-work" "endpoint_task_id=live-work" "kind=ship" "harness=codex"
+printf '[{"text":"Heads up from the fixture","kind":"fyi"}]\n' > "$FM_HOME/data/board-notes.json"
+printf -- '- [ ] other-work - Other work (repo: sample) (kind: ship) (since 2026-10-01)\n' > "$TMP_ROOT/other"
+sed -i "/^## Queued$/r $TMP_ROOT/other" "$FM_HOME/data/backlog.md"
+"$ROOT/bin/fm-sharkboard.sh" publish
+work_puts() { jq --arg title "$1" '[.calls[]|select(.verb=="work" and .body.title==$title)]|length' "$FAKE_SHARK_STATE"; }
+[ "$(work_puts live-work)" = 1 ] && [ "$(work_puts 'Other work')" = 1 ] || fail 'work rows not published'
+"$ROOT/bin/fm-sharkboard.sh" publish
+[ "$(work_puts live-work)" = 2 ] || fail 'in-flight work did not heartbeat'
+[ "$(work_puts 'Other work')" = 1 ] || fail 'unchanged queued work republished'
+note_key=$(jq -r '.notes|keys[0]' "$FAKE_SHARK_STATE")
+update_json "$FAKE_SHARK_STATE" 'del(.notes[])'
+rm "$FM_HOME/state/live-work.meta" "$FM_HOME/data/board-notes.json"
+sed -i '/other-work/d' "$FM_HOME/data/backlog.md"
+"$ROOT/bin/fm-sharkboard.sh" publish || fail 'disappeared rows wedged publication'
+[ "$(jq -r '[.work[]|select(.done=="closed")]|length' "$FAKE_SHARK_STATE")" = 2 ] || fail 'disappeared work not closed'
+[ "$(jq --arg key "$note_key" '[.calls[]|select(.verb=="note" and .key==$key)]|length' "$FAKE_SHARK_STATE")" = 2 ] || fail 'disappeared note not cleared'
+[ "$(jq --arg key "$note_key" '.rows[$key]' "$STATE_FILE")" = null ] || fail 'cleared note kept in state'
+pass 'in-flight heartbeat and idempotent retirement of work, notes and asks'
+# A transient intake failure records nothing and keeps the page for a retry.
+"$ROOT/bin/fm-captain-hold.sh" hold bridge-test --reason 'Fifth question' >/dev/null
+"$ROOT/bin/fm-sharkboard.sh" sync
+key=$(ask_key)
+cursor=$(jq -r '.cursor' "$STATE_FILE")
+set_events "$key" '{"eventId":"transient","optionId":"no"}'
+update_json "$FAKE_SHARK_STATE" '.cursor="cursor-next"'
+chmod 555 "$FM_HOME/data"
+"$ROOT/bin/fm-sharkboard.sh" answers || { chmod 755 "$FM_HOME/data"; fail 'a transient intake failure wedged answers'; }
+chmod 755 "$FM_HOME/data"
+[ "$(receipt transient)" = null ] || fail 'transient intake failure left a receipt'
+[ "$(jq -r '.cursor' "$STATE_FILE")" = "$cursor" ] || fail 'transient intake failure advanced the cursor'
+"$ROOT/bin/fm-captain-hold.sh" open bridge-test >/dev/null || fail 'transient failure released held work'
+"$ROOT/bin/fm-sharkboard.sh" answers
+[ "$(receipt transient)" = acked ] || fail 'transient intake failure was not retried'
+[ "$(jq -r '.cursor' "$STATE_FILE")" = cursor-next ] || fail 'cursor did not advance after the retry'
+pass 'transient intake failures retry without a receipt or cursor progress'
 # serve logs a failed tick and keeps polling.
 answer_calls() { jq '[.calls[]|select(.verb=="answers")]|length' "$FAKE_SHARK_STATE" 2>/dev/null || echo 0; }
 wait_calls() {  # <count>

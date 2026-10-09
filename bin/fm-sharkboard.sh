@@ -7,10 +7,13 @@
 # Publication is board-only (no push). State and receipts live in
 # state/sharkboard; a lock serializes all publishers and answer consumers, and
 # a lock whose owner process is gone is cleared on the next run.
-# serve logs a failed tick and keeps polling. Pending publications are resent
-# before answers are read, so a lost response cannot skip their answers.
-# An answer fm-board.sh refuses, or one with unexpected provenance, becomes a
-# rejected receipt plus an inbox note and is never acknowledged.
+# serve logs a failed tick and keeps polling. Pending asks recover their remote
+# identity before answers are matched, so a lost response cannot skip an answer.
+# An answer fm-board.sh refuses, one with unexpected provenance, and one to a
+# changed or earlier question becomes a rejected receipt plus an inbox note
+# naming the captain's choice, and is never acknowledged. A lock or snapshot
+# failure in the intake records nothing and is retried on the next tick.
+# SHark Later snoozes are applied as dated holds with sharkboard:snooze provenance.
 # A receipt left at applying after interruption requires operator reconciliation;
 # it is never automatically replayed or acknowledged as successfully applied.
 # No service installation, old-board retirement, or login is performed here.

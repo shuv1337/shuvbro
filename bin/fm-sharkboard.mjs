@@ -30,7 +30,7 @@ function exec(executable, args, input = '') {
   if (result.error) die(`${path.basename(executable)} ${args[0]} failed; no cursor advanced`);
   let body = null;
   try { body = JSON.parse(result.stdout.trim().split('\n').pop()); } catch { /* Callers decide. */ }
-  return { status: result.status, stdout: result.stdout, body };
+  return { status: result.status, stdout: result.stdout, stderr: result.stderr, body };
 }
 function run(executable, args, input = '', json = true) {
   const result = exec(executable, args, input);
@@ -40,6 +40,8 @@ function run(executable, args, input = '', json = true) {
   return result.body;
 }
 const sharkArgs = (verb, args, payload) => ['board', verb, '--json', ...args, ...(payload ? ['--stdin'] : [])];
+// sharkctl exits 1 for every API failure; only the server's own refusal names an absent row.
+const absent = (result, error) => result.status === 1 && result.stderr.split('\n')[0].trim() === error;
 const shark = (verb, args = [], payload) => run('sharkctl', sharkArgs(verb, args, payload), payload ? JSON.stringify(payload) : '');
 const model = () => run(path.join(bin, 'fm-board.sh'), ['model']);
 const links = row => [...(row.links ?? []), ...(row.pr ? [row.pr] : [])].filter(url => url.startsWith('https://')).slice(0, 10).map(url => ({ kind: 'other', url }));
@@ -98,50 +100,64 @@ async function tick(mode) {
       }
       state.rows[key].published = true; persist();
     };
+    const remoteAsk = key => {
+      const result = exec('sharkctl', sharkArgs('get', ['--key', key]));
+      if ([0, 4].includes(result.status) && result.body?.ask) return result.body.ask;
+      if (absent(result, 'Ask not found')) return null;
+      die('sharkctl get failed; no cursor advanced');
+    };
+    // A re-PUT after an answer would open a new ask, so adopt the answered one.
+    const reconcile = (key, row, remote) => {
+      if (remote?.status !== 'answered') return publish(key, row);
+      Object.assign(state.rows[key], { askId: remote.id, revision: remote.revision, published: true }); persist();
+    };
+    const answerOf = (row, event) => event.text
+      ?? (event.optionId ? `${event.optionLabel ?? row.payload.options.find(option => option.id === event.optionId)?.label ?? ''} [${event.optionId}]`.trim() : null)
+      ?? (event.until ? `later, until ${event.until}` : '');
     // Untrusted text goes to the lead under normal authority. A repeated note is harmless.
     const note = (row, event, why) => run(path.join(bin, 'fm-inbox.sh'), ['note', '-'],
-      `SHark board event for ${row.payload.title}: ${why}.\nUntrusted captain text: ${event.text ?? event.optionLabel ?? event.until ?? ''}\nNo task was released by this transport; apply the normal authority rules.`, false);
+      `SHark board event for ${row.payload.title}: ${why}.\nUntrusted captain answer: ${answerOf(row, event)}\nNo task was released by this transport; apply the normal authority rules.`, false);
     const reject = (row, event, why) => {
       delete state.events[event.eventId]; persist();
       note(row, event, `not applied (${why})`);
       state.events[event.eventId] = 'rejected'; persist();
     };
     if (mode !== 'publish') {
-      // A lost publish response must not let its answers pass the cursor unmatched.
-      for (const [key, row] of Object.entries(state.rows)) if (!row.published) publish(key, row);
       const page = shark('answers', state.cursor ? ['--since', state.cursor] : []);
       if (!Array.isArray(page.events) || typeof page.cursor !== 'string') die('invalid answer page');
+      for (const event of page.events) delete event.until;
+      // A lost publish response must not let its answers pass unmatched.
       // Snoozes are not terminal events in SHark's cursor feed.
       for (const [key, row] of Object.entries(state.rows)) {
-        if (row.type !== 'ask' || !row.card) continue;
-        // 4 is an expired or cancelled ask; 1 includes an ask the server no longer has.
-        const { status, body } = exec('sharkctl', sharkArgs('get', ['--key', key]));
-        if (![0, 1, 4].includes(status)) die('sharkctl get failed; no cursor advanced');
-        const remote = status === 1 ? null : body?.ask;
-        if (remote?.id !== row.askId || remote.revision !== row.revision) { publish(key, row); continue; }
-        if (remote.status === 'open' && remote.snoozeUntil) {
+        if (row.type !== 'ask') continue;
+        const remote = remoteAsk(key);
+        if (!row.published || remote?.id !== row.askId || remote.revision !== row.revision) { reconcile(key, row, remote); continue; }
+        if (row.card && remote.status === 'open' && remote.snoozeUntil) {
           page.events.unshift({ askKey: key, askId: row.askId, revision: row.revision,
-            waitingTaskId: row.task, answeredVia: 'web', status: 'answered',
+            waitingTaskId: row.task, answeredVia: 'snooze', status: 'answered',
             eventId: `${row.askId}:snooze:${remote.snoozeUntil}`, until: remote.snoozeUntil.slice(0, 10) });
         }
       }
+      let retry = false;
       for (const event of page.events) {
         const row = state.rows[event.askKey];
-        // Another home/token's rows and old revisions never reach the intake.
-        if (!row || row.type !== 'ask' || row.askId !== event.askId || row.revision !== event.revision) continue;
+        // Another home/token's rows and retired rows never reach the intake.
+        if (!row || row.type !== 'ask') continue;
         if (state.events[event.eventId] === 'applying') die('answer application was interrupted; reconcile its receipt before retrying');
         if (!state.events[event.eventId]) {
-          if (event.status !== 'answered' || !row.card) {
+          if (row.askId !== event.askId || row.revision !== event.revision) {
+            if (event.status === 'answered') reject(row, event, 'answer to an earlier version of this question');
+          } else if (event.status !== 'answered' || !row.card) {
             note(row, event, event.status);
             state.events[event.eventId] = event.status === 'answered' ? 'applied' : 'noted'; persist();
-          } else if (event.waitingTaskId !== row.task || !['web', 'ios_app', 'ios_webview'].includes(event.answeredVia)) {
+          } else if (event.waitingTaskId !== row.task || !(event.until ? ['snooze'] : ['web', 'ios_app', 'ios_webview']).includes(event.answeredVia)) {
             reject(row, event, 'unexpected answer provenance');
           } else {
             const current = model().waiting_on_you.find(item => item.answerable && item.id === row.task && item.card === row.card);
-            if (!current) { state.events[event.eventId] = 'stale'; persist(); continue; }
             if (event.until && event.until <= new Date().toISOString().slice(0, 10)) event.until = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
             const choice = event.until ? 'later' : event.optionId ?? 'reply';
-            if (event.optionId && !current.choices.some(option => option.id === choice)) reject(row, event, 'answer option no longer offered');
+            if (!current) reject(row, event, 'question changed or no longer waiting');
+            else if (event.optionId && !current.choices.some(option => option.id === choice)) reject(row, event, 'answer option no longer offered');
             else {
               state.events[event.eventId] = 'applying'; persist();
               const args = ['answer', row.task, '--card', row.card, '--choice', choice, '--login', `sharkboard:${event.answeredVia}`];
@@ -149,8 +165,9 @@ async function tick(mode) {
               else if (!event.optionId) args.push('--text-file', '-');
               const { status, body } = exec(path.join(bin, 'fm-board.sh'), args, event.text ?? '');
               if (status === 0 && body?.ok === true) { state.events[event.eventId] = 'applied'; persist(); }
-              // fm-board.sh reports these refusals only when nothing was recorded.
-              else if ([1, 2, 3].includes(status) && body?.ok === false && typeof body.code === 'string' && body.code !== 'repair_failed') reject(row, event, body.code);
+              // fm-board.sh reports these only when nothing was recorded; its card check makes a retry at most once.
+              else if (status === 1 && ['record_failed', 'snapshot_failed'].includes(body?.code)) { delete state.events[event.eventId]; persist(); retry = true; }
+              else if ([2, 3].includes(status) && body?.ok === false && typeof body.code === 'string') reject(row, event, body.code);
               else die('answer outcome unknown; reconcile receipt');
             }
           }
@@ -161,7 +178,8 @@ async function tick(mode) {
           state.events[event.eventId] = 'acked'; persist();
         }
       }
-      state.cursor = page.cursor; persist();
+      // A retryable intake failure keeps the page for the next tick; settled receipts dedupe it.
+      if (!retry) { state.cursor = page.cursor; persist(); }
     }
     if (mode === 'answers') return;
     const view = model();
@@ -172,7 +190,7 @@ async function tick(mode) {
       const identity = row.card ?? hash([row.source, row.from, row.id, row.title, row.reason]);
       const key = `${prefix}ask:${hash([row.source, row.from, row.id, identity]).slice(0, 40)}`;
       desired[key] = { type: 'ask', task: row.answerable ? row.id : null, card: row.answerable ? row.card : null,
-        payload: { key, title: row.title.slice(0, 120), body: row.reason ?? '', kind: row.source === 'note' ? 'todo' : 'decision',
+        payload: { key, title: row.title.slice(0, 120), body: (row.reason ?? '').slice(0, 2000), kind: row.source === 'note' ? 'todo' : 'decision',
           options: row.answerable ? row.choices : [], allowText: row.source !== 'note', allowLater: Boolean(row.answerable),
           priority: 'p2', push: 'none', ...(row.answerable ? { taskId: row.id } : {}), links: links(row) } };
     }
@@ -193,9 +211,13 @@ async function tick(mode) {
     }
     for (const [key, row] of Object.entries(state.rows)) {
       if (desired[key]) continue;
-      if (row.type === 'ask') shark('cancel', ['--key', key, '--reason', 'No longer waiting in source board']);
-      else if (row.type === 'note') shark('note', ['--key', key, '--clear']);
-      else if (row.type !== 'done') shark('done', ['--key', key, '--verb', 'closed']);
+      if (row.type === 'ask') {
+        const result = exec('sharkctl', sharkArgs('cancel', ['--key', key, '--reason', 'No longer waiting in source board']));
+        if (result.status !== 0 && remoteAsk(key)?.status === 'open') die('sharkctl cancel failed');
+      } else if (row.type === 'note') {
+        const result = exec('sharkctl', sharkArgs('note', ['--key', key, '--clear']));
+        if (result.status !== 0 && !absent(result, 'Note not found')) die('sharkctl note failed');
+      } else if (row.type !== 'done') shark('done', ['--key', key, '--title', row.payload.title, '--verb', 'closed']);
       delete state.rows[key]; persist();
     }
   } finally { fs.rmSync(lock, { recursive: true }); }
