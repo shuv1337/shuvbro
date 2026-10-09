@@ -28,17 +28,23 @@
 # An uncertain intake (including repair_failed or an interrupted applying journal)
 # quarantines that ask and replacement questions for the same local task.
 # Publication, reset, retirement and answer replay stay blocked for that task;
-# unrelated intake, publication and heartbeats continue. A durable local inbox
+# unrelated intake, publication and heartbeats continue. Captain events for a
+# frozen ask are journaled with their content and forwarded to the lead, never
+# sent to intake; after release they settle like notes. A durable local inbox
 # alert retries on failure; successful alerts are not repeated. A crash between
 # inbox delivery and receipt persistence can duplicate the alert, never the action.
-# quarantines prints private JSON with the key, receipt, event and pending journals.
+# quarantines prints private JSON with the key, receipt, event, pending journals
+# and held captain events.
 # The lead must inspect the original local intake records and current remote ask
 # and establish whether the action was recorded before running reconcile with
 # that exact key, receipt and outcome. This explicit command journals the outcome,
-# alerts the local lead, cancels an open remote ask or acknowledges its terminal
-# result, then releases the quarantine for the next ordinary publication. It never
-# invokes answer intake. A failed reconciliation remains quarantined; repeat the
-# same command to finish it. Already completed identical commands are idempotent.
+# alerts the local lead, cancels an open remote ask, forwards held events, and
+# acknowledges a captain's terminal result only once that event is on the answer
+# feed and forwarded (a Later snooze never counts as that proof); otherwise it
+# refuses and keeps the quarantine. It then releases the quarantine for the next
+# ordinary publication. It never invokes answer intake. A failed reconciliation
+# remains quarantined; repeat the same command to finish it. Already completed
+# identical commands are idempotent.
 # A changed remote ask identity refuses reconciliation instead of mutating it.
 # Older applying receipts are scoped from their original answer page or encoded
 # ask identity. Missing legacy identity or corrupt journal state still refuses
