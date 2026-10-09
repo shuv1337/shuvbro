@@ -522,6 +522,81 @@ later_event="$(jq -r --arg key "$key" '.asks[$key].id' "$FAKE_SHARK_STATE"):snoo
 "$qbin/fm-sharkboard.sh" reconcile --key "$key" --receipt "$later_event" --outcome recorded
 "$qbin/fm-sharkboard.sh" sync
 pass 'uncertain Later keeps its remote ask frozen until explicit reconciliation'
+snooze_into_quarantine() {  # <key>
+  local until
+  until=$(node -e 'console.log(new Date(Date.now()+3*86400000).toISOString())')
+  # shellcheck disable=SC2016
+  update_json "$FAKE_SHARK_STATE" --arg key "$1" --arg until "$until" '.asks[$key].snoozeUntil=$until | .events=[]'
+  later_event="$(jq -r --arg key "$1" '.asks[$key].id' "$FAKE_SHARK_STATE"):snooze:$until"
+  "$qbin/fm-sharkboard.sh" sync
+  [ "$(receipt "$later_event")" = quarantined ] || fail 'uncertain Later not quarantined'
+}
+held_noted() { jq -r --arg id "$1" '.held[$id].noted' "$STATE_FILE"; }
+# A reply after an uncertain Later is journaled and forwarded, never sent to intake.
+"$ROOT/bin/fm-captain-hold.sh" hold bridge-test --reason 'Later then reply' >/dev/null
+"$qbin/fm-sharkboard.sh" sync
+key=$(ask_key)
+snooze_into_quarantine "$key"
+calls=$(wc -l < "$FM_TEST_ANSWER_CALLS" | tr -d ' ')
+acked=$(jq '.acked' "$FAKE_SHARK_STATE")
+set_events "$key" '{"eventId":"reply-after-later","text":"Reply sent after Later"}'
+touch "$FM_TEST_ALERT_FAIL"
+if "$qbin/fm-sharkboard.sh" sync 2>/dev/null; then fail 'failed forwarding reported success'; fi
+rm "$FM_TEST_ALERT_FAIL"
+[ "$(receipt reply-after-later)/$(held_noted reply-after-later)" = held/false ] || fail 'quarantined reply was not journaled before the cursor moved'
+"$qbin/fm-sharkboard.sh" sync
+[ "$(held_noted reply-after-later)" = true ] || fail 'failed forwarding was not retried'
+grep -h -A1 -F 'answered while its task was quarantined' "$FM_HOME"/state/inbox/*.note | grep -q -F 'Untrusted captain answer: Reply sent after Later' \
+  || fail 'quarantined reply content did not reach the lead'
+[ "$(jq '.acked' "$FAKE_SHARK_STATE")" = "$acked" ] || fail 'quarantined reply acknowledged before reconciliation'
+printf 'ack-lost\n' > "$FAKE_SHARK_FAIL"
+if "$qbin/fm-sharkboard.sh" reconcile --key "$key" --receipt "$later_event" --outcome recorded 2>/dev/null; then fail 'lost reconciliation ack reported success'; fi
+rm "$FAKE_SHARK_FAIL"
+"$qbin/fm-sharkboard.sh" reconcile --key "$key" --receipt "$later_event" --outcome recorded
+[ "$(jq '.acked' "$FAKE_SHARK_STATE")" = $((acked + 1)) ] || fail 'forwarded reply was not acknowledged exactly once'
+"$qbin/fm-sharkboard.sh" sync
+[ "$(receipt reply-after-later)" = noted ] || fail 'forwarded reply did not settle after release'
+[ "$(wc -l < "$FM_TEST_ANSWER_CALLS" | tr -d ' ')" = "$calls" ] || fail 'reply received while quarantined reached intake'
+pass 'a reply after an uncertain Later is forwarded before reconciliation acks it'
+# A dismissal landing after the last tick is read from the feed and forwarded before its ack.
+"$ROOT/bin/fm-captain-hold.sh" hold bridge-test --reason 'Later then dismissal' >/dev/null
+"$qbin/fm-sharkboard.sh" sync
+key=$(ask_key)
+snooze_into_quarantine "$key"
+calls=$(wc -l < "$FM_TEST_ANSWER_CALLS" | tr -d ' ')
+acked=$(jq '.acked' "$FAKE_SHARK_STATE")
+set_events "$key" '{"eventId":"dismiss-after-later","status":"cancelled","answeredVia":"ios_app","cancelReason":"Dismissed by the captain"}'
+# shellcheck disable=SC2016
+update_json "$FAKE_SHARK_STATE" --arg key "$key" '.asks[$key].status="cancelled"'
+"$qbin/fm-sharkboard.sh" reconcile --key "$key" --receipt "$later_event" --outcome recorded
+grep -l -F 'cancelled while its task was quarantined' "$FM_HOME"/state/inbox/*.note >/dev/null || fail 'quarantined dismissal did not reach the lead'
+[ "$(jq '.acked' "$FAKE_SHARK_STATE")" = $((acked + 1)) ] || fail 'captain dismissal was not acknowledged by reconciliation'
+"$qbin/fm-sharkboard.sh" sync
+[ "$(receipt dismiss-after-later)" = noted ] || fail 'forwarded dismissal did not settle'
+[ "$(wc -l < "$FM_TEST_ANSWER_CALLS" | tr -d ' ')" = "$calls" ] || fail 'dismissal reached intake'
+pass 'a dismissal after an uncertain Later is forwarded and acknowledged by reconciliation'
+# A retired sibling's answer is journaled while its task is frozen, so the tombstone can still clear.
+"$ROOT/bin/fm-captain-hold.sh" hold bridge-test --reason 'Sibling first' >/dev/null
+"$qbin/fm-sharkboard.sh" sync
+xkey=$(ask_key)
+# shellcheck disable=SC2016
+update_json "$FAKE_SHARK_STATE" --arg key "$xkey" '.asks[$key].status="answered" | .events=[]'
+"$ROOT/bin/fm-captain-hold.sh" hold bridge-test --reason 'Sibling second' >/dev/null
+"$qbin/fm-sharkboard.sh" publish
+[ "$(jq -r --arg key "$xkey" '.rows[$key].retired' "$STATE_FILE")" = true ] || fail 'raced sibling was not kept as a tombstone'
+key=$(ask_key)
+[ "$key" != "$xkey" ] || fail 'replacement sibling was not published'
+snooze_into_quarantine "$key"
+calls=$(wc -l < "$FM_TEST_ANSWER_CALLS" | tr -d ' ')
+set_events "$xkey" '{"eventId":"sibling-answer","optionId":"yes"}'
+"$qbin/fm-sharkboard.sh" sync
+[ "$(receipt sibling-answer)/$(held_noted sibling-answer)" = held/true ] || fail 'frozen sibling answer was not journaled and forwarded'
+"$qbin/fm-sharkboard.sh" reconcile --key "$key" --receipt "$later_event" --outcome recorded
+"$qbin/fm-sharkboard.sh" sync
+[ "$(receipt sibling-answer)" = noted ] || fail 'sibling answer did not settle after release'
+[ "$(jq -r --arg key "$xkey" '.rows[$key]' "$STATE_FILE")" = null ] || fail 'sibling tombstone stayed after its answer was forwarded'
+[ "$(wc -l < "$FM_TEST_ANSWER_CALLS" | tr -d ' ')" = "$calls" ] || fail 'sibling answer reached intake'
+pass 'a retired sibling answer received while frozen is forwarded and clears its tombstone'
 rm "$FM_HOME/state/quarantine-other.meta" "$FM_HOME/data/board-notes.json"
 # serve logs a failed tick and keeps polling.
 answer_calls() { jq '[.calls[]|select(.verb=="answers")]|length' "$FAKE_SHARK_STATE" 2>/dev/null || echo 0; }

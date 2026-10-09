@@ -105,6 +105,7 @@ async function tick(mode) {
     const persist = () => save(file, state);
     state.intakes ??= {};
     state.settledAsks ??= {};
+    state.held ??= {};
     const quarantine = (key, event, reason) => {
       const row = state.rows[key];
       if (!row?.quarantine) {
@@ -137,6 +138,19 @@ async function tick(mode) {
     }
     const blocked = (key, row) => Boolean(state.rows[key]?.quarantine
       || (row.type === 'ask' && row.task && Object.values(state.rows).some(other => other.quarantine && other.task === row.task)));
+    // Events for a frozen ask are kept with their content, forwarded, and never sent to intake.
+    const hold = (key, event) => {
+      state.held[event.eventId] = { key, payload: state.rows[key].payload, event, noted: false };
+      state.events[event.eventId] = 'held'; persist();
+    };
+    const holdBlocked = events => {
+      for (const event of events) {
+        const row = state.rows[event.askKey];
+        if (row?.type === 'ask' && !state.events[event.eventId] && !state.settledAsks[event.askId] && blocked(event.askKey, row)) hold(event.askKey, event);
+      }
+    };
+    const captainVia = ['web', 'ios_app', 'ios_webview'];
+    const byCaptain = event => event.status === 'answered' || (event.status === 'cancelled' && captainVia.includes(event.answeredVia));
     const publish = (key, row) => {
       // Save intent before transport. A retry uses the same content-addressed key.
       state.rows[key] = { ...state.rows[key], ...row, published: false, retired: false, refresh: false }; persist();
@@ -172,6 +186,10 @@ async function tick(mode) {
     // Untrusted text goes to the lead under normal authority. A repeated note is harmless.
     const note = (row, event, why) => run(path.join(bin, 'fm-inbox.sh'), ['note', '-'],
       `SHark board event for ${row.payload.title}: ${why}.\nUntrusted captain answer: ${answerOf(row, event)}\nVerify the local task state and apply the normal authority rules; this note does not authorize an action.`, false);
+    const forward = held => {
+      note(held, held.event, `${held.event.status ?? 'resolved'} while its task was quarantined; not applied and never replayed`);
+      held.noted = true; persist();
+    };
     const reject = (row, event, why) => {
       delete state.events[event.eventId]; persist();
       note(row, event, `not applied (${why})`);
@@ -183,7 +201,8 @@ async function tick(mode) {
       console.log(JSON.stringify({ quarantines: Object.entries(state.rows).filter(([, row]) => row.quarantine)
         .map(([key, row]) => ({ key, task: row.task, ...row.quarantine })),
       pending: Object.entries(state.intakes).filter(([id]) => state.events[id] === 'applying')
-        .map(([eventId, intake]) => ({ eventId, ...intake })) }));
+        .map(([eventId, intake]) => ({ eventId, ...intake })),
+      held: Object.entries(state.held).map(([eventId, held]) => ({ eventId, key: held.key, noted: held.noted, event: held.event })) }));
       return;
     }
     if (mode === 'reconcile') {
@@ -213,13 +232,26 @@ async function tick(mode) {
       };
       assertIdentity();
       if (remote?.status === 'open') {
-        exec('sharkctl', sharkArgs('cancel', ['--key', key, '--reason', 'Operator reconciled quarantined receipt']));
+        const cancelled = exec('sharkctl', sharkArgs('cancel', ['--key', key, '--reason', 'Operator reconciled quarantined receipt']));
         remote = remoteAsk(key); assertIdentity();
         if (remote?.status === 'open') die('reconciliation cancellation not confirmed; retry the same command');
+        if (cancelled.status === 0 && remote?.status === 'cancelled') { q.reconciliation.cancelled = remote.id; persist(); }
       }
-      if (remote?.status === 'answered' || (remote?.status === 'cancelled' && remote.answeredVia)) {
-        const result = exec('sharkctl', sharkArgs('ack', ['--key', key]));
-        if (result.status !== 0 && !absent(result, 'No unacknowledged resolved ask with that key')) die('reconciliation ack failed; retry the same command');
+      // Release must not let an unread captain event reach intake or be acked unseen.
+      const page = shark('answers', state.cursor ? ['--since', state.cursor] : []);
+      if (!Array.isArray(page.events)) die('invalid answer page');
+      for (const event of page.events) delete event.until;
+      holdBlocked(page.events);
+      for (const held of Object.values(state.held)) if (!held.noted) forward(held);
+      if (['answered', 'cancelled'].includes(remote?.status) && q.reconciliation.cancelled !== remote.id) {
+        const resolved = `${remote.id}:r${remote.revision}:${remote.status}`;
+        const known = [q.event, ...Object.values(state.held).filter(held => held.key === key).map(held => held.event)]
+          .find(event => event.eventId === resolved || (event.askId === remote.id && event.revision === remote.revision && event.status === remote.status));
+        if (!known) die('remote resolution is not on the answer feed yet; quarantine retained, retry the same command');
+        if (byCaptain({ ...known, status: remote.status })) {
+          const result = exec('sharkctl', sharkArgs('ack', ['--key', key]));
+          if (result.status !== 0 && !absent(result, 'No unacknowledged resolved ask with that key')) die('reconciliation ack failed; retry the same command');
+        }
       }
       state.events[id] = 'reconciled';
       state.settledAsks[q.askId] = { key, eventId: id, outcome };
@@ -243,7 +275,16 @@ async function tick(mode) {
         });
       }
     };
+    const forwardsAttempted = new Set();
+    const forwardHeld = () => {
+      for (const [id, held] of Object.entries(state.held)) {
+        if (held.noted || forwardsAttempted.has(id)) continue;
+        forwardsAttempted.add(id);
+        attempt(held.key, () => forward(held));
+      }
+    };
     alertQuarantines();
+    forwardHeld();
     if (mode !== 'publish') {
       const page = shark('answers', state.cursor ? ['--since', state.cursor] : []);
       if (!Array.isArray(page.events) || typeof page.cursor !== 'string') die('invalid answer page');
@@ -264,14 +305,15 @@ async function tick(mode) {
       for (const event of page.events) {
         const row = state.rows[event.askKey];
         // Another home/token's rows and retired rows never reach the intake.
-        if (!row || row.type !== 'ask' || blocked(event.askKey, row) || state.settledAsks[event.askId]) continue;
+        if (!row || row.type !== 'ask' || state.settledAsks[event.askId]) continue;
+        if (blocked(event.askKey, row)) { holdBlocked([event]); continue; }
         if (!state.events[event.eventId]) {
           if (row.askId !== event.askId || row.revision !== event.revision) {
             if (event.status === 'answered') reject(row, event, 'answer to an earlier version of this question');
           } else if (event.status !== 'answered' || !row.card) {
             note(row, event, event.status);
-            state.events[event.eventId] = event.status === 'answered' || (event.status === 'cancelled' && ['web', 'ios_app', 'ios_webview'].includes(event.answeredVia)) ? 'applied' : 'noted'; persist();
-          } else if (event.waitingTaskId !== row.task || !(event.until ? ['snooze'] : ['web', 'ios_app', 'ios_webview']).includes(event.answeredVia)) {
+            state.events[event.eventId] = byCaptain(event) ? 'applied' : 'noted'; persist();
+          } else if (event.waitingTaskId !== row.task || !(event.until ? ['snooze'] : captainVia).includes(event.answeredVia)) {
             reject(row, event, 'unexpected answer provenance');
           } else {
             const current = model().waiting_on_you.find(item => item.answerable && item.id === row.task && item.card === row.card);
@@ -315,6 +357,27 @@ async function tick(mode) {
       if (!retry) { state.cursor = page.cursor; persist(); }
     }
     alertQuarantines();
+    forwardHeld();
+    // After release a forwarded event settles like a forwarded note; it never reaches intake.
+    for (const [id, held] of Object.entries(state.held)) {
+      const row = state.rows[held.key];
+      if (!held.noted || (row && blocked(held.key, row))) continue;
+      attempt(held.key, () => {
+        const event = held.event;
+        // Like a rejected answer, an unapplied one stays unacked; a dismissal is acked.
+        const dismissal = event.status === 'cancelled' && byCaptain(event) && row?.published
+          && row.askId === event.askId && row.revision === event.revision && !state.settledAsks[event.askId];
+        if (dismissal) {
+          const result = exec('sharkctl', sharkArgs('ack', ['--key', held.key]));
+          if (result.status !== 0 && !absent(result, 'No unacknowledged resolved ask with that key')) die('sharkctl ack failed');
+          row.refresh = true;
+        }
+        if (row && ['answered', 'cancelled'].includes(event.status)) row.seen = event.askId;
+        state.events[id] = dismissal ? 'acked' : 'noted';
+        delete state.held[id];
+        persist();
+      });
+    }
     // A rejected Later must not keep its source question hidden. Persist the
     // repair until cancel is confirmed; a racing answer remains for next intake.
     for (const [key, row] of Object.entries(state.rows)) {
