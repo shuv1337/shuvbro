@@ -327,6 +327,25 @@ rm "$FAKE_SHARK_FAIL"
 [ "$(jq -r --arg key "$key" '.asks[$key].id' "$FAKE_SHARK_STATE")" != "$old_id" ] || fail 'dismissal reused terminal ask'
 "$ROOT/bin/fm-captain-hold.sh" open bridge-test >/dev/null || fail 'dismissal released local hold'
 pass 'captain dismissals are acknowledged and still-local holds are reasserted'
+# A captain dismissal that races retirement is still forwarded and acknowledged.
+key=$(ask_key)
+set_events "$key" '{"eventId":"dismissal-race","status":"cancelled","answeredVia":"web"}'
+# shellcheck disable=SC2016
+update_json "$FAKE_SHARK_STATE" --arg key "$key" '.asks[$key].status="cancelled"'
+"$ROOT/bin/fm-captain-hold.sh" hold bridge-test --reason 'After dismissal race' >/dev/null
+"$ROOT/bin/fm-sharkboard.sh" publish
+[ "$(jq -r --arg key "$key" '.rows[$key].retired' "$STATE_FILE")" = true ] || fail 'dismissed ask retired before its dismissal was read'
+printf 'ack-lost\n' > "$FAKE_SHARK_FAIL"
+if "$ROOT/bin/fm-sharkboard.sh" answers 2>/dev/null; then fail 'lost racing dismissal ack reported success'; fi
+rm "$FAKE_SHARK_FAIL"
+"$ROOT/bin/fm-sharkboard.sh" publish
+[ "$(jq -r --arg key "$key" '.rows[$key].retired' "$STATE_FILE")" = true ] || fail 'dismissal dropped before its ack settled'
+"$ROOT/bin/fm-sharkboard.sh" answers
+[ "$(receipt dismissal-race)" = acked ] || fail 'racing dismissal was not acknowledged'
+"$ROOT/bin/fm-sharkboard.sh" publish
+[ "$(jq --arg key "$key" '.rows[$key]' "$STATE_FILE")" = null ] || fail 'retired dismissal kept after acknowledgment'
+"$ROOT/bin/fm-captain-hold.sh" open bridge-test >/dev/null || fail 'racing dismissal released local hold'
+pass 'a captain dismissal racing retirement is acknowledged before the row is dropped'
 # A refused far-future snooze must not hide a still-open local question.
 key=$(ask_key)
 far=$(node -e 'console.log(new Date(Date.now()+400*86400000).toISOString())')

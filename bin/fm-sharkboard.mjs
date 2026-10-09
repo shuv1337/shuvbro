@@ -200,7 +200,7 @@ async function tick(mode) {
           if (event.status === 'cancelled') row.refresh = true;
           persist();
         }
-        if (state.events[event.eventId] && event.status === 'answered' && !event.until) { row.seen = event.askId; persist(); }
+        if (['acked', 'noted', 'rejected'].includes(state.events[event.eventId]) && ['answered', 'cancelled'].includes(event.status) && !event.until) { row.seen = event.askId; persist(); }
       }
       // A retryable intake failure keeps the page for the next tick; settled receipts dedupe it.
       if (!retry) { state.cursor = page.cursor; persist(); }
@@ -257,8 +257,9 @@ async function tick(mode) {
           const result = exec('sharkctl', sharkArgs('cancel', ['--key', key, '--reason', 'No longer waiting in source board']));
           const remote = result.status === 0 ? null : remoteAsk(key);
           if (remote?.status === 'open') die('sharkctl cancel failed');
-          // An answer that raced retirement must still reach the lead before the row goes.
-          if (remote?.status === 'answered' && row.seen !== remote.id) { Object.assign(row, { retired: true, askId: remote.id, revision: remote.revision }); persist(); return; }
+          // An answer or dismissal that raced retirement must still reach the lead,
+          // and a captain dismissal be acked, before the row goes.
+          if (['answered', 'cancelled'].includes(remote?.status) && row.seen !== remote.id) { Object.assign(row, { retired: true, askId: remote.id, revision: remote.revision }); persist(); return; }
         } else if (row.type === 'note') {
           const result = exec('sharkctl', sharkArgs('note', ['--key', key, '--clear']));
           if (result.status !== 0 && !absent(result, 'Note not found')) die('sharkctl note failed');
