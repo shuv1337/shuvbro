@@ -1,0 +1,25 @@
+--- 1791524649-Ot2UU5.note
+id=1791524649-Ot2UU5
+at=2026-10-09T05:44:09Z
+source=text
+--
+SHark board event for Captain decision A: QUARANTINED: intake was interrupted; its outcome is unknown. Ask shuvbro:3934af381357315c:ask:c87c60c1b691327c81780f47629b4aafd46bd531, receipt ev-a. Inspect local intake records and remote ask, then explicitly reconcile; do not replay the answer.
+Untrusted captain answer: Yes [yes]
+Verify the local task state and apply the normal authority rules; this note does not authorize an action.
+--- 1791524650-OdQVuK.note
+id=1791524650-OdQVuK
+at=2026-10-09T05:44:10Z
+source=text
+--
+Live board answer for task-b: typed reply
+Question: Captain decision B - Ship B now?
+Reply: Hold until Monday please
+Recorded through the live board, signed in as sharkboard:ios_app: the held work stays held until you act on this answer.
+--- 1791524652-iePQc1.note
+id=1791524652-iePQc1
+at=2026-10-09T05:44:12Z
+source=text
+--
+SHark board event for Captain decision A: operator reconciled receipt ev-a: recorded; no answer was replayed.
+Untrusted captain answer: Yes [yes]
+Verify the local task state and apply the normal authority rules; this note does not authorize an action.

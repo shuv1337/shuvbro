@@ -1,0 +1,64 @@
+== 1. Lead holds two tasks and publishes (ambient HARK_TOKEN/HARK_API_URL set; must be ignored)
+$ HARK_TOKEN=x HARK_API_URL=https://wrong.invalid fm-sharkboard.sh publish
+[exit 0]
+$ /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M4FHTXAPREWW7X7ZKKTQSYM3/bin/fm-sharkboard.sh publish
+[exit 0]
+ask calls sent to SHark: 2  (expect 2; unchanged second publish sends none)
+ask push/scope sample: {"title":"Captain decision A","taskId":"task-a","push":"none","waitingTaskId":null}
+
+== 2. Captain answers B with free text; then an interrupted intake on A (applying journal, process lost)
+$ /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M4FHTXAPREWW7X7ZKKTQSYM3/bin/fm-sharkboard.sh sync
+[exit 0]
+receipts: {"ev-a":"quarantined","ev-b":"acked"}
+acks on SHark: 1  (expect 1: B's free text acked once, A never)
+task-b still held (free text keeps work held): yes
+task-a still held (uncertain, no replay): yes
+inbox notes to lead:
+--- 1791524649-Ot2UU5.note
+id=1791524649-Ot2UU5
+at=2026-10-09T05:44:09Z
+source=text
+--
+--- 1791524650-OdQVuK.note
+id=1791524650-OdQVuK
+at=2026-10-09T05:44:10Z
+source=text
+--
+
+== 3. Lead changes task-a question while quarantined; repeated syncs must not republish it nor replay intake
+$ /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M4FHTXAPREWW7X7ZKKTQSYM3/bin/fm-sharkboard.sh sync
+[exit 0]
+$ /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M4FHTXAPREWW7X7ZKKTQSYM3/bin/fm-sharkboard.sh sync
+[exit 0]
+ask calls before/after: 2/2  (expect equal)
+
+== 4. Operator inspects quarantines
+$ /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M4FHTXAPREWW7X7ZKKTQSYM3/bin/fm-sharkboard.sh quarantines
+{"quarantines":[{"key":"shuvbro:3934af381357315c:ask:c87c60c1b691327c81780f47629b4aafd46bd531","task":"task-a","eventId":"ev-a","askId":"ask-1","revision":1,"reason":"intake was interrupted; its outcome is unknown","alerted":true,"event":{"eventId":"ev-a","askKey":"shuvbro:3934af381357315c:ask:c87c60c1b691327c81780f47629b4aafd46bd531","askId":"ask-1","revision":1,"status":"answered","optionId":"yes","answeredVia":"ios_app","waitingTaskId":"task-a"}}],"pending":[],"held":[]}
+[exit 0]
+
+== 5. Adversarial reconcile: wrong receipt, missing outcome
+$ /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M4FHTXAPREWW7X7ZKKTQSYM3/bin/fm-sharkboard.sh reconcile --key shuvbro:3934af381357315c:ask:c87c60c1b691327c81780f47629b4aafd46bd531 --receipt bogus --outcome recorded
+sharkboard: no matching quarantine; inspect quarantines before reconciling
+[exit 1]
+$ /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M4FHTXAPREWW7X7ZKKTQSYM3/bin/fm-sharkboard.sh reconcile --key shuvbro:3934af381357315c:ask:c87c60c1b691327c81780f47629b4aafd46bd531 --receipt ev-a
+sharkboard: usage: fm-sharkboard.sh reconcile --key KEY --receipt EVENT --outcome recorded|not-recorded
+[exit 1]
+
+== 6. Explicit reconcile (recorded), repeated for idempotency, then sync publishes replacement
+$ /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M4FHTXAPREWW7X7ZKKTQSYM3/bin/fm-sharkboard.sh reconcile --key shuvbro:3934af381357315c:ask:c87c60c1b691327c81780f47629b4aafd46bd531 --receipt ev-a --outcome recorded
+{"ok":true,"key":"shuvbro:3934af381357315c:ask:c87c60c1b691327c81780f47629b4aafd46bd531","receipt":"ev-a","outcome":"recorded","replayed":false}
+[exit 0]
+$ /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M4FHTXAPREWW7X7ZKKTQSYM3/bin/fm-sharkboard.sh reconcile --key shuvbro:3934af381357315c:ask:c87c60c1b691327c81780f47629b4aafd46bd531 --receipt ev-a --outcome recorded
+{"ok":true,"key":"shuvbro:3934af381357315c:ask:c87c60c1b691327c81780f47629b4aafd46bd531","receipt":"ev-a","outcome":"recorded","replayed":false,"alreadyReconciled":true}
+[exit 0]
+$ /home/shuv/.no-mistakes/worktrees/8a7692f99431/01M4FHTXAPREWW7X7ZKKTQSYM3/bin/fm-sharkboard.sh sync
+[exit 0]
+receipt ev-a: reconciled  acks: 2  ask calls: 3
+latest replacement ask title: Captain decision A
+task-a still held after reconcile (reconcile never invokes intake): yes
+
+== 7. Worker cannot drive the bridge
+$ FM_TASK_ID=worker fm-sharkboard.sh sync
+sharkboard: task workers cannot publish or consume captain board answers
+[exit 1]

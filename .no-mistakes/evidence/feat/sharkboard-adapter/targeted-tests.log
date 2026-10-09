@@ -1,0 +1,59 @@
+FM_TEST_BEGIN 2026-10-09T05:42:23Z tests/fm-sharkboard.test.sh family=snapshot-bearings expected_gate_skip=optional-binary
+ok - changed-row publication, scoped answer intake, No hold preservation, replay and worker guard
+ok - new lifecycle forwards a stale approval and interrupted receipt quarantines its ask
+{"ok":true,"key":"shuvbro:9926904aa6179e76:ask:987fd0b986564a523922b2612afaa0199fa5998c","receipt":"interrupted","outcome":"not-recorded","replayed":false}
+ok - a definite fm-board refusal becomes a terminal receipt and an inbox note
+ok - unexpected provenance and withdrawn options are rejected per event
+ok - a missing remote ask is republished and later events still apply
+ok - pending publication identity is recovered before answers advance the cursor
+ok - dead lock owners are reaped and live owners are respected
+ok - Later snoozes defer the hold to a date and retire the ask
+ok - active work heartbeat and idempotent retirement of work, notes and asks
+ok - transient intake failures retry without a receipt or cursor progress
+ok - note text, detail, link and ask titles are normalized to the SHark contract
+ok - refused rows are skipped and logged without content while intake and retirement continue
+ok - an answer racing retirement is forwarded before the row is dropped
+ok - an ack whose response was lost settles on the next tick
+ok - never-created work retires once SHark confirms it has no such item
+ok - captain dismissals are acknowledged and still-local holds are reasserted
+ok - a captain dismissal racing retirement is acknowledged before the row is dropped
+ok - rejected snoozes restore visibility without applying Later
+ok - snooze repair confirms cancellation despite response loss
+ok - an answer racing rejected-snooze recovery remains available for intake
+ok - stale snoozes retire without hiding the replacement question
+ok - abandoned reaper locks recover while live reapers retain ownership
+ok - ownerless legacy reaper locks require manual reconciliation
+{"ok":true,"key":"shuvbro:9926904aa6179e76:ask:997d56eaa678f8ec55094d660510dc5ccb8fb12e","receipt":"repair-uncertain","outcome":"recorded","replayed":false}
+ok - repair_failed quarantines one ask, retries its alert, preserves changed questions and permits unrelated updates
+{"ok":true,"key":"shuvbro:9926904aa6179e76:ask:060ff7ee97b1d9c317a99ebbcdb9489ccdfb1ef9","receipt":"crashed-journal","outcome":"not-recorded","replayed":false}
+ok - publish-only recovers a crashed intake without requiring its event on the feed
+tests/fm-sharkboard.test.sh: line 499: 1438746 Killed                     "$qbin/fm-sharkboard.sh" sync 2> /dev/null
+{"ok":true,"key":"shuvbro:9926904aa6179e76:ask:060ff7ee97b1d9c317a99ebbcdb9489ccdfb1ef9","receipt":"killed-after-record","outcome":"recorded","replayed":false}
+ok - an actual post-record process crash recovers into quarantine without replay
+{"ok":true,"key":"shuvbro:9926904aa6179e76:ask:82c3e12dd191fc01704d27afa999c6805fb56267","receipt":"ask-23:snooze:2026-10-12T05:43:04.948Z","outcome":"recorded","replayed":false}
+ok - uncertain Later keeps its remote ask frozen until explicit reconciliation
+{"ok":true,"key":"shuvbro:9926904aa6179e76:ask:2911e538bce4a6e42d2b9cce57108bfaa273c2bc","receipt":"ask-24:snooze:2026-10-12T05:43:08.852Z","outcome":"recorded","replayed":false}
+ok - a reply after an uncertain Later is forwarded before reconciliation acks it
+{"ok":true,"key":"shuvbro:9926904aa6179e76:ask:68491d505b8b848b0f3e3fe2371ef5065086194c","receipt":"ask-25:snooze:2026-10-12T05:43:13.140Z","outcome":"recorded","replayed":false}
+ok - a dismissal after an uncertain Later is forwarded and acknowledged by reconciliation
+{"ok":true,"key":"shuvbro:9926904aa6179e76:ask:0bc1cde88248724a73f1ad22b94e496a13f71b4a","receipt":"ask-26:snooze:2026-10-12T05:43:16.855Z","outcome":"recorded","replayed":false}
+ok - reconciliation refuses until a lagging reply is held and forwarded
+{"ok":true,"key":"shuvbro:9926904aa6179e76:ask:8b740b964fb48f552dda2451f0b82c96059b11ac","receipt":"ask-28:snooze:2026-10-12T05:43:21.767Z","outcome":"recorded","replayed":false}
+ok - a retired sibling answer received while frozen is forwarded and clears its tombstone
+ok - serve survives a transient tick failure
+FM_TEST_END 2026-10-09T05:43:26Z tests/fm-sharkboard.test.sh exit=0 duration_ms=62473 gate_skip=false
+FM_TEST_BEGIN 2026-10-09T05:43:26Z tests/fm-sharkctl-guard.test.sh family=backend-dispatch expected_gate_skip=none
+ok - FM_TASK_ID set: sharkctl notify ask refuses and does not call sharkctl
+ok - FM_TASK_ID set: ask refuses, other verbs delegate, flags do not hide notify
+ok - FM_TASK_ID unset: sharkctl notify ask reaches the next sharkctl
+ok - two guard aliases skip each other and delegate allowed and unmarked invocations once
+ok - two separate guard copies delegate allowed and unmarked invocations once and still refuse notify
+ok - spawned ship and scout environments refuse sharkctl notify ask
+ok - filtered launch keeps the guard and refuses sharkctl notify ask
+ok - workers cannot write or consume captain board rows
+FM_TEST_END 2026-10-09T05:43:32Z tests/fm-sharkctl-guard.test.sh exit=0 duration_ms=6037 gate_skip=false
+FM_TEST_SUMMARY total=2 failed=0 skipped_gate=0 duration_ms=68554
+FM_TEST_SUMMARY_FAMILY family=backend-dispatch count=1 duration_ms=6037 failed=0
+FM_TEST_SUMMARY_FAMILY family=snapshot-bearings count=1 duration_ms=62473 failed=0
+FM_TEST_SLOWEST rank=1 script=tests/fm-sharkboard.test.sh duration_ms=62473
+FM_TEST_SLOWEST rank=2 script=tests/fm-sharkctl-guard.test.sh duration_ms=6037
