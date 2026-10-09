@@ -36,6 +36,13 @@ const save = () => fs.writeFileSync(file, JSON.stringify(s));
 const refuse = error => { save(); console.error(error); process.exit(1); };
 s.calls.push({verb, key, body, title: flag('--title')});
 if (fail === `${verb}-down`) { save(); process.exit(6); }
+if (/hark_[A-Za-z0-9_-]{40,}/.test(JSON.stringify(body))) { save(); console.error('Refusing to send board content that looks like a SHark API token'); process.exit(2); }
+const single = (v, max) => typeof v === 'string' && v.trim().length > 0 && v.length <= max && !/[\x00-\x1f\x7f\p{Cf}]/u.test(v);
+const multi = (v, max) => v === undefined || (typeof v === 'string' && v.length <= max && !/\p{Cf}/u.test(v));
+const invalid = verb === 'ask' ? !(single(body.title, 120) && multi(body.body, 2000) && (body.options ?? []).every(o => single(o.label, 120)))
+  : verb === 'note' && !a.includes('--clear') ? !(single(body.text, 300) && multi(body.detail, 2000) && (body.link === undefined || body.link.startsWith('https://')))
+  : verb === 'work' ? !(single(body.title, 120) && (body.statusLabel === undefined || single(body.statusLabel, 60))) : false;
+if (invalid) refuse(`Invalid ${verb}`);
 let out = {}, code = 0;
 if (verb === 'ask') {
   const open = s.asks[key]?.status === 'open' ? s.asks[key] : null;
@@ -202,7 +209,7 @@ work_puts() { jq --arg title "$1" '[.calls[]|select(.verb=="work" and .body.titl
 [ "$(work_puts live-work)" = 1 ] && [ "$(work_puts 'Other work')" = 1 ] || fail 'work rows not published'
 "$ROOT/bin/fm-sharkboard.sh" publish
 [ "$(work_puts live-work)" = 2 ] || fail 'in-flight work did not heartbeat'
-[ "$(work_puts 'Other work')" = 1 ] || fail 'unchanged queued work republished'
+[ "$(work_puts 'Other work')" = 2 ] || fail 'queued work did not heartbeat'
 note_key=$(jq -r '.notes|keys[0]' "$FAKE_SHARK_STATE")
 update_json "$FAKE_SHARK_STATE" 'del(.notes[])'
 rm "$FM_HOME/state/live-work.meta" "$FM_HOME/data/board-notes.json"
@@ -211,7 +218,7 @@ sed -i '/other-work/d' "$FM_HOME/data/backlog.md"
 [ "$(jq -r '[.work[]|select(.done=="closed")]|length' "$FAKE_SHARK_STATE")" = 2 ] || fail 'disappeared work not closed'
 [ "$(jq --arg key "$note_key" '[.calls[]|select(.verb=="note" and .key==$key)]|length' "$FAKE_SHARK_STATE")" = 2 ] || fail 'disappeared note not cleared'
 [ "$(jq --arg key "$note_key" '.rows[$key]' "$STATE_FILE")" = null ] || fail 'cleared note kept in state'
-pass 'in-flight heartbeat and idempotent retirement of work, notes and asks'
+pass 'active work heartbeat and idempotent retirement of work, notes and asks'
 # A transient intake failure records nothing and keeps the page for a retry.
 "$ROOT/bin/fm-captain-hold.sh" hold bridge-test --reason 'Fifth question' >/dev/null
 "$ROOT/bin/fm-sharkboard.sh" sync
@@ -229,6 +236,46 @@ chmod 755 "$FM_HOME/data"
 [ "$(receipt transient)" = acked ] || fail 'transient intake failure was not retried'
 [ "$(jq -r '.cursor' "$STATE_FILE")" = cursor-next ] || fail 'cursor did not advance after the retry'
 pass 'transient intake failures retry without a receipt or cursor progress'
+# Presentation fields are normalized to SHark's contract before publication.
+long_line="$(head -c 340 /dev/zero | tr '\0' n)"
+jq -n --arg text "First line
+$long_line" --arg detail "$(head -c 2100 /dev/zero | tr '\0' d)" \
+  '[{text:$text,detail:$detail,link:"http://example.invalid/plain",kind:"fyi"},{text:"Call me\nback",kind:"you"}]' > "$FM_HOME/data/board-notes.json"
+"$ROOT/bin/fm-sharkboard.sh" publish || fail 'contract-invalid presentation fields were published unnormalized'
+jq -e '.notes[] | select(.text|startswith("First line")) | (.text|length) <= 300 and (.text|test("\n")|not) and (.detail|length) <= 2000 and (has("link")|not)' "$FAKE_SHARK_STATE" >/dev/null \
+  || fail 'FYI note not normalized'
+jq -e '[.asks[] | select(.title=="Call me back")] | length == 1' "$FAKE_SHARK_STATE" >/dev/null || fail 'multi-line ask title not normalized'
+pass 'note text, detail, link and ask titles are normalized to the SHark contract'
+# A permanently refused row is skipped without blocking captain intake or other rows.
+secret="hark_$(head -c 44 /dev/zero | tr '\0' Z)"
+"$ROOT/bin/fm-captain-hold.sh" hold bridge-test --reason 'Sixth question' >/dev/null
+"$ROOT/bin/fm-sharkboard.sh" sync
+key=$(ask_key)
+jq -n --arg secret "$secret" '[{text:("Token " + $secret),kind:"fyi"},{text:("Ask " + $secret),kind:"you"}]' > "$FM_HOME/data/board-notes.json"
+if "$ROOT/bin/fm-sharkboard.sh" publish 2> "$TMP_ROOT/refused.err"; then fail 'refused rows reported success'; fi
+[ "$(jq '[.notes[]|select(.text|startswith("First line"))]|length' "$FAKE_SHARK_STATE")" = 0 ] || fail 'a refused row blocked retirement of other rows'
+set_events "$key" '{"eventId":"beside-refused","optionId":"no"}'
+if "$ROOT/bin/fm-sharkboard.sh" sync 2>> "$TMP_ROOT/refused.err"; then fail 'refused rows reported success'; fi
+[ "$(receipt beside-refused)" = acked ] || fail 'a refused row blocked captain intake'
+if grep -q -F "$secret" "$TMP_ROOT/refused.err"; then fail 'refused content was logged'; fi
+rm "$FM_HOME/data/board-notes.json"
+"$ROOT/bin/fm-sharkboard.sh" publish || fail 'retiring never-published rows failed'
+pass 'refused rows are skipped and logged without content while intake and retirement continue'
+# An answer that lands while its row is being retired is still forwarded.
+"$ROOT/bin/fm-captain-hold.sh" hold bridge-test --reason 'Seventh question' >/dev/null
+"$ROOT/bin/fm-sharkboard.sh" sync
+key=$(ask_key)
+set_events "$key" '{"eventId":"racing-retirement","text":"Phone reply racing retirement"}'
+"$ROOT/bin/fm-captain-hold.sh" hold bridge-test --reason 'Eighth question' >/dev/null
+"$ROOT/bin/fm-sharkboard.sh" publish
+[ "$(jq -r --arg key "$key" '.rows[$key].retired' "$STATE_FILE")" = true ] || fail 'answered ask retired before its answer was read'
+"$ROOT/bin/fm-sharkboard.sh" answers
+[ "$(receipt racing-retirement)" = rejected ] || fail 'answer racing retirement was not forwarded'
+grep -h -F 'Untrusted captain answer: Phone reply racing retirement' "$FM_HOME"/state/inbox/*.note >/dev/null || fail 'racing reply text did not reach the lead'
+"$ROOT/bin/fm-captain-hold.sh" open bridge-test >/dev/null || fail 'racing reply released held work'
+"$ROOT/bin/fm-sharkboard.sh" publish
+[ "$(jq --arg key "$key" '.rows[$key]' "$STATE_FILE")" = null ] || fail 'retired ask kept after its answer was forwarded'
+pass 'an answer racing retirement is forwarded before the row is dropped'
 # serve logs a failed tick and keeps polling.
 answer_calls() { jq '[.calls[]|select(.verb=="answers")]|length' "$FAKE_SHARK_STATE" 2>/dev/null || echo 0; }
 wait_calls() {  # <count>

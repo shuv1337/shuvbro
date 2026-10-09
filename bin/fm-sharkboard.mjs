@@ -44,7 +44,12 @@ const sharkArgs = (verb, args, payload) => ['board', verb, '--json', ...args, ..
 const absent = (result, error) => result.status === 1 && result.stderr.split('\n')[0].trim() === error;
 const shark = (verb, args = [], payload) => run('sharkctl', sharkArgs(verb, args, payload), payload ? JSON.stringify(payload) : '');
 const model = () => run(path.join(bin, 'fm-board.sh'), ['model']);
-const links = row => [...(row.links ?? []), ...(row.pr ? [row.pr] : [])].filter(url => url.startsWith('https://')).slice(0, 10).map(url => ({ kind: 'other', url }));
+const https = url => typeof url === 'string' && url.startsWith('https://') && url.length <= 2048;
+const links = row => [...(row.links ?? []), ...(row.pr ? [row.pr] : [])].filter(https).slice(0, 10).map(url => ({ kind: 'other', url }));
+// SHark refuses format characters, control characters in single-line fields, and overlong text.
+const clamp = (text, max) => text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text;
+const block = (text, max) => clamp(String(text ?? '').replace(/\p{Cf}/gu, '').trim(), max);
+const line = (text, max, fallback = 'Untitled') => clamp(String(text ?? '').replace(/\p{Cf}/gu, '').replace(/[\s\x00-\x1f\x7f]+/g, ' ').trim(), max) || fallback;
 
 const startOf = pid => {
   try { return fs.readFileSync(`/proc/${pid}/stat`, 'utf8').split(') ').pop().split(' ')[19] ?? null; }
@@ -91,7 +96,7 @@ async function tick(mode) {
     const persist = () => save(file, state);
     const publish = (key, row) => {
       // Save intent before transport. A retry uses the same content-addressed key.
-      state.rows[key] = { ...state.rows[key], ...row, published: false }; persist();
+      state.rows[key] = { ...state.rows[key], ...row, published: false, retired: false }; persist();
       const result = shark(row.type, ['--key', key], row.payload);
       if (row.type === 'ask') {
         if (!result.ask?.id || !Number.isInteger(result.ask.revision)) die('invalid published ask');
@@ -108,8 +113,15 @@ async function tick(mode) {
     };
     // A re-PUT after an answer would open a new ask, so adopt the answered one.
     const reconcile = (key, row, remote) => {
-      if (remote?.status !== 'answered') return publish(key, row);
-      Object.assign(state.rows[key], { askId: remote.id, revision: remote.revision, published: true }); persist();
+      if (remote) { Object.assign(state.rows[key], { askId: remote.id, revision: remote.revision }); persist(); }
+      if (remote?.status === 'answered') { state.rows[key].published = true; persist(); }
+      else attempt(key, () => publish(key, row));
+    };
+    // One refused row must not stop intake or the other rows; it retries next tick.
+    let failed = false;
+    const attempt = (key, action) => {
+      try { action(); }
+      catch (error) { if (error.fatal) throw error; failed = true; console.error(`sharkboard: ${key}: ${error.message}`); }
     };
     const answerOf = (row, event) => event.text
       ?? (event.optionId ? `${event.optionLabel ?? row.payload.options.find(option => option.id === event.optionId)?.label ?? ''} [${event.optionId}]`.trim() : null)
@@ -129,7 +141,7 @@ async function tick(mode) {
       // A lost publish response must not let its answers pass unmatched.
       // Snoozes are not terminal events in SHark's cursor feed.
       for (const [key, row] of Object.entries(state.rows)) {
-        if (row.type !== 'ask') continue;
+        if (row.type !== 'ask' || row.retired) continue;
         const remote = remoteAsk(key);
         if (!row.published || remote?.id !== row.askId || remote.revision !== row.revision) { reconcile(key, row, remote); continue; }
         if (row.card && remote.status === 'open' && remote.snoozeUntil) {
@@ -177,11 +189,12 @@ async function tick(mode) {
           shark('ack', ['--key', event.askKey]);
           state.events[event.eventId] = 'acked'; persist();
         }
+        if (state.events[event.eventId] && event.status === 'answered' && !event.until) { row.seen = event.askId; persist(); }
       }
       // A retryable intake failure keeps the page for the next tick; settled receipts dedupe it.
       if (!retry) { state.cursor = page.cursor; persist(); }
     }
-    if (mode === 'answers') return;
+    if (mode === 'answers') { if (failed) die('some board rows could not be published'); return; }
     const view = model();
     if (view.schema !== 'fm-board.v1' || view.errors?.length) die('board model is incomplete; refusing destructive reconciliation');
     const prefix = `shuvbro:${hash(fs.realpathSync(home)).slice(0, 16)}:`;
@@ -190,36 +203,43 @@ async function tick(mode) {
       const identity = row.card ?? hash([row.source, row.from, row.id, row.title, row.reason]);
       const key = `${prefix}ask:${hash([row.source, row.from, row.id, identity]).slice(0, 40)}`;
       desired[key] = { type: 'ask', task: row.answerable ? row.id : null, card: row.answerable ? row.card : null,
-        payload: { key, title: row.title.slice(0, 120), body: (row.reason ?? '').slice(0, 2000), kind: row.source === 'note' ? 'todo' : 'decision',
-          options: row.answerable ? row.choices : [], allowText: row.source !== 'note', allowLater: Boolean(row.answerable),
+        payload: { key, title: line(row.title, 120), body: block(row.reason, 2000), kind: row.source === 'note' ? 'todo' : 'decision',
+          options: row.answerable ? row.choices.map(option => ({ id: option.id, label: line(option.label, 120, option.id) })) : [], allowText: row.source !== 'note', allowLater: Boolean(row.answerable),
           priority: 'p2', push: 'none', ...(row.answerable ? { taskId: row.id } : {}), links: links(row) } };
     }
     for (const lane of ['queued', 'in_flight', 'with_lead', 'done']) for (const row of view[lane]) {
       const key = `${prefix}work:${hash(row.id).slice(0, 40)}`;
       const done = lane === 'done';
-      desired[key] = { type: done ? 'done' : 'work', payload: { key, title: row.title.slice(0, 120), links: links(row),
-        ...(done ? { verb: ['merged', 'shipped', 'done', 'closed', 'reported'].includes(row.verb) ? row.verb : 'done' } : { state: lane === 'with_lead' ? 'blocked' : lane, ...(row.label ? { statusLabel: row.label } : {}) }) } };
+      desired[key] = { type: done ? 'done' : 'work', payload: { key, title: line(row.title, 120), links: links(row),
+        ...(done ? { verb: ['merged', 'shipped', 'done', 'closed', 'reported'].includes(row.verb) ? row.verb : 'done' } : { state: lane === 'with_lead' ? 'blocked' : lane, ...(row.label ? { statusLabel: line(row.label, 60) } : {}) }) } };
     }
     for (const row of view.fyi) {
       const key = `${prefix}note:${hash([row.text, row.link]).slice(0, 40)}`;
-      desired[key] = { type: 'note', payload: { key, text: row.text, ...(row.detail ? { detail: row.detail } : {}), ...(row.link ? { link: row.link } : {}) } };
+      desired[key] = { type: 'note', payload: { key, text: line(row.text, 300), ...(block(row.detail, 2000) ? { detail: block(row.detail, 2000) } : {}), ...(https(row.link) ? { link: row.link } : {}) } };
     }
     for (const [key, row] of Object.entries(desired)) {
       const previous = state.rows[key];
-      if (previous?.published && hash(previous.payload) === hash(row.payload) && row.payload.state !== 'in_flight') continue;
-      publish(key, row);
+      // Active work heartbeats every tick so SHark never marks it stale.
+      if (previous?.published && !previous.retired && hash(previous.payload) === hash(row.payload) && row.type !== 'work') continue;
+      attempt(key, () => publish(key, row));
     }
     for (const [key, row] of Object.entries(state.rows)) {
       if (desired[key]) continue;
-      if (row.type === 'ask') {
-        const result = exec('sharkctl', sharkArgs('cancel', ['--key', key, '--reason', 'No longer waiting in source board']));
-        if (result.status !== 0 && remoteAsk(key)?.status === 'open') die('sharkctl cancel failed');
-      } else if (row.type === 'note') {
-        const result = exec('sharkctl', sharkArgs('note', ['--key', key, '--clear']));
-        if (result.status !== 0 && !absent(result, 'Note not found')) die('sharkctl note failed');
-      } else if (row.type !== 'done') shark('done', ['--key', key, '--title', row.payload.title, '--verb', 'closed']);
-      delete state.rows[key]; persist();
+      attempt(key, () => {
+        if (row.type === 'ask') {
+          const result = exec('sharkctl', sharkArgs('cancel', ['--key', key, '--reason', 'No longer waiting in source board']));
+          const remote = result.status === 0 ? null : remoteAsk(key);
+          if (remote?.status === 'open') die('sharkctl cancel failed');
+          // An answer that raced retirement must still reach the lead before the row goes.
+          if (remote?.status === 'answered' && row.seen !== remote.id) { Object.assign(row, { retired: true, askId: remote.id, revision: remote.revision }); persist(); return; }
+        } else if (row.type === 'note') {
+          const result = exec('sharkctl', sharkArgs('note', ['--key', key, '--clear']));
+          if (result.status !== 0 && !absent(result, 'Note not found')) die('sharkctl note failed');
+        } else if (row.type !== 'done') shark('done', ['--key', key, '--title', row.payload.title, '--verb', 'closed']);
+        delete state.rows[key]; persist();
+      });
     }
+    if (failed) die('some board rows could not be published or retired');
   } finally { fs.rmSync(lock, { recursive: true }); }
 }
 

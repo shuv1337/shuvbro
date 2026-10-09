@@ -14,6 +14,10 @@
 # naming the captain's choice, and is never acknowledged. A lock or snapshot
 # failure in the intake records nothing and is retried on the next tick.
 # SHark Later snoozes are applied as dated holds with sharkboard:snooze provenance.
+# Text is fitted to SHark's field limits; a row SHark still refuses (for example
+# a secret-looking value) is logged by key only and retried without blocking
+# intake or other rows. Active work heartbeats every publish, and a retired ask
+# whose answer has not been read stays until that answer reaches the lead.
 # A receipt left at applying after interruption requires operator reconciliation;
 # it is never automatically replayed or acknowledged as successfully applied.
 # No service installation, old-board retirement, or login is performed here.
