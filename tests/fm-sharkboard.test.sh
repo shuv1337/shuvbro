@@ -406,6 +406,13 @@ printf '{"pid":%s,"start":"1"}' "$dead" > "$FM_HOME/state/sharkboard/lock.reap/o
 "$ROOT/bin/fm-sharkboard.sh" publish || fail 'dead reaper wedged publication'
 [ ! -e "$FM_HOME/state/sharkboard/lock.reap" ] || fail 'reaper lock leaked'
 pass 'abandoned reaper locks recover while live reapers retain ownership'
+# A legacy ownerless reap directory cannot prove a dead owner and is never taken over.
+mkdir "$FM_HOME/state/sharkboard/lock" "$FM_HOME/state/sharkboard/lock.reap"
+printf '{"pid":%s,"start":"1"}' "$dead" > "$FM_HOME/state/sharkboard/lock/owner"
+if "$ROOT/bin/fm-sharkboard.sh" publish 2>/dev/null; then fail 'ownerless legacy reaper was taken over'; fi
+[ -d "$FM_HOME/state/sharkboard/lock.reap" ] && [ -f "$FM_HOME/state/sharkboard/lock/owner" ] || fail 'ownerless legacy reaper or its lock was removed'
+rm -r "$FM_HOME/state/sharkboard/lock" "$FM_HOME/state/sharkboard/lock.reap"
+pass 'ownerless legacy reaper locks require manual reconciliation'
 # serve logs a failed tick and keeps polling.
 answer_calls() { jq '[.calls[]|select(.verb=="answers")]|length' "$FAKE_SHARK_STATE" 2>/dev/null || echo 0; }
 wait_calls() {  # <count>

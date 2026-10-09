@@ -74,8 +74,11 @@ function acquire(lock, depth = 0) {
   fs.writeFileSync(path.join(temp, 'owner'), JSON.stringify({ pid: process.pid, start: startOf(process.pid) }));
   try {
     for (let attempt = 0; ; attempt++) {
-      try { fs.renameSync(temp, lock); return; }
-      catch (error) { if (!['EEXIST', 'ENOTEMPTY', 'EISDIR'].includes(error.code)) throw error; }
+      // rename(2) replaces an empty directory, so a legacy ownerless lock is never a rename target.
+      if (!fs.existsSync(lock)) {
+        try { fs.renameSync(temp, lock); return; }
+        catch (error) { if (!['EEXIST', 'ENOTEMPTY', 'EISDIR'].includes(error.code)) throw error; }
+      }
       const owner = read(path.join(lock, 'owner'), null);
       if (attempt || !ownerIsGone(owner)) die('sharkboard lock is held by a live or unknown owner; verify it before removing it');
       const reap = `${lock}.reap`;
